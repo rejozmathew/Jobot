@@ -1,0 +1,203 @@
+{
+  "identity": {
+    "full_name": "First Last",
+    "first_name": "First",
+    "middle_name": "",
+    "last_name": "Last",
+    "preferred_name": "",
+    "email": "you@example.com",
+    "phone": "+1-555-555-5555",
+    "address": {
+      "street": "123 Main St",
+      "city": "City",
+      "state": "State",
+      "zip": "12345",
+      "country": "United States"
+    },
+    "location": "City, State, Country",
+    "linkedin": "https://linkedin.com/in/your-handle",
+    "website": "",
+    "github": ""
+  },
+  "summary": "Senior data & analytics leader with 17+ years driving enterprise data strategy, cloud platforms, and BI.",
+  "years_experience": 17,
+  "target_roles": [
+    "Chief Data Officer",
+    "VP Data Science",
+    "VP Analytics",
+    "Head of Data",
+    "Director of Data"
+  ],
+  "industries": [
+    "Financial Services",
+    "MarTech",
+    "SaaS"
+  ],
+  "skills": [
+    "Data strategy",
+    "Analytics leadership",
+    "Data platforms",
+    "Machine learning",
+    "BI",
+    "Marketing analytics",
+    "CDP",
+    "Identity graph"
+  ],
+  "leadership_scope": {
+    "teams_managed": "30+",
+    "budget_ownership": true,
+    "executive_stakeholders": true
+  },
+  "work_authorization": {
+    "country": "United States",
+    "status": "H1B",
+    "visa_expiration": "2027-12-31",
+    "needs_sponsorship": true,
+    "sponsorship_type_needed": "H1B Transfer or Extension",
+    "legally_authorized_us": true,
+    "legally_authorized_eu": false,
+    "work_permit_other_countries": []
+  },
+  "work_preferences": {
+    "remote_only": false,
+    "hybrid_ok": true,
+    "onsite_ok": true,
+    "preferred_locations": [
+      "United States",
+      "Remote"
+    ],
+    "willing_to_relocate": false,
+    "relocation_assistance_required": true,
+    "min_total_comp": null,
+    "salary_expectation": {
+      "min": 200000,
+      "max": 350000,
+      "currency": "USD",
+      "includes_bonus": false
+    },
+    "notice_period_days": 14,
+    "earliest_start_date": "2 weeks from offer"
+  },
+  "dealbreakers": [
+    "No sponsorship for US roles",
+    "Junior or entry-level roles",
+    "On-site only without relocation support"
+  ],
+  "eeo_information": {
+    "_comment": "Equal Employment Opportunity - voluntary self-identification. Use 'decline' to skip.",
+    "gender": "Male",
+    "gender_identity": "Man",
+    "pronouns": "He/Him",
+    "race_ethnicity": "Asian",
+    "hispanic_latino": false,
+    "veteran_status": "I am not a protected veteran",
+    "disability_status": "I do not have a disability",
+    "lgbtq": "decline"
+  },
+  "standard_answers": {
+    "_comment": "Common yes/no questions on job applications",
+    "authorized_to_work_us": true,
+    "requires_sponsorship": true,
+    "will_require_sponsorship_future": true,
+    "willing_to_relocate": false,
+    "willing_to_travel": true,
+    "travel_percentage_ok": 25,
+    "background_check_consent": true,
+    "drug_test_consent": true,
+    "non_compete_agreement": false,
+    "has_non_compete": false,
+    "previously_applied": false,
+    "previously_employed": false,
+    "referred_by_employee": false,
+    "referral_name": "",
+    "age_18_or_older": true,
+    "has_drivers_license": true,
+    "has_reliable_transportation": true,
+    "can_work_overtime": true,
+    "can_work_weekends": false,
+    "felony_conviction": false,
+    "felony_explanation": "",
+    "security_clearance": "None",
+    "highest_education": "Masters",
+    "years_in_current_role": 3,
+    "reason_for_leaving": "Seeking new challenges and growth opportunities"
+  },
+  "experience": [
+    {
+      "company": "Example Corp",
+      "location": "",
+      "title": "VP, Data Science",
+      "dates": "2019-2024",
+      "start_date": "2019-01",
+      "end_date": "2024-12",
+      "current": false,
+      "highlights": [
+        "Built enterprise data platform and self-service BI",
+        "Led data science team of 25 across 3 regions"
+      ]
+    },
+    {
+      "company": "Prior Co",
+      "location": "",
+      "title": "Director of Analytics",
+      "dates": "2014-2019",
+      "start_date": "2014-06",
+      "end_date": "2019-01",
+      "current": false,
+      "highlights": [
+        "Owned marketing analytics and experimentation roadmap",
+        "Launched CDP and identity graph initiatives"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "program": "MBA",
+      "degree": "Master of Business Administration",
+      "major": "Finance",
+      "institution": "Example University",
+      "year": 2009,
+      "gpa": ""
+    }
+  ],
+  "certifications": [
+    "Certification A"
+  ],
+  "projects": [
+    "Enterprise Identity Graph",
+    "Self-Service BI & Analytics Enablement"
+  ],
+  "languages": [
+    {
+      "language": "English",
+      "proficiency": "Native"
+    }
+  ],
+  "links": [
+    "https://www.linkedin.com/in/your-handle"
+  ],
+  "accounts": {
+    "_comment": "Login credentials for job portals. The agent will use these to log in or create accounts.",
+    "default": {
+      "email": "you@example.com",
+      "username": "",
+      "password": ""
+    },
+    "overrides": [
+      {
+        "domain": "workday.com",
+        "email": "",
+        "username": "",
+        "password": ""
+      }
+    ]
+  },
+  "resume": {
+    "text": "Paste full resume text here so the LLM can match keywords.",
+    "path": "./resume.pdf"
+  },
+  "cover_letter": {
+    "default_text": "",
+    "generate_custom": true
+  }
+}

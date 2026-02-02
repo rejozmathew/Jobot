@@ -1,0 +1,36 @@
+# Cache files
+.DS_Store
+__pycache__/
+*.py[cod]
+*$py.class
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Virtual Environments
+.venv*
+venv/
+
+# IDEs
+.vscode/
+.idea/
+
+# Build files
+dist/
+*.egg-info/
+
+# Secrets and sensitive files
+.env
+profile.json
+browser_cookies.json
+cookies.json
+
+# Runtime files
+artifacts/
+job_queue.json
+*.gif
+*.log
+
+# Temp
+temp/
+tmp/
