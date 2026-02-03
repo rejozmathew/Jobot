@@ -118,12 +118,14 @@ class JobApplyAgent:
         max_steps: int = 30,
         max_history_items: int = 10,
         headless: bool = False,
+        db_queue = None,  # Optional: JobQueueDB for step tracking
     ):
         self.profile_path = Path(profile_path)
         self.artifacts_dir = Path(artifacts_dir)
         self.max_steps = max_steps
         self.max_history_items = max_history_items
         self.headless = headless
+        self.db_queue = db_queue
         self._profile: Optional[Dict[str, Any]] = None
     
     def load_profile(self) -> Dict[str, Any]:
@@ -200,12 +202,29 @@ class JobApplyAgent:
             available_files.append(resume_path)
         
         try:
-            # Create and run agent
+            from .element_handlers import create_job_applier_controller
+            
+            # Create extended controller with custom actions for dropdowns and uploads
+            controller = create_job_applier_controller()
+            
+            # ============================================================
+            # Use initial_actions for programmatic navigation BEFORE LLM
+            # This executes immediately without LLM reasoning
+            # ============================================================
+            initial_actions = [
+                {'navigate': {'url': job_url, 'new_tab': False}},
+                {'wait': {'seconds': 3}},  # Wait for dynamic content to load
+            ]
+            
+            print(f"🌐 Agent will navigate to: {job_url}")
+            
             agent = Agent(
                 task=task,
                 llm=llm,
                 browser=browser,
+                controller=controller,  # Inject custom element handlers
                 available_file_paths=available_files,
+                initial_actions=initial_actions,  # Navigate before LLM starts
                 max_failures=5,
                 generate_gif=str(job_artifacts / "recording.gif"),
                 llm_timeout=300,  # 5 minutes for local models
@@ -231,6 +250,31 @@ class JobApplyAgent:
             final_result = history.final_result()
             errors = history.errors()
             
+            # Extract and save steps to database
+            steps_summary = ""
+            if self.db_queue:
+                try:
+                    from .step_tracker import extract_steps_from_history, summarize_steps
+                    steps = extract_steps_from_history(history)
+                    steps_summary = summarize_steps(steps)
+                    
+                    # Save each step to database
+                    for step in steps:
+                        self.db_queue.add_step(
+                            job_id=job_id,
+                            step_number=step["step_number"],
+                            action_type=step["action_type"],
+                            element_description=step["description"],
+                            element_selector=step.get("element_selector"),
+                            input_value=step.get("input_value"),
+                            result="failed" if step.get("error") else "success",
+                            error_message=step.get("error"),
+                            page_url=step.get("url"),
+                        )
+                except Exception as e:
+                    # Step tracking should not fail the job
+                    print(f"Warning: Step tracking failed: {e}")
+            
             # Use final screenshot if available, else recording
             display_screenshot = str(final_screenshot_path) if final_screenshot_path and final_screenshot_path.exists() else str(job_artifacts / "recording.gif")
             
@@ -239,6 +283,7 @@ class JobApplyAgent:
                 "final_result": final_result,
                 "errors": [str(e) for e in errors] if errors else [],
                 "steps": len(history.history),
+                "steps_summary": steps_summary,
                 "screenshot": display_screenshot
             }
             (job_artifacts / "result.json").write_text(

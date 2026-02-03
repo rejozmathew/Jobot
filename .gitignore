@@ -28,9 +28,14 @@ cookies.json
 # Runtime files
 artifacts/
 job_queue.json
+job_applier.db
+*.db
 *.gif
 *.log
 
 # Temp
 temp/
 tmp/
+
+#ignore resume
+Resume -*.pdf

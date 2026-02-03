@@ -13,7 +13,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .queue import JobQueue, JobStatus, AddJobRequest, QueuedJob
+from .db_queue import JobQueue, QueuedJob, AddJobRequest
+from .database import JobStatus
 from .runner import JobRunner
 
 load_dotenv()
@@ -26,8 +27,8 @@ app = FastAPI(
 
 
 
-# Initialize queue and runner
-_queue = JobQueue(os.getenv("JOB_APPLIER_QUEUE_PATH", "./job_queue.json"))
+# Initialize database-backed queue and runner
+_queue = JobQueue()  # Uses SQLite database
 _runner = JobRunner()
 
 # Track background task
@@ -113,6 +114,21 @@ def retry_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"ok": True, "job": job.model_dump_json_safe()}
+
+
+@app.get("/queue/{job_id}/steps")
+def get_job_steps(job_id: str):
+    """Get all steps recorded for a job."""
+    job = _queue.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    steps = _queue.get_steps(job_id)
+    return {
+        "job_id": job_id,
+        "step_count": len(steps),
+        "steps": steps,
+    }
 
 
 @app.get("/status")
@@ -422,6 +438,127 @@ HTML_TEMPLATE = """
             pointer-events: none;
         }
         
+        /* Expandable row styles */
+        .expand-btn {
+            background: none;
+            border: none;
+            color: var(--accent);
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 0.25rem;
+            transition: transform 0.2s;
+        }
+        
+        .expand-btn:hover {
+            color: var(--success);
+        }
+        
+        .expand-btn.expanded {
+            transform: rotate(45deg);
+        }
+        
+        .job-row {
+            cursor: pointer;
+        }
+        
+        .job-row:hover {
+            background: rgba(255,255,255,0.03);
+        }
+        
+        .detail-row {
+            display: none;
+        }
+        
+        .detail-row.visible {
+            display: table-row;
+        }
+        
+        .detail-cell {
+            background: var(--bg-secondary);
+            padding: 1rem !important;
+        }
+        
+        .error-box {
+            background: rgba(255, 71, 87, 0.1);
+            border: 1px solid var(--error);
+            border-radius: 8px;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            color: var(--error);
+        }
+        
+        .error-box strong {
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        
+        .steps-timeline {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            padding: 0.5rem 0;
+            border-left: 2px solid var(--accent);
+            padding-left: 1rem;
+            margin-left: 0.5rem;
+            position: relative;
+        }
+        
+        .step-item::before {
+            content: '';
+            position: absolute;
+            left: -5px;
+            top: 0.75rem;
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 50%;
+        }
+        
+        .step-item.step-error {
+            border-left-color: var(--error);
+        }
+        
+        .step-item.step-error::before {
+            background: var(--error);
+        }
+        
+        .step-item.step-success {
+            border-left-color: var(--success);
+        }
+        
+        .step-item.step-success::before {
+            background: var(--success);
+        }
+        
+        .step-order {
+            background: var(--bg-card);
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            margin-right: 0.5rem;
+            min-width: 24px;
+            text-align: center;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-summary {
+            color: var(--text);
+        }
+        
+        .no-steps {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+        
         @media (max-width: 768px) {
             body { padding: 1rem; }
             h1 { font-size: 1.8rem; }
@@ -469,6 +606,7 @@ HTML_TEMPLATE = """
             <table>
                 <thead>
                     <tr>
+                        <th></th>
                         <th>Status</th>
                         <th>URL</th>
                         <th>Title</th>
@@ -556,6 +694,66 @@ HTML_TEMPLATE = """
             refreshQueue();
         }
         
+        // Track which rows are expanded
+        const expandedJobs = new Set();
+        
+        async function toggleDetails(jobId) {
+            const btn = document.getElementById(`expand-btn-${jobId}`);
+            const detailRow = document.getElementById(`detail-row-${jobId}`);
+            
+            if (expandedJobs.has(jobId)) {
+                expandedJobs.delete(jobId);
+                btn.classList.remove('expanded');
+                detailRow.classList.remove('visible');
+            } else {
+                expandedJobs.add(jobId);
+                btn.classList.add('expanded');
+                detailRow.classList.add('visible');
+                await loadSteps(jobId);
+            }
+        }
+        
+        async function loadSteps(jobId) {
+            const container = document.getElementById(`steps-${jobId}`);
+            container.innerHTML = '<p class="no-steps">Loading steps...</p>';
+            
+            try {
+                const res = await api(`/queue/${jobId}/steps`);
+                
+                if (res.steps.length === 0) {
+                    container.innerHTML = '<p class="no-steps">No steps recorded yet</p>';
+                    return;
+                }
+                
+                const stepsHtml = res.steps.map((step, i) => {
+                    // Use element_description or action_type for display
+                    const description = step.element_description || step.action_type || 'Unknown action';
+                    const isError = step.result === 'failed' || (step.error_message && step.error_message.length > 0);
+                    const isSuccess = step.result === 'success' && !isError;
+                    const stepClass = isError ? 'step-error' : (isSuccess ? 'step-success' : '');
+                    
+                    // Build display text
+                    let displayText = description;
+                    if (step.error_message) {
+                        displayText += ` ⚠️ ${step.error_message.substring(0, 100)}`;
+                    }
+                    
+                    return `
+                        <li class="step-item ${stepClass}">
+                            <span class="step-order">${step.step_number || i + 1}</span>
+                            <div class="step-content">
+                                <span class="step-summary">${displayText}</span>
+                            </div>
+                        </li>
+                    `;
+                }).join('');
+                
+                container.innerHTML = `<ul class="steps-timeline">${stepsHtml}</ul>`;
+            } catch (e) {
+                container.innerHTML = `<p class="no-steps">Failed to load steps: ${e.message}</p>`;
+            }
+        }
+        
         async function refreshQueue() {
             try {
                 const res = await api('/queue');
@@ -571,31 +769,65 @@ HTML_TEMPLATE = """
                 // Update table
                 const tbody = document.getElementById('queue-table');
                 if (res.jobs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No jobs in queue</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No jobs in queue</td></tr>';
                     return;
                 }
                 
                 tbody.innerHTML = res.jobs.map(job => {
                     const retryBtn = ['failed', 'needs_review'].includes(job.status) ? 
-                        `<button class="btn btn-primary btn-small" onclick="retryJob('${job.id}')">Retry</button>` : '';
+                        `<button class="btn btn-primary btn-small" onclick="event.stopPropagation(); retryJob('${job.id}')">Retry</button>` : '';
+                    
+                    const isExpanded = expandedJobs.has(job.id);
+                    const expandClass = isExpanded ? 'expanded' : '';
+                    const visibleClass = isExpanded ? 'visible' : '';
+                    
+                    // Show error/intervention reason if present
+                    let errorHtml = '';
+                    if (job.error || job.intervention_reason) {
+                        const reason = job.intervention_reason || job.error;
+                        errorHtml = `
+                            <div class="error-box">
+                                <strong>❌ ${job.status === 'needs_review' ? 'Needs Review' : 'Error'}:</strong>
+                                ${reason}
+                            </div>
+                        `;
+                    }
                     
                     return `
-                    <tr>
-                        <td><span class="status-badge status-${job.status}">${job.status}</span></td>
-                        <td class="url-cell"><a href="${job.url}" target="_blank">${job.url}</a></td>
-                        <td>${job.title || '-'}</td>
-                        <td>${new Date(job.updated_at).toLocaleString()}</td>
-                        <td class="actions">
-                            ${retryBtn}
-                            <button class="btn btn-danger btn-small" onclick="deleteJob('${job.id}')">Delete</button>
-                        </td>
-                    </tr>
-                `}).join('');
+                        <tr class="job-row" onclick="toggleDetails('${job.id}')">
+                            <td>
+                                <button class="expand-btn ${expandClass}" id="expand-btn-${job.id}" onclick="event.stopPropagation(); toggleDetails('${job.id}')">+</button>
+                            </td>
+                            <td><span class="status-badge status-${job.status}">${job.status}</span></td>
+                            <td class="url-cell"><a href="${job.url}" target="_blank" onclick="event.stopPropagation()">${job.url}</a></td>
+                            <td>${job.title || '-'}</td>
+                            <td>${new Date(job.updated_at).toLocaleString()}</td>
+                            <td class="actions">
+                                ${retryBtn}
+                                <button class="btn btn-danger btn-small" onclick="event.stopPropagation(); deleteJob('${job.id}')">Delete</button>
+                            </td>
+                        </tr>
+                        <tr class="detail-row ${visibleClass}" id="detail-row-${job.id}">
+                            <td colspan="6" class="detail-cell">
+                                ${errorHtml}
+                                <strong>📋 Application Steps:</strong>
+                                <div id="steps-${job.id}">
+                                    <p class="no-steps">Click to load steps...</p>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                // Re-load steps for expanded jobs
+                for (const jobId of expandedJobs) {
+                    loadSteps(jobId);
+                }
             } catch (e) {
                 console.error('Failed to refresh queue:', e);
                 const tbody = document.getElementById('queue-table');
                 if (tbody) {
-                    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--error);">Error loading data: ${e.message}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--error);">Error loading data: ${e.message}</td></tr>`;
                 }
             }
         }

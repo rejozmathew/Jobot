@@ -34,8 +34,10 @@ load_dotenv()
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from job_applier.queue import JobQueue, AddJobRequest
+from job_applier.db_queue import JobQueue, AddJobRequest
+from job_applier.database import JobStatus
 from job_applier.runner import JobRunner
+from job_applier.migrate import migrate_from_json, check_migration_status
 
 
 def cmd_serve(args):
@@ -96,12 +98,12 @@ def cmd_apply(args):
 
 def cmd_add(args):
     """Add URLs to queue without processing."""
-    queue = JobQueue(os.getenv("JOB_APPLIER_QUEUE_PATH", "./job_queue.json"))
+    queue = JobQueue()  # Uses SQLite database
     
     jobs = queue.add_urls(args.urls)
     print(f"✅ Added {len(jobs)} job(s) to queue:")
     for job in jobs:
-        print(f"   - {job.id[:8]}... {job.url}")
+        print(f"   - #{job.seq_id or '?'} {job.id[:8]}... {job.url}")
 
 
 def cmd_run_all(args):
@@ -130,7 +132,7 @@ def cmd_run_all(args):
 
 def cmd_status(args):
     """Show queue status."""
-    queue = JobQueue(os.getenv("JOB_APPLIER_QUEUE_PATH", "./job_queue.json"))
+    queue = JobQueue()  # Uses SQLite database
     
     stats = queue.get_stats()
     print("\n📊 Queue Status:")
@@ -152,10 +154,48 @@ def cmd_status(args):
                     "applied": "✅",
                     "needs_review": "⚠️",
                     "failed": "❌",
-                }.get(job.status.value, "❓")
-                print(f"   {status_emoji} [{job.status.value}] {job.url}")
+                }.get(job.status, "❓")
+                seq_label = f"#{job.seq_id}" if job.seq_id else ""
+                print(f"   {status_emoji} [{job.status}] {seq_label} {job.url}")
                 if job.notes:
                     print(f"      Notes: {job.notes[:80]}...")
+                if job.intervention_reason:
+                    print(f"      Reason: {job.intervention_reason[:80]}...")
+
+
+def cmd_migrate(args):
+    """Migrate from JSON to SQLite database."""
+    if args.check:
+        # Just check status
+        status = check_migration_status(json_path=args.json_path)
+        print("\n🔍 Migration Status:")
+        print(f"   JSON file exists: {status['json_file_exists']}")
+        print(f"   JSON job count:   {status['json_job_count']}")
+        print(f"   Database jobs:    {status['db_job_count']}")
+        print(f"   Database path:    {status['db_path']}")
+        print(f"   Migration needed: {status['migration_needed']}")
+        return
+    
+    # Run migration
+    print(f"\n🔄 Migrating from {args.json_path} to SQLite database...")
+    
+    result = migrate_from_json(
+        json_path=args.json_path,
+        backup=not args.no_backup,
+    )
+    
+    if result['status'] == 'skipped':
+        print(f"⏭️  Skipped: {result['message']}")
+    elif result['status'] == 'error':
+        print(f"❌ Error: {result['message']}")
+    else:
+        print(f"✅ {result['message']}")
+        if result.get('backup_path'):
+            print(f"   Backup saved to: {result['backup_path']}")
+        if result.get('errors'):
+            print("   Errors:")
+            for err in result['errors']:
+                print(f"      - {err}")
 
 
 def main():
@@ -197,6 +237,13 @@ def main():
     status_parser = subparsers.add_parser("status", help="Show queue status")
     status_parser.add_argument("-v", "--verbose", action="store_true", help="Show all jobs")
     status_parser.set_defaults(func=cmd_status)
+    
+    # migrate command
+    migrate_parser = subparsers.add_parser("migrate", help="Migrate from JSON to SQLite database")
+    migrate_parser.add_argument("--json-path", default="./job_queue.json", help="Path to JSON queue file")
+    migrate_parser.add_argument("--no-backup", action="store_true", help="Don't backup JSON file")
+    migrate_parser.add_argument("--check", action="store_true", help="Only check migration status")
+    migrate_parser.set_defaults(func=cmd_migrate)
     
     args = parser.parse_args()
     

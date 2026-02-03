@@ -3,11 +3,12 @@ Apply for job: {job_url}
 {job_title_line}
 {company_line}
 
-## CRITICAL EFFICIENCY RULES
-1. **Navigate FIRST** - Go to URL immediately. Do NOT think extensively before navigating.
-2. **Batch fill forms** - Identify ALL visible input fields, fill them ALL at once, then proceed.
-3. **Minimize LLM calls** - Use heuristics for obvious fields (name, email, phone). Only reason about complex/ambiguous fields.
-4. **Keep thinking SHORT** - 1-2 sentences max. No repetition of previous steps.
+## CRITICAL RULES
+1. **Page is already loaded** - You are already ON the job page. Start by analyzing what you see.
+2. **RESUME FIRST** - ALWAYS upload resume BEFORE filling any form fields. Sites auto-fill from resume!
+3. **Skip pre-filled fields** - After resume upload, check which fields are already filled. Do NOT re-type them.
+4. **Batch fill forms** - Identify ALL empty input fields, fill them ALL at once, then proceed.
+5. **Keep thinking SHORT** - 1-2 sentences max. No repetition of previous steps.
 
 ## USER DATA
 - Name: {full_name} (First: {first_name}, Last: {last_name})
@@ -29,39 +30,44 @@ Apply for job: {job_url}
 - Has driver license: {ans_license}
 - Felony: {ans_felony}
 
-## ACTION SEQUENCE
-1. **Navigate** → Go to job URL immediately
-2. **Click Apply** → Find "Apply", "Apply Now" button
-3. **Handle Login** → If login required:
-   - Try credentials first
-   - If fails: Create account (don't retry failed login)
+## ACTION SEQUENCE (FOLLOW THIS ORDER!)
+1. **Click Apply** → Find "Apply", "Apply Now" button (page is already loaded)
+2. **Handle Login** → If login required:
+   - Try credentials first (email + password MUST match)
+   - If create account: use SAME password in both "password" and "confirm password" fields
    - If 2FA needed: STOP with needs_review
-4. **Fill Forms** → For each form page:
-   - Identify ALL input fields at once
-   - Fill obvious fields (name/email/phone) without extra reasoning
-   - For dropdowns: type value, wait 1 second, select first match
-   - Click Next/Continue
-5. **Upload Resume** → Use file path when prompted
+3. **UPLOAD RESUME FIRST** → Before filling ANY form fields:
+   - Find "Upload Resume" / "Attach CV" button
+   - Upload resume file: {resume_path}
+   - WAIT 3 seconds for auto-fill to complete
+4. **Check Pre-filled Fields** → After resume upload:
+   - Many fields are now pre-filled from resume parsing
+   - Only fill fields that are EMPTY
+5. **Fill Remaining Forms** → For empty fields only:
+   - Use `select_dropdown` action for Country, State, Company dropdowns
+   - For password fields: ALWAYS use the exact same value for both password and confirm
 6. **Submit** → Click final Submit button
 7. **Verify Success** → Look for "Application Submitted" or "Thank you" message
 
-## DROPDOWN HANDLING (CRITICAL)
-For searchable dropdowns (Country, Company, School, City):
-1. Click the field
-2. Type PARTIAL text (e.g., "United" not "US" for country)
-3. WAIT 1 second for suggestions
-4. Press ArrowDown then Enter, OR click first suggestion
-5. Do NOT just type and Tab away
+## FORM HANDLING TOOLS
+- **Dropdowns (<select>)**: Use `select_dropdown` action with the option text.
+- **File Uploads**: Use `upload_file` action for resume/CV uploads.
+- **Password + Confirm**: Use IDENTICAL values. Copy the password exactly to confirm field.
 
-**Country Code Example**: Type "United" → Wait → Select "United States (+1)"
+## PASSWORD HANDLING (CRITICAL)
+When creating an account:
+- Password field: enter {login_password}
+- Confirm password field: enter THE EXACT SAME VALUE {login_password}
+- Do NOT type different values or variations
 
 ## STOPPING CONDITIONS
 - **SUCCESS**: See "Application Submitted" / "Thank you for applying" message ONLY
-- **NEEDS_REVIEW**: CAPTCHA, 2FA, unknown questions, errors
+- **NEEDS_REVIEW**: CAPTCHA, 2FA, unknown questions, errors persisting after retry
 - **FAILED**: Page won't load, unrecoverable errors
 
 ## EFFICIENCY REMINDERS
+- Page is ALREADY LOADED - don't navigate again
+- Upload resume FIRST to leverage auto-fill
+- Skip fields that are already populated
 - Do NOT repeat yourself in thinking
-- Do NOT describe what you just did - just do next action
-- Do NOT screenshot/analyze every single field separately
 - Fill multiple fields per step when possible

@@ -9,7 +9,8 @@ from typing import Dict, Any, Optional
 
 from dotenv import load_dotenv
 
-from .queue import JobQueue, JobStatus, QueuedJob
+from .db_queue import JobQueue, QueuedJob
+from .database import JobStatus
 from .agent import JobApplyAgent
 
 load_dotenv()
@@ -20,15 +21,16 @@ class JobRunner:
 
     def __init__(
         self,
-        queue_path: Optional[str] = None,
+        db_path: Optional[str] = None,
         profile_path: Optional[str] = None,
         artifacts_dir: Optional[str] = None,
         max_steps: Optional[int] = None,
         max_history_items: Optional[int] = None,
         headless: bool = False,
     ):
+        # Use database-backed queue
         self.queue = JobQueue(
-            path=queue_path or os.getenv("JOB_APPLIER_QUEUE_PATH", "./job_queue.json")
+            db_path=db_path or os.getenv("JOB_APPLIER_DB_PATH")
         )
         self.profile_path = profile_path or os.getenv("JOB_APPLIER_PROFILE_PATH", "./profile.json")
         self.artifacts_dir = artifacts_dir or os.getenv("JOB_APPLIER_ARTIFACTS_DIR", "./artifacts")
@@ -49,13 +51,14 @@ class JobRunner:
         return self._current_job
 
     def _create_agent(self) -> JobApplyAgent:
-        """Create a new agent instance."""
+        """Create a new agent instance with step tracking."""
         return JobApplyAgent(
             profile_path=self.profile_path,
             artifacts_dir=self.artifacts_dir,
             max_steps=self.max_steps,
             max_history_items=self.max_history_items,
             headless=self.headless,
+            db_queue=self.queue,  # Pass queue for step tracking
         )
 
     async def run_one(self) -> Optional[Dict[str, Any]]:
