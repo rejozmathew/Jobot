@@ -12,6 +12,64 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from browser_use import Agent, Browser, BrowserProfile, ChatOpenAI
+
+class AutoFillingAgent(Agent):
+    """
+    Agent that automatically runs heuristics to fill forms before capturing state.
+    This ensures the LLM sees filled forms and saves tokens.
+    """
+    # Slot for pause/stop events, db_queue, job_id
+    pause_event: Optional[asyncio.Event] = None
+    stop_event: Optional[asyncio.Event] = None
+    db_queue: Any = None
+    job_id: str = ""
+    
+    async def _prepare_context(self, step_info=None):
+        # Stop check
+        if self.stop_event and self.stop_event.is_set():
+             raise asyncio.CancelledError("Agent execution stopped by user")
+
+        # Human-in-the-loop Pause
+        if self.pause_event and not self.pause_event.is_set():
+             print("⏸️  Agent PAUSED. Waiting for user to Resume...")
+             await self.pause_event.wait()
+             print("▶️  Agent RESUMED - Capturing fresh state.")
+             if self.db_queue and self.job_id:
+                 try:
+                     self.db_queue.add_step(
+                         job_id=self.job_id,
+                         step_number=getattr(self, 'last_step_num', 0) + 1,
+                         action_type="human_intervention",
+                         element_description="Human resumed execution",
+                         result="success",
+                         step_memory="Human paused and resumed execution. State may have changed."
+                     )
+                 except: pass
+
+        # Programmatic fill before state capture
+        if hasattr(self.tools, 'smart_fill'):
+             try:
+                 res = await self.tools.smart_fill()
+                 # Only log if fields were actually filled (result has content after colon)
+                 if "Smart filled fields" in res and not res.endswith(": "):
+                      print(f"⚡ {res}")
+                      if self.db_queue and self.job_id:
+                          try:
+                              self.db_queue.add_step(
+                                  job_id=self.job_id,
+                                  step_number=getattr(self, 'last_step_num', 0) + 1,
+                                  action_type="smart_fill",
+                                  element_description=res,
+                                  result="success",
+                                  step_memory="Programmatic auto-fill executed successfully columns."
+                              )
+                          except: pass
+             except Exception as e:
+                 print(f"Warning: Auto-fill error: {e}")
+        
+        return await super()._prepare_context(step_info)
+
 
 def build_application_task(profile: Dict[str, Any], job_url: str, job_title: Optional[str] = None, job_company: Optional[str] = None) -> str:
     """Build a comprehensive task prompt for job application."""
@@ -127,6 +185,17 @@ class JobApplyAgent:
         self.headless = headless
         self.db_queue = db_queue
         self._profile: Optional[Dict[str, Any]] = None
+        # Human-in-the-loop controls
+        self.pause_event = asyncio.Event()
+        self.pause_event.set() # Default to running
+
+    def pause(self):
+        """Pause the agent execution."""
+        self.pause_event.clear()
+        
+    def resume(self):
+        """Resume the agent execution."""
+        self.pause_event.set()
     
     def load_profile(self) -> Dict[str, Any]:
         """Load user profile from JSON file."""
@@ -167,7 +236,7 @@ class JobApplyAgent:
             - intervention_reason: Why human intervention is needed (if applicable)
             - screenshot_path: Path to final screenshot
         """
-        from browser_use import Agent, Browser, BrowserProfile, ChatOpenAI
+        # Imports moved to top
         
         profile = self.load_profile()
         resume_path = self.get_resume_path()
@@ -205,8 +274,67 @@ class JobApplyAgent:
             from .element_handlers import create_job_applier_controller
             
             # Create extended controller with custom actions for dropdowns and uploads
-            controller = create_job_applier_controller()
+            controller = create_job_applier_controller(profile)
             
+            # ============================================================
+            # Define Incremental Step Callback
+            # ============================================================
+            from .step_tracker import extract_action_summary, infer_action_type
+            
+            last_step_id = None
+            
+            async def on_step(state, output, step_num):
+                nonlocal last_step_id
+                
+                # Update previous running step if exists
+                if last_step_id and self.db_queue and agent.state.last_result:
+                    try:
+                        last_res = agent.state.last_result[-1]
+                        res_status = "failed" if (last_res.error) else "success"
+                        self.db_queue.update_step(
+                            step_id=last_step_id, 
+                            result=res_status, 
+                            error_message=last_res.error
+                        )
+                    except Exception as e:
+                        print(f"Warning: Failed to update step {last_step_id}: {e}")
+
+                # Create new running step
+                if self.db_queue:
+                    try:
+                        descriptions = []
+                        action_types = []
+                        for action in output.action:
+                            desc = extract_action_summary(action)
+                            descriptions.append(desc)
+                            action_types.append(infer_action_type(action))
+                        
+                        description = "; ".join(descriptions)
+                        action_type = action_types[0] if action_types else "unknown"
+                        
+                        # Safe extraction of diagnostics
+                        out_dict = output.model_dump() if hasattr(output, 'model_dump') else {}
+
+                        new_step = self.db_queue.add_step(
+                            job_id=job_id,
+                            step_number=step_num,
+                            action_type=action_type,
+                            element_description=description,
+                            element_selector=None,
+                            input_value=None,
+                            result="running",
+                            page_url=state.url,
+                            step_memory=out_dict.get('memory'),
+                            next_goal=out_dict.get('next_goal'),
+                            evaluation=out_dict.get('evaluation_previous_goal'),
+                        )
+                        last_step_id = new_step.id
+                        # Update shared step count for AutoFillingAgent
+                        if hasattr(agent, 'last_step_num'):
+                             agent.last_step_num = step_num
+                    except Exception as e:
+                        print(f"Warning: Failed to log step {step_num}: {e}")
+
             # ============================================================
             # Use initial_actions for programmatic navigation BEFORE LLM
             # This executes immediately without LLM reasoning
@@ -218,13 +346,39 @@ class JobApplyAgent:
             
             print(f"🌐 Agent will navigate to: {job_url}")
             
-            agent = Agent(
+            # Retry Logic: Summary & Clear
+            failure_context = ""
+            if self.db_queue:
+                 try:
+                     steps = self.db_queue.get_steps(job_id)
+                     if steps:
+                         last = steps[-1]
+                         failure_context = f"\n\n🛑 PREVIOUS ATTEMPT FAILED: The last run failed at step {last['step_number']} ({last['action_type']}). Error: {last.get('error_message') or 'Unknown'}. Logic: {last.get('evaluation') or 'N/A'}. Please correct this strategy."
+                         print(f"🔄 Retry detected. Clearing {len(steps)} steps and injecting failure context.")
+                         # Clear steps now that we have the summary
+                         self.db_queue.clear_steps(job_id)
+                         # Add Step 0 to log the context
+                         self.db_queue.add_step(
+                             job_id=job_id,
+                             step_number=0,
+                             action_type="retry_context",
+                             element_description=f"RETRYING. Context: {failure_context}",
+                             result="success",
+                             step_memory="Previous attempt failure analysis injected."
+                         )
+                 except Exception as e:
+                     print(f"Warning: Failed to process retry logic: {e}")
+
+            task = build_application_task(profile, job_url, job_title, job_company) + failure_context
+            
+            agent = AutoFillingAgent(
                 task=task,
                 llm=llm,
                 browser=browser,
                 controller=controller,  # Inject custom element handlers
                 available_file_paths=available_files,
                 initial_actions=initial_actions,  # Navigate before LLM starts
+                register_new_step_callback=on_step,  # Bind callback
                 max_failures=5,
                 generate_gif=str(job_artifacts / "recording.gif"),
                 llm_timeout=300,  # 5 minutes for local models
@@ -234,7 +388,30 @@ class JobApplyAgent:
                 max_history_items=self.max_history_items,  # Limit history to prevent context overflow
             )
             
+            # Inject pause event and logging context
+            agent.pause_event = self.pause_event
+            agent.db_queue = self.db_queue
+            agent.job_id = job_id
+            # Track step number for AutoFillingAgent to usage
+            agent.last_step_num = 0
+
             history = await agent.run(max_steps=self.max_steps)
+            
+            # Update final step status after run completes
+            if last_step_id and self.db_queue:
+                try:
+                    last_status = "success"
+                    last_error = None
+                    if history.history and history.history[-1].result:
+                         # Check if the very last action had an error
+                         last_result_item = history.history[-1].result[-1]
+                         if last_result_item.error:
+                             last_status = "failed"
+                             last_error = last_result_item.error
+                    
+                    self.db_queue.update_step(last_step_id, result=last_status, error_message=last_error)
+                except Exception as e:
+                    print(f"Warning: Failed to update final step: {e}")
             
             # Capture final validation screenshot
             final_screenshot_path = job_artifacts / "final_screenshot.png"
@@ -258,19 +435,8 @@ class JobApplyAgent:
                     steps = extract_steps_from_history(history)
                     steps_summary = summarize_steps(steps)
                     
-                    # Save each step to database
-                    for step in steps:
-                        self.db_queue.add_step(
-                            job_id=job_id,
-                            step_number=step["step_number"],
-                            action_type=step["action_type"],
-                            element_description=step["description"],
-                            element_selector=step.get("element_selector"),
-                            input_value=step.get("input_value"),
-                            result="failed" if step.get("error") else "success",
-                            error_message=step.get("error"),
-                            page_url=step.get("url"),
-                        )
+                    # Steps already saved incrementally
+                    pass
                 except Exception as e:
                     # Step tracking should not fail the job
                     print(f"Warning: Step tracking failed: {e}")

@@ -4,10 +4,13 @@ An automated job application agent powered by [browser-use](https://github.com/b
 
 ## Features
 
-- 🌐 **Web Dashboard** - Manage job queue at `localhost:8000` with expandable step details
+- 🌐 **Web Dashboard** - Manage job queue at `localhost:8000` with expandable step details and rich diagnostics
+- ⏸️ **Human-in-the-Loop** - Pause/Resume control to manually intervene when the agent gets stuck (Co-Browsing)
+- ⏹️ **Stop & Cleanup** - Terminate jobs instantly and auto-recover from stuck states
 - 🤖 **AI-Powered** - Uses vision LLMs to understand and fill forms
+- ⚡ **Smart Fill** - Heuristic auto-filling of common fields (Name, Email, etc.) for speed
 - 📋 **Queue System** - Add jobs, track status (queued → running → applied/failed)
-- 🗄️ **SQLite Database** - Persistent storage with step tracking and diagnostics
+- 🗄️ **SQLite Database** - Persistent storage with step tracking and deep diagnostics (memory, reasoning)
 - 🎥 **Recordings** - Generates GIF recordings of each application attempt
 - ⚙️ **Configurable** - Works with local LLMs (LM Studio) or OpenAI
 - 🔒 **Profile-Based** - Store your info once, use for all applications

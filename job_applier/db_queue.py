@@ -298,26 +298,44 @@ class JobQueueDB:
         finally:
             session.close()
 
+    def cleanup_stuck_jobs(self) -> int:
+        """Reset jobs stuck in 'running' state to 'failed' on startup."""
+        session = get_session()
+        try:
+            stuck_jobs = session.query(Job).filter(Job.status == JobStatus.RUNNING.value).all()
+            count = 0
+            for job in stuck_jobs:
+                job.status = JobStatus.FAILED.value
+                job.error = "System restart/crash during execution"
+                count += 1
+            session.commit()
+            return count
+        except Exception as e:
+            print(f"Error cleaning stuck jobs: {e}")
+            return 0
+        finally:
+            session.close()
+
     # =========================================================================
-    # Step Tracking Methods
+    # Step Management
     # =========================================================================
 
     def add_step(
-        self,
-        job_id: str,
-        step_number: int,
-        action_type: str,
-        element_description: Optional[str] = None,
+        self, 
+        job_id: str, 
+        step_number: int, 
+        action_type: str, 
+        element_description: str,
         element_selector: Optional[str] = None,
         input_value: Optional[str] = None,
-        result: str = StepResult.SUCCESS.value,
+        result: str = "success",
         error_message: Optional[str] = None,
-        screenshot_path: Optional[str] = None,
-        duration_ms: Optional[int] = None,
         page_url: Optional[str] = None,
-        page_title: Optional[str] = None,
+        step_memory: Optional[str] = None,
+        next_goal: Optional[str] = None,
+        evaluation: Optional[str] = None,
     ) -> ApplicationStep:
-        """Add a step to the application log."""
+        """Add a step to the database."""
         session = get_session()
         try:
             step = ApplicationStep(
@@ -329,16 +347,37 @@ class JobQueueDB:
                 input_value=input_value,
                 result=result,
                 error_message=error_message,
-                screenshot_path=screenshot_path,
-                duration_ms=duration_ms,
                 page_url=page_url,
-                page_title=page_title,
+                step_memory=step_memory,
+                next_goal=next_goal,
+                evaluation=evaluation,
                 timestamp=datetime.utcnow(),
             )
             session.add(step)
             session.commit()
             session.refresh(step)
             return step
+        finally:
+            session.close()
+
+    def update_step(
+        self, 
+        step_id: int, 
+        result: str, 
+        error_message: Optional[str] = None, 
+        duration_ms: Optional[int] = None
+    ) -> None:
+        """Update the result of an existing step."""
+        session = get_session()
+        try:
+            step = session.query(ApplicationStep).filter(ApplicationStep.id == step_id).first()
+            if step:
+                step.result = result
+                if error_message is not None:
+                    step.error_message = error_message
+                if duration_ms is not None:
+                    step.duration_ms = duration_ms
+                session.commit()
         finally:
             session.close()
 
@@ -353,6 +392,17 @@ class JobQueueDB:
                 .all()
             )
             return [step.to_dict() for step in steps]
+        finally:
+            session.close()
+
+    def clear_steps(self, job_id: str) -> None:
+        """Delete all steps for a given job to prepare for retry."""
+        session = get_session()
+        try:
+            session.query(ApplicationStep).filter(ApplicationStep.job_id == job_id).delete()
+            session.commit()
+        except Exception as e:
+            print(f"Error clearing steps for job {job_id}: {e}")
         finally:
             session.close()
 

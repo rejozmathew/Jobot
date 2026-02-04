@@ -39,6 +39,13 @@ class JobRunner:
         self.headless = headless
         self._running = False
         self._current_job: Optional[QueuedJob] = None
+        self._current_agent: Optional[JobApplyAgent] = None
+        self._current_task: Optional[asyncio.Task] = None
+        
+        # Cleanup stuck jobs from previous run
+        cleaned = self.queue.cleanup_stuck_jobs()
+        if cleaned > 0:
+            print(f"🧹 Cleaned up {cleaned} stuck jobs from previous session")
 
     @property
     def is_running(self) -> bool:
@@ -49,6 +56,22 @@ class JobRunner:
     def current_job(self) -> Optional[QueuedJob]:
         """Get the currently processing job."""
         return self._current_job
+    
+    def pause_current(self):
+        """Pause the currently running agent."""
+        if self._current_agent:
+            self._current_agent.pause()
+
+    def resume_current(self):
+        """Resume the currently running agent."""
+        if self._current_agent:
+            self._current_agent.resume()
+
+    def stop_current(self):
+        """Stop the currently running agent immediately."""
+        if self._current_task:
+            print("🛑 Force stopping current task...")
+            self._current_task.cancel()
 
     def _create_agent(self) -> JobApplyAgent:
         """Create a new agent instance with step tracking."""
@@ -60,6 +83,71 @@ class JobRunner:
             headless=self.headless,
             db_queue=self.queue,  # Pass queue for step tracking
         )
+
+    async def run_specific(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Process a specific job by ID."""
+        if self._running:
+            return {"error": "Already processing a job", "job": None}
+
+        # Claim specific job
+        # We manually get it and update status
+        job = self.queue.get(job_id)
+        if not job:
+            return None
+        
+        # Force status to running
+        self._running = True
+        self._current_job = job
+        self.queue.update_status(job.id, JobStatus.RUNNING)
+        
+        # Track the task for cancellation
+        self._current_task = asyncio.current_task()
+
+        try:
+            agent = self._create_agent()
+            self._current_agent = agent
+            result = await agent.apply(
+                job_url=job.url,
+                job_id=job.id,
+                job_title=job.title,
+                job_company=job.company,
+            )
+            # ... update status based on result (same as run_one) ...
+            # Reuse logic by extraction? Or copy paste for now to save time
+            status_map = {
+                "applied": JobStatus.APPLIED,
+                "needs_review": JobStatus.NEEDS_REVIEW,
+                "failed": JobStatus.FAILED,
+            }
+            new_status = status_map.get(result.get("status", "failed"), JobStatus.FAILED)
+
+            self.queue.update_status(
+                job_id=job.id,
+                status=new_status,
+                notes=result.get("message", ""),
+                error=result.get("error", ""),
+                intervention_reason=result.get("intervention_reason"),
+                screenshot_path=result.get("screenshot_path"),
+            )
+            return {
+                "job_id": job.id,
+                "url": job.url,
+                "status": new_status.value,
+                "message": result.get("message", ""),
+                "error": result.get("error", ""),
+            }
+        except asyncio.CancelledError:
+            print("⚠️ Task cancelled.")
+            self.queue.update_status(job.id, JobStatus.FAILED, error="Stopped by user")
+            return {"status": "stopped"}
+        except Exception as e:
+            self.queue.update_status(job.id, JobStatus.FAILED, error=str(e))
+            return {"status": "failed", "error": str(e)}
+        finally:
+            self._running = False
+            self._current_job = None
+            self._current_agent = None
+            self._current_task = None
 
     async def run_one(self) -> Optional[Dict[str, Any]]:
         """
@@ -81,6 +169,7 @@ class JobRunner:
 
         try:
             agent = self._create_agent()
+            self._current_agent = agent
             result = await agent.apply(
                 job_url=job.url,
                 job_id=job.id,
@@ -130,6 +219,7 @@ class JobRunner:
         finally:
             self._running = False
             self._current_job = None
+            self._current_agent = None
 
     def run_one_sync(self) -> Optional[Dict[str, Any]]:
         """Synchronous wrapper for run_one()."""
@@ -161,8 +251,14 @@ class JobRunner:
     def get_status(self) -> Dict[str, Any]:
         """Get current runner status."""
         stats = self.queue.get_stats()
+        # Check if paused
+        is_paused = False
+        if self._current_agent and not self._current_agent.pause_event.is_set():
+            is_paused = True
+            
         return {
             "is_running": self._running,
+            "is_paused": is_paused,
             "current_job": self._current_job.model_dump_json_safe() if self._current_job else None,
             "queue_stats": stats,
         }

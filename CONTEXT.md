@@ -86,6 +86,17 @@ JOB_APPLIER_MAX_HISTORY=10
 - **Solution**: Expandable rows in job queue showing step-by-step details
 - **File**: `job_applier/api.py` (JavaScript + CSS)
 - **API**: New `/queue/{job_id}/steps` endpoint
+     
+### 9. Human-in-the-Loop & Stop (NEW - 2026-02-04)
+- **Problem**: Agent gets stuck in loops or cannot be stopped easily
+- **Solution**: Pause/Resume/Stop controls. Hard cancellation for Stop
+- **File**: `job_applier/runner.py`, `job_applier/agent.py`
+- **API**: `/run/pause`, `/run/resume`, `/run/stop`, `/run/{id}`
+
+### 10. Smart Retry Context (NEW - 2026-02-04)
+- **Problem**: Retrying a job started from scratch without knowing *why* it failed
+- **Solution**: Inject previous failure summary as "Step 0" when retrying
+- **File**: `job_applier/agent.py`
 
 ---
 

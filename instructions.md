@@ -5,7 +5,7 @@ Apply for job: {job_url}
 
 ## CRITICAL RULES
 1. **Page is already loaded** - You are already ON the job page. Start by analyzing what you see.
-2. **RESUME FIRST** - ALWAYS upload resume BEFORE filling any form fields. Sites auto-fill from resume!
+2. **RESUME PRIORITY** - Upload resume *as soon as* you see the upload option. Do not force navigation or skip required steps (like login) to find it.
 3. **Skip pre-filled fields** - After resume upload, check which fields are already filled. Do NOT re-type them.
 4. **Batch fill forms** - Identify ALL empty input fields, fill them ALL at once, then proceed.
 5. **Keep thinking SHORT** - 1-2 sentences max. No repetition of previous steps.
@@ -32,11 +32,14 @@ Apply for job: {job_url}
 
 ## ACTION SEQUENCE (FOLLOW THIS ORDER!)
 1. **Click Apply** → Find "Apply", "Apply Now" button (page is already loaded)
-2. **Handle Login** → If login required:
+2. **SMART FILL** → Call `smart_fill` tool IMMEDIATELY to heuristic fill Name, Email, Phone, etc.
+   - This saves steps. If fields are filled, move on.
+3. **Handle Login** → If login required:
    - Try credentials first (email + password MUST match)
    - If create account: use SAME password in both "password" and "confirm password" fields
    - If 2FA needed: STOP with needs_review
-3. **UPLOAD RESUME FIRST** → Before filling ANY form fields:
+3. **UPLOAD RESUME FIRST** → Before filling ANY *application* form fields:
+   - **Exception**: If on Login/Create Account page, complete that FIRST. Resume upload is on the next page.
    - Find "Upload Resume" / "Attach CV" button
    - Upload resume file: {resume_path}
    - WAIT 3 seconds for auto-fill to complete
@@ -60,8 +63,21 @@ When creating an account:
 - Confirm password field: enter THE EXACT SAME VALUE {login_password}
 - Do NOT type different values or variations
 
+## TROUBLESHOOTING
+- **Hidden Errors**: If the page doesn't change after clicking "Next/Submit", **SCROLL TO TOP**. Errors are often hidden there.
+- **Sign In / Button Loops**:
+  - **Click Button, Not Container**: The agent often tries to click the whole "Sign In" card. You MUST click the specific `<button>` or text "Sign In".
+  - **Verify Navigation**: If the page URL doesn't change after clicking, you clicked the wrong thing. Try a different index.
+
+- **Checkbox/Consent Loops (CRITICAL)**:
+  1. **Read More**: You often MUST click "Read More" / "Privacy Policy" to UNLOCK the checkbox. Do this FIRST.
+  2. **Click Label**: If clicking the square box fails (check doesn't appear), try clicking the **text label** next to it.
+  3. **Scroll**: Scroll to the bottom of any terms box.
+- **Resume Upload**: If you can't find "Upload Resume" on the login/create account page, complete the account creation FIRST. The upload button will be on the next page.
+
 ## STOPPING CONDITIONS
 - **SUCCESS**: See "Application Submitted" / "Thank you for applying" message ONLY
+- **Premature Done**: Do NOT stop just because you uploaded a resume. You MUST complete the form. Do NOT use `done` action until "Application Submitted".
 - **NEEDS_REVIEW**: CAPTCHA, 2FA, unknown questions, errors persisting after retry
 - **FAILED**: Page won't load, unrecoverable errors
 

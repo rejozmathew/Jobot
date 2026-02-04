@@ -123,6 +123,11 @@ class ApplicationStep(Base):
     page_url = Column(Text, nullable=True)
     page_title = Column(String(255), nullable=True)
     
+    # Diagnostics
+    step_memory = Column(Text, nullable=True)
+    next_goal = Column(Text, nullable=True)
+    evaluation = Column(Text, nullable=True)
+    
     # Relationships
     job = relationship("Job", back_populates="steps")
 
@@ -144,6 +149,9 @@ class ApplicationStep(Base):
             "duration_ms": self.duration_ms,
             "page_url": self.page_url,
             "page_title": self.page_title,
+            "step_memory": self.step_memory,
+            "next_goal": self.next_goal,
+            "evaluation": self.evaluation,
         }
 
 

@@ -116,6 +116,15 @@ def retry_job(job_id: str):
     return {"ok": True, "job": job.model_dump_json_safe()}
 
 
+@app.post("/queue/{job_id}/fail")
+def force_fail_job(job_id: str):
+    """Manually mark a job as failed (Force Stop)."""
+    job = _queue.update_status(job_id, JobStatus.FAILED, error="Manually stopped by user")
+    if not job:
+         raise HTTPException(status_code=404, detail="Job not found")
+    return {"ok": True, "job": job.model_dump_json_safe()}
+
+
 @app.get("/queue/{job_id}/steps")
 def get_job_steps(job_id: str):
     """Get all steps recorded for a job."""
@@ -193,6 +202,38 @@ async def run_all(background_tasks: BackgroundTasks):
         "remaining": remaining,
     }
 
+
+@app.post("/run/pause")
+def pause_execution():
+    """Pause the current job execution."""
+    _runner.pause_current()
+    return {"ok": True, "status": "paused"}
+
+
+@app.post("/run/resume")
+def resume_execution():
+    """Resume the current job execution."""
+    _runner.resume_current()
+    return {"ok": True, "status": "running"}
+
+
+@app.post("/run/stop")
+def stop_execution():
+    """Stop the current job execution."""
+    _runner.stop_current()
+    return {"ok": True, "status": "stopped"}
+
+@app.post("/run/{job_id}")
+async def run_specific_job(job_id: str, background_tasks: BackgroundTasks):
+    """Run a specific job."""
+    if _runner.is_running:
+        raise HTTPException(status_code=400, detail="Already processing a job")
+    
+    # Run in background to return quickly? Or foreground?
+    # User expects immediate feedback usually, but run_one uses await.
+    # We'll use background task to avoid blocking API
+    background_tasks.add_task(_runner.run_specific, job_id)
+    return {"ok": True, "message": "Job started"}
 
 # ----- Web UI -----
 
@@ -565,6 +606,86 @@ HTML_TEMPLATE = """
             .stats { grid-template-columns: repeat(3, 1fr); }
             table { font-size: 0.9rem; }
         }
+        
+        /* New Table Styles */
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            table-layout: fixed;
+            width: 100%;
+        }
+        .url-cell {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        /* Icon Buttons */
+        .btn-icon {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            color: var(--text);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            min-width: 32px;
+            height: 32px;
+        }
+        .btn-icon:hover { background: rgba(255,255,255,0.2); transform: translateY(-1px); }
+        .btn-icon svg { width: 18px; height: 18px; fill: currentColor; }
+        
+        .btn-icon.run:hover { color: var(--success); background: rgba(0,255,136,0.15); }
+        .btn-icon.pause:hover { color: var(--warning); background: rgba(255,170,0,0.15); }
+        .btn-icon.stop:hover { color: var(--error); background: rgba(255,71,87,0.15); }
+        .btn-icon.delete:hover { color: var(--error); background: rgba(255,71,87,0.15); }
+        
+        .actions {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        
+        /* Queue filters */
+        .queue-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin: 0.75rem 0 1rem;
+        }
+        
+        .filter-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .filter-input,
+        .filter-select {
+            background: var(--bg-secondary);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: var(--text);
+            padding: 0.5rem 0.7rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+        
+        .filter-input:focus,
+        .filter-select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        .table-meta {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
@@ -598,12 +719,46 @@ HTML_TEMPLATE = """
                 <div class="stat needs_review"><div class="stat-value">-</div><div class="stat-label">Review</div></div>
                 <div class="stat failed"><div class="stat-value">-</div><div class="stat-label">Failed</div></div>
             </div>
-            <button class="btn btn-primary btn-small" onclick="refreshQueue()">🔄 Refresh</button>
+            <div style="margin-top: 1rem; text-align: right;">
+                 <button class="btn btn-primary btn-small" onclick="refreshQueue()">🔄 Refresh</button>
+            </div>
         </div>
         
         <div class="card">
             <h2>📝 Job Queue</h2>
+            <div class="queue-controls">
+                <div class="filter-group">
+                    <input id="job-search" class="filter-input" type="text" placeholder="Search URL, title, company" />
+                    <select id="status-filter" class="filter-select">
+                        <option value="all" selected>All statuses</option>
+                        <option value="queued">Queued</option>
+                        <option value="running">Running</option>
+                        <option value="applied">Applied</option>
+                        <option value="needs_review">Needs review</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                    <select id="sort-by" class="filter-select">
+                        <option value="updated_at" selected>Sort: Updated</option>
+                        <option value="created_at">Sort: Created</option>
+                        <option value="status">Sort: Status</option>
+                        <option value="seq_id">Sort: Seq</option>
+                        <option value="title">Sort: Title</option>
+                    </select>
+                    <select id="sort-dir" class="filter-select">
+                        <option value="desc" selected>Desc</option>
+                        <option value="asc">Asc</option>
+                    </select>
+                </div>
+                <div id="table-meta" class="table-meta">Showing 0 of 0</div>
+            </div>
+            <div class="table-container">
             <table>
+                <col style="width: 40px;" />
+                <col style="width: 100px;" />
+                <col style="width: auto;" />
+                <col style="width: 150px;" />
+                <col style="width: 160px;" />
+                <col style="width: 160px;" />
                 <thead>
                     <tr>
                         <th></th>
@@ -620,9 +775,17 @@ HTML_TEMPLATE = """
             </table>
         </div>
     </div>
+    </div>
     
     <script>
         const API_BASE = '';
+        
+        const filterState = {
+            search: '',
+            status: 'all',
+            sortBy: 'updated_at',
+            sortDir: 'desc',
+        };
         
         function showMessage(text, type = 'success') {
             const el = document.getElementById('message');
@@ -693,6 +856,38 @@ HTML_TEMPLATE = """
             showMessage('Job deleted');
             refreshQueue();
         }
+
+        async function pauseJob() {
+            await api('/run/pause', { method: 'POST' });
+            showMessage('Job Paused. Check browser window.');
+            refreshQueue();
+        }
+
+        async function resumeJob() {
+            await api('/run/resume', { method: 'POST' });
+            showMessage('Job Resumed.');
+            refreshQueue();
+        }
+        
+        async function runJob(jobId) {
+            await api(`/run/${jobId}`, { method: 'POST' });
+            showMessage('Job started');
+            refreshQueue();
+        }
+
+        async function stopJob() {
+             if (!confirm('Stop the current job?')) return;
+             await api('/run/stop', { method: 'POST' });
+             showMessage('Job stopped');
+             refreshQueue();
+        }
+
+        async function forceFailJob(jobId) {
+             if (!confirm('Force mark this job as FAILED? (Use if stuck)')) return;
+             await api(`/queue/${jobId}/fail`, { method: 'POST' });
+             showMessage('Job marked as failed');
+             refreshQueue();
+        }
         
         // Track which rows are expanded
         const expandedJobs = new Set();
@@ -715,6 +910,9 @@ HTML_TEMPLATE = """
         
         async function loadSteps(jobId) {
             const container = document.getElementById(`steps-${jobId}`);
+            if (!container) {
+                return;
+            }
             container.innerHTML = '<p class="no-steps">Loading steps...</p>';
             
             try {
@@ -725,7 +923,7 @@ HTML_TEMPLATE = """
                     return;
                 }
                 
-                const stepsHtml = res.steps.map((step, i) => {
+                    const stepsHtml = res.steps.map((step, i) => {
                     // Use element_description or action_type for display
                     const description = step.element_description || step.action_type || 'Unknown action';
                     const isError = step.result === 'failed' || (step.error_message && step.error_message.length > 0);
@@ -738,11 +936,24 @@ HTML_TEMPLATE = """
                         displayText += ` ⚠️ ${step.error_message.substring(0, 100)}`;
                     }
                     
+                    // Rich Details (Eval, Memory, Goal)
+                    let detailsHtml = '';
+                    if (step.evaluation || step.step_memory || step.next_goal) {
+                        detailsHtml = `
+                            <div style="margin-top:0.5rem; font-size:0.85rem; color:#aaa; background:rgba(0,0,0,0.2); padding:0.5rem; border-radius:4px; line-height: 1.4;">
+                                ${step.evaluation ? `<div style="margin-bottom:4px;"><strong>🤔 Eval:</strong> ${step.evaluation}</div>` : ''}
+                                ${step.next_goal ? `<div style="margin-bottom:4px;"><strong>🎯 Goal:</strong> ${step.next_goal}</div>` : ''}
+                                ${step.step_memory ? `<div><strong>🧠 Memory:</strong> ${step.step_memory}</div>` : ''}
+                            </div>
+                        `;
+                    }
+                    
                     return `
                         <li class="step-item ${stepClass}">
-                            <span class="step-order">${step.step_number || i + 1}</span>
+                            <span class="step-order">${step.step_number !== undefined ? step.step_number : i + 1}</span>
                             <div class="step-content">
                                 <span class="step-summary">${displayText}</span>
+                                ${detailsHtml}
                             </div>
                         </li>
                     `;
@@ -756,7 +967,34 @@ HTML_TEMPLATE = """
         
         async function refreshQueue() {
             try {
-                const res = await api('/queue');
+                const [res, status] = await Promise.all([
+                     api('/queue'),
+                     api('/status')
+                ]);
+                
+                // Add status to res for mapping
+                res.is_running = status.is_running;
+                res.is_paused = status.is_paused;
+
+                // Update Controls (Global) - Optional, since we have row controls now
+                // But keep them for visibility
+                const controls = document.getElementById('controls-area');
+                if (controls) {
+                    if (status.is_running) {
+                        controls.style.display = 'flex';
+                        const btnPause = document.getElementById('btn-pause');
+                        const btnResume = document.getElementById('btn-resume');
+                        if (status.is_paused) {
+                            btnPause.style.display = 'none';
+                            btnResume.style.display = 'block';
+                        } else {
+                            btnPause.style.display = 'block';
+                            btnResume.style.display = 'none';
+                        }
+                    } else {
+                        controls.style.display = 'none';
+                    }
+                }
                 
                 // Update stats
                 const stats = res.stats;
@@ -768,12 +1006,81 @@ HTML_TEMPLATE = """
                 
                 // Update table
                 const tbody = document.getElementById('queue-table');
-                if (res.jobs.length === 0) {
+                const allJobs = res.jobs || [];
+                
+                // Apply search + status filter
+                let jobs = allJobs.slice();
+                const search = filterState.search.trim().toLowerCase();
+                if (search) {
+                    jobs = jobs.filter(job => {
+                        const haystack = [
+                            job.url,
+                            job.title,
+                            job.company,
+                        ].filter(Boolean).join(' ').toLowerCase();
+                        return haystack.includes(search);
+                    });
+                }
+                if (filterState.status !== 'all') {
+                    jobs = jobs.filter(job => job.status === filterState.status);
+                }
+                
+                // Sort
+                const dir = filterState.sortDir === 'desc' ? -1 : 1;
+                const statusOrder = {
+                    running: 0,
+                    queued: 1,
+                    needs_review: 2,
+                    failed: 3,
+                    applied: 4,
+                };
+                
+                jobs.sort((a, b) => {
+                    const sortBy = filterState.sortBy;
+                    if (sortBy === 'updated_at' || sortBy === 'created_at') {
+                        const aVal = a[sortBy] ? new Date(a[sortBy]).getTime() : 0;
+                        const bVal = b[sortBy] ? new Date(b[sortBy]).getTime() : 0;
+                        return (aVal - bVal) * dir;
+                    }
+                    if (sortBy === 'status') {
+                        const aVal = statusOrder[a.status] ?? 99;
+                        const bVal = statusOrder[b.status] ?? 99;
+                        return (aVal - bVal) * dir;
+                    }
+                    if (sortBy === 'seq_id') {
+                        const aHas = typeof a.seq_id === 'number';
+                        const bHas = typeof b.seq_id === 'number';
+                        if (aHas && bHas) return (a.seq_id - b.seq_id) * dir;
+                        if (aHas) return -1;
+                        if (bHas) return 1;
+                        return 0;
+                    }
+                    if (sortBy === 'title') {
+                        const aTitle = a.title;
+                        const bTitle = b.title;
+                        if (!aTitle && !bTitle) return 0;
+                        if (!aTitle) return 1;
+                        if (!bTitle) return -1;
+                        return aTitle.localeCompare(bTitle) * dir;
+                    }
+                    return 0;
+                });
+                
+                const meta = document.getElementById('table-meta');
+                if (meta) {
+                    meta.textContent = `Showing ${jobs.length} of ${allJobs.length}`;
+                }
+                
+                if (allJobs.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No jobs in queue</td></tr>';
                     return;
                 }
+                if (jobs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No matching jobs</td></tr>';
+                    return;
+                }
                 
-                tbody.innerHTML = res.jobs.map(job => {
+                tbody.innerHTML = jobs.map(job => {
                     const retryBtn = ['failed', 'needs_review'].includes(job.status) ? 
                         `<button class="btn btn-primary btn-small" onclick="event.stopPropagation(); retryJob('${job.id}')">Retry</button>` : '';
                     
@@ -795,7 +1102,7 @@ HTML_TEMPLATE = """
                     
                     return `
                         <tr class="job-row" onclick="toggleDetails('${job.id}')">
-                            <td>
+                            <td class="expand-cell">
                                 <button class="expand-btn ${expandClass}" id="expand-btn-${job.id}" onclick="event.stopPropagation(); toggleDetails('${job.id}')">+</button>
                             </td>
                             <td><span class="status-badge status-${job.status}">${job.status}</span></td>
@@ -803,8 +1110,22 @@ HTML_TEMPLATE = """
                             <td>${job.title || '-'}</td>
                             <td>${new Date(job.updated_at).toLocaleString()}</td>
                             <td class="actions">
-                                ${retryBtn}
-                                <button class="btn btn-danger btn-small" onclick="event.stopPropagation(); deleteJob('${job.id}')">Delete</button>
+                                ${['queued', 'failed', 'needs_review'].includes(job.status) && !res.is_running ? 
+                                    `<button class="btn-icon run" title="Run" onclick="event.stopPropagation(); runJob('${job.id}')"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>` : ''}
+                                
+                                ${job.status === 'running' && res.is_running ? 
+                                    (res.is_paused ? 
+                                        `<button class="btn-icon run" title="Resume" onclick="event.stopPropagation(); resumeJob()"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>` : 
+                                        `<button class="btn-icon pause" title="Pause" onclick="event.stopPropagation(); pauseJob()"><svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></button>`
+                                    ) : ''}
+                                
+                                ${job.status === 'running' && res.is_running ? 
+                                     `<button class="btn-icon stop" title="Stop" onclick="event.stopPropagation(); stopJob()"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>` : ''}
+
+                                ${job.status === 'running' && !res.is_running ? 
+                                     `<button class="btn-icon stop" title="Force Stop (Stuck)" onclick="event.stopPropagation(); forceFailJob('${job.id}')"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg></button>` : ''}
+                                
+                                <button class="btn-icon delete" title="Delete" onclick="event.stopPropagation(); deleteJob('${job.id}')"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
                             </td>
                         </tr>
                         <tr class="detail-row ${visibleClass}" id="detail-row-${job.id}">
@@ -833,6 +1154,36 @@ HTML_TEMPLATE = """
         }
         
         // Initial load and auto-refresh
+        const searchInput = document.getElementById('job-search');
+        const statusFilter = document.getElementById('status-filter');
+        const sortBySelect = document.getElementById('sort-by');
+        const sortDirSelect = document.getElementById('sort-dir');
+        
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                filterState.search = e.target.value || '';
+                refreshQueue();
+            });
+        }
+        if (statusFilter) {
+            statusFilter.addEventListener('change', (e) => {
+                filterState.status = e.target.value || 'all';
+                refreshQueue();
+            });
+        }
+        if (sortBySelect) {
+            sortBySelect.addEventListener('change', (e) => {
+                filterState.sortBy = e.target.value || 'updated_at';
+                refreshQueue();
+            });
+        }
+        if (sortDirSelect) {
+            sortDirSelect.addEventListener('change', (e) => {
+                filterState.sortDir = e.target.value || 'desc';
+                refreshQueue();
+            });
+        }
+        
         refreshQueue();
         setInterval(refreshQueue, 5000);
     </script>
