@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -33,6 +34,25 @@ _runner = JobRunner()
 
 # Track background task
 _background_task_running = False
+
+
+def _artifact_folder_name(job) -> str:
+    """Prefer numbered artifact folder using seq_id."""
+    if getattr(job, "seq_id", None) is not None:
+        return f"job-{int(job.seq_id):05d}"
+    return str(job.id)
+
+
+def _resolve_artifacts_dir(job) -> Path:
+    """Resolve artifacts directory for a job with backward compatibility."""
+    root = Path(os.getenv("JOB_APPLIER_ARTIFACTS_DIR", "./artifacts"))
+    preferred = root / _artifact_folder_name(job)
+    legacy = root / str(job.id)
+    if preferred.exists():
+        return preferred
+    if legacy.exists():
+        return legacy
+    return preferred
 
 
 # ----- Request/Response Models -----
@@ -138,6 +158,31 @@ def get_job_steps(job_id: str):
         "step_count": len(steps),
         "steps": steps,
     }
+
+
+@app.get("/queue/{job_id}/trace")
+def get_job_trace(job_id: str):
+    """Get per-step trace records for a job."""
+    job = _queue.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    artifacts_dir = _resolve_artifacts_dir(job)
+    trace_file = artifacts_dir / "trace.jsonl"
+    if not trace_file.exists():
+        return {"job_id": job_id, "artifacts_dir": str(artifacts_dir), "trace_count": 0, "trace": []}
+
+    entries = []
+    for line in trace_file.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            entries.append(json.loads(text))
+        except json.JSONDecodeError:
+            entries.append({"raw": text})
+
+    return {"job_id": job_id, "artifacts_dir": str(artifacts_dir), "trace_count": len(entries), "trace": entries}
 
 
 @app.get("/status")
@@ -754,6 +799,7 @@ HTML_TEMPLATE = """
             <div class="table-container">
             <table>
                 <col style="width: 40px;" />
+                <col style="width: 80px;" />
                 <col style="width: 100px;" />
                 <col style="width: auto;" />
                 <col style="width: 150px;" />
@@ -762,6 +808,7 @@ HTML_TEMPLATE = """
                 <thead>
                     <tr>
                         <th></th>
+                        <th>Job #</th>
                         <th>Status</th>
                         <th>URL</th>
                         <th>Title</th>
@@ -770,7 +817,7 @@ HTML_TEMPLATE = """
                     </tr>
                 </thead>
                 <tbody id="queue-table">
-                    <tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+                    <tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -1072,11 +1119,11 @@ HTML_TEMPLATE = """
                 }
                 
                 if (allJobs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No jobs in queue</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">No jobs in queue</td></tr>';
                     return;
                 }
                 if (jobs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No matching jobs</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">No matching jobs</td></tr>';
                     return;
                 }
                 
@@ -1105,6 +1152,7 @@ HTML_TEMPLATE = """
                             <td class="expand-cell">
                                 <button class="expand-btn ${expandClass}" id="expand-btn-${job.id}" onclick="event.stopPropagation(); toggleDetails('${job.id}')">+</button>
                             </td>
+                            <td>${job.seq_id ?? '-'}</td>
                             <td><span class="status-badge status-${job.status}">${job.status}</span></td>
                             <td class="url-cell"><a href="${job.url}" target="_blank" onclick="event.stopPropagation()">${job.url}</a></td>
                             <td>${job.title || '-'}</td>
@@ -1129,7 +1177,7 @@ HTML_TEMPLATE = """
                             </td>
                         </tr>
                         <tr class="detail-row ${visibleClass}" id="detail-row-${job.id}">
-                            <td colspan="6" class="detail-cell">
+                            <td colspan="7" class="detail-cell">
                                 ${errorHtml}
                                 <strong>📋 Application Steps:</strong>
                                 <div id="steps-${job.id}">
@@ -1148,7 +1196,7 @@ HTML_TEMPLATE = """
                 console.error('Failed to refresh queue:', e);
                 const tbody = document.getElementById('queue-table');
                 if (tbody) {
-                    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--error);">Error loading data: ${e.message}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--error);">Error loading data: ${e.message}</td></tr>`;
                 }
             }
         }
@@ -1207,13 +1255,14 @@ def debug_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    artifacts_dir = Path(os.getenv("JOB_APPLIER_ARTIFACTS_DIR", "./artifacts")) / job_id
+    artifacts_dir = _resolve_artifacts_dir(job)
     files = []
     if artifacts_dir.exists():
         files = [p.name for p in artifacts_dir.iterdir() if p.is_file()]
     
     return {
         "job": job.model_dump_json_safe(),
+        "artifact_folder": _artifact_folder_name(job),
         "artifacts_dir": str(artifacts_dir),
         "files": sorted(files),
     }

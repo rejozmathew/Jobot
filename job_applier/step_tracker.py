@@ -67,13 +67,44 @@ def extract_action_summary(action: Any) -> str:
         text = sel.get('text', '')
         index = sel.get('index', '?')
         summary_parts.append(f"Selected '{text[:30]}' from dropdown #{index}")
-    
+
+    # Handle custom 'fill_dropdown' action
+    elif 'fill_dropdown' in action_data:
+        sel = action_data['fill_dropdown']
+        text = sel.get('value', '')
+        index = sel.get('index', '?')
+        summary_parts.append(f"Filled dynamic dropdown #{index} with '{text[:30]}'")
+
+    # Handle custom 'check_checkbox' action
+    elif 'check_checkbox' in action_data:
+        chk = action_data['check_checkbox']
+        index = chk.get('index', '?')
+        checked = chk.get('checked', True)
+        summary_parts.append(f"Set checkbox #{index} to {checked}")
+
     # Handle 'upload_file' action
     elif 'upload_file' in action_data:
         upload = action_data['upload_file']
         path = upload.get('path', '')
         filename = path.split('/')[-1].split('\\')[-1] if path else 'file'
         summary_parts.append(f"Uploaded '{filename}'")
+
+    # Handle custom 'upload_resume' action
+    elif 'upload_resume' in action_data:
+        upload = action_data['upload_resume']
+        path = upload.get('path', '')
+        filename = path.split('/')[-1].split('\\')[-1] if path else 'resume'
+        summary_parts.append(f"Uploaded resume '{filename}'")
+
+    # Handle scan/diagnostic actions
+    elif 'scan_form_fields' in action_data:
+        summary_parts.append("Scanned form fields")
+
+    elif 'check_page_state' in action_data:
+        summary_parts.append("Checked page diagnostics")
+
+    elif 'smart_fill' in action_data:
+        summary_parts.append("Ran smart field fill")
     
     # Handle 'wait' action
     elif 'wait' in action_data:
@@ -273,7 +304,13 @@ def infer_action_type(action: Any) -> str:
         'navigate': 'navigate',
         'scroll': 'scroll',
         'select_dropdown': 'select',
+        'fill_dropdown': 'select',
+        'check_checkbox': 'click',
         'upload_file': 'upload',
+        'upload_resume': 'upload',
+        'scan_form_fields': 'extract',
+        'check_page_state': 'extract',
+        'smart_fill': 'input',
         'extract_content': 'extract',
         'wait': 'wait',
         'done': 'done',

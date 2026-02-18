@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -16,19 +17,23 @@ from browser_use import Agent, Browser, BrowserProfile, ChatOpenAI
 
 class AutoFillingAgent(Agent):
     """
-    Agent that automatically runs heuristics to fill forms before capturing state.
-    This ensures the LLM sees filled forms and saves tokens.
+    Agent with pause/stop support and context-level stagnation warnings.
     """
     # Slot for pause/stop events, db_queue, job_id
     pause_event: Optional[asyncio.Event] = None
     stop_event: Optional[asyncio.Event] = None
     db_queue: Any = None
     job_id: str = ""
+    _loop_stop_reason: Optional[str] = None
+    _last_context_url: Optional[str] = None
+    _url_unchanged_count: int = 0
     
     async def _prepare_context(self, step_info=None):
         # Stop check
         if self.stop_event and self.stop_event.is_set():
-             raise asyncio.CancelledError("Agent execution stopped by user")
+             self.state.stopped = True
+             reason = self._loop_stop_reason or "Agent execution stopped by user"
+             raise InterruptedError(reason)
 
         # Human-in-the-loop Pause
         if self.pause_event and not self.pause_event.is_set():
@@ -47,26 +52,26 @@ class AutoFillingAgent(Agent):
                      )
                  except: pass
 
-        # Programmatic fill before state capture
-        if hasattr(self.tools, 'smart_fill'):
-             try:
-                 res = await self.tools.smart_fill()
-                 # Only log if fields were actually filled (result has content after colon)
-                 if "Smart filled fields" in res and not res.endswith(": "):
-                      print(f"⚡ {res}")
-                      if self.db_queue and self.job_id:
-                          try:
-                              self.db_queue.add_step(
-                                  job_id=self.job_id,
-                                  step_number=getattr(self, 'last_step_num', 0) + 1,
-                                  action_type="smart_fill",
-                                  element_description=res,
-                                  result="success",
-                                  step_memory="Programmatic auto-fill executed successfully columns."
-                              )
-                          except: pass
-             except Exception as e:
-                 print(f"Warning: Auto-fill error: {e}")
+        current_url = ""
+        try:
+             current_url = await self.browser_session.get_current_page_url()
+        except Exception:
+             current_url = ""
+
+        if current_url and current_url == self._last_context_url:
+             self._url_unchanged_count += 1
+        else:
+             self._last_context_url = current_url
+             self._url_unchanged_count = 1 if current_url else 0
+
+        if self._url_unchanged_count >= 4 and self.state.last_model_output:
+             warning = (
+                 f"WARNING: Page has not changed for {self._url_unchanged_count} steps. "
+                 "Your actions may not be having effect. Call check_page_state to diagnose."
+             )
+             memory = self.state.last_model_output.memory or ""
+             if warning not in memory:
+                 self.state.last_model_output.memory = f"{memory}\n{warning}".strip()
         
         return await super()._prepare_context(step_info)
 
@@ -217,11 +222,19 @@ class JobApplyAgent:
             if path.exists():
                 return str(path.resolve())
         return None
+
+    @staticmethod
+    def _artifact_folder_name(job_id: str, job_seq_id: Optional[int] = None) -> str:
+        """Build deterministic artifact folder name."""
+        if job_seq_id is not None:
+            return f"job-{int(job_seq_id):05d}"
+        return job_id
     
     async def apply(
         self,
         job_url: str,
         job_id: str,
+        job_seq_id: Optional[int] = None,
         job_title: Optional[str] = None,
         job_company: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -241,9 +254,22 @@ class JobApplyAgent:
         profile = self.load_profile()
         resume_path = self.get_resume_path()
         
-        # Create job-specific artifacts directory
-        job_artifacts = self.artifacts_dir / job_id
+        # Create job-specific artifacts directory (numbered by seq_id when available)
+        artifact_folder = self._artifact_folder_name(job_id=job_id, job_seq_id=job_seq_id)
+        job_artifacts = self.artifacts_dir / artifact_folder
         job_artifacts.mkdir(parents=True, exist_ok=True)
+        (job_artifacts / "job_meta.json").write_text(
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "job_seq_id": job_seq_id,
+                    "job_url": job_url,
+                    "artifact_folder": artifact_folder,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         
         # Build the task prompt
         task = build_application_task(profile, job_url, job_title, job_company)
@@ -270,7 +296,10 @@ class JobApplyAgent:
         if resume_path:
             available_files.append(resume_path)
         
+        trace_file = None
+        
         try:
+            trace_file = (job_artifacts / "trace.jsonl").open("a", encoding="utf-8")
             from .element_handlers import create_job_applier_controller
             
             # Create extended controller with custom actions for dropdowns and uploads
@@ -282,39 +311,107 @@ class JobApplyAgent:
             from .step_tracker import extract_action_summary, infer_action_type
             
             last_step_id = None
+            last_step_number = None
+            action_fingerprints: list[tuple[str, str, str]] = []
+            stagnation_reason: Optional[str] = None
+
+            def normalize_text(value: str) -> str:
+                return " ".join(str(value or "").lower().split())
+
+            def append_trace(payload: Dict[str, Any]) -> None:
+                if not trace_file:
+                    return
+                try:
+                    trace_file.write(json.dumps(payload, default=str) + "\n")
+                    trace_file.flush()
+                except Exception as trace_exc:
+                    print(f"Warning: Failed to write trace: {trace_exc}")
             
             async def on_step(state, output, step_num):
-                nonlocal last_step_id
+                nonlocal last_step_id, last_step_number, stagnation_reason
                 
                 # Update previous running step if exists
-                if last_step_id and self.db_queue and agent.state.last_result:
+                if agent.state.last_result and last_step_number is not None:
                     try:
                         last_res = agent.state.last_result[-1]
                         res_status = "failed" if (last_res.error) else "success"
-                        self.db_queue.update_step(
-                            step_id=last_step_id, 
-                            result=res_status, 
-                            error_message=last_res.error
-                        )
+                        if last_step_id and self.db_queue:
+                            self.db_queue.update_step(
+                                step_id=last_step_id, 
+                                result=res_status, 
+                                error_message=last_res.error
+                            )
+                        append_trace({
+                            "step": last_step_number,
+                            "ts": datetime.utcnow().isoformat(),
+                            "update": True,
+                            "result": res_status,
+                            "error": last_res.error,
+                        })
                     except Exception as e:
                         print(f"Warning: Failed to update step {last_step_id}: {e}")
 
-                # Create new running step
-                if self.db_queue:
-                    try:
-                        descriptions = []
-                        action_types = []
-                        for action in output.action:
-                            desc = extract_action_summary(action)
-                            descriptions.append(desc)
-                            action_types.append(infer_action_type(action))
-                        
-                        description = "; ".join(descriptions)
-                        action_type = action_types[0] if action_types else "unknown"
-                        
-                        # Safe extraction of diagnostics
-                        out_dict = output.model_dump() if hasattr(output, 'model_dump') else {}
+                try:
+                    descriptions = []
+                    action_types = []
+                    for action in output.action:
+                        desc = extract_action_summary(action)
+                        descriptions.append(desc)
+                        action_types.append(infer_action_type(action))
+                    
+                    description = "; ".join(descriptions)
+                    action_type = action_types[0] if action_types else "unknown"
+                    page_url = state.url or ""
+                    
+                    # Safe extraction of diagnostics
+                    out_dict = output.model_dump() if hasattr(output, 'model_dump') else {}
+                    memory_text = out_dict.get('memory') or ""
 
+                    fingerprint = (action_type, normalize_text(description), page_url)
+                    action_fingerprints.append(fingerprint)
+                    agent._action_fingerprints = action_fingerprints
+                    loop_count = sum(1 for item in action_fingerprints[-7:] if item == fingerprint)
+
+                    if loop_count >= 3:
+                        loop_warning = (
+                            "WARNING: You are stuck in a loop. Same action on same element repeated 3+ times. "
+                            "Try a different action (fill_dropdown/check_checkbox), or call check_page_state."
+                        )
+                        if loop_warning not in memory_text:
+                            memory_text = f"{memory_text}\n{loop_warning}".strip()
+                            if hasattr(output, 'memory'):
+                                output.memory = memory_text
+
+                    if loop_count >= 5 and not stagnation_reason:
+                        stagnation_reason = (
+                            f"Stagnation: action '{action_type}' on '{description}' repeated {loop_count} times "
+                            "without page change."
+                        )
+                        agent._loop_stop_reason = stagnation_reason
+                        if agent.stop_event:
+                            agent.stop_event.set()
+                        agent.state.stopped = True
+
+                    append_trace({
+                        "step": step_num,
+                        "ts": datetime.utcnow().isoformat(),
+                        "url": page_url,
+                        "action_type": action_type,
+                        "element_desc": description,
+                        "llm_output": out_dict,
+                        "result": "running",
+                        "error": None,
+                        "loop_count": loop_count,
+                    })
+                    if stagnation_reason and loop_count >= 5:
+                        append_trace({
+                            "step": step_num,
+                            "ts": datetime.utcnow().isoformat(),
+                            "event": "stagnation_stop",
+                            "reason": stagnation_reason,
+                        })
+
+                    if self.db_queue:
                         new_step = self.db_queue.add_step(
                             job_id=job_id,
                             step_number=step_num,
@@ -323,17 +420,18 @@ class JobApplyAgent:
                             element_selector=None,
                             input_value=None,
                             result="running",
-                            page_url=state.url,
-                            step_memory=out_dict.get('memory'),
+                            page_url=page_url,
+                            step_memory=memory_text,
                             next_goal=out_dict.get('next_goal'),
                             evaluation=out_dict.get('evaluation_previous_goal'),
                         )
                         last_step_id = new_step.id
-                        # Update shared step count for AutoFillingAgent
-                        if hasattr(agent, 'last_step_num'):
-                             agent.last_step_num = step_num
-                    except Exception as e:
-                        print(f"Warning: Failed to log step {step_num}: {e}")
+                    last_step_number = step_num
+                    # Update shared step count for AutoFillingAgent
+                    if hasattr(agent, 'last_step_num'):
+                         agent.last_step_num = step_num
+                except Exception as e:
+                    print(f"Warning: Failed to log step {step_num}: {e}")
 
             # ============================================================
             # Use initial_actions for programmatic navigation BEFORE LLM
@@ -390,12 +488,16 @@ class JobApplyAgent:
             
             # Inject pause event and logging context
             agent.pause_event = self.pause_event
+            agent.stop_event = asyncio.Event()
             agent.db_queue = self.db_queue
             agent.job_id = job_id
             # Track step number for AutoFillingAgent to usage
             agent.last_step_num = 0
+            agent._action_fingerprints = action_fingerprints
+            agent._loop_stop_reason = None
 
             history = await agent.run(max_steps=self.max_steps)
+            stagnation_reason = stagnation_reason or getattr(agent, "_loop_stop_reason", None)
             
             # Update final step status after run completes
             if last_step_id and self.db_queue:
@@ -408,8 +510,18 @@ class JobApplyAgent:
                          if last_result_item.error:
                              last_status = "failed"
                              last_error = last_result_item.error
+                    if stagnation_reason:
+                        last_status = "failed"
+                        last_error = stagnation_reason
                     
                     self.db_queue.update_step(last_step_id, result=last_status, error_message=last_error)
+                    append_trace({
+                        "step": last_step_number,
+                        "ts": datetime.utcnow().isoformat(),
+                        "update": True,
+                        "result": last_status,
+                        "error": last_error,
+                    })
                 except Exception as e:
                     print(f"Warning: Failed to update final step: {e}")
             
@@ -450,11 +562,27 @@ class JobApplyAgent:
                 "errors": [str(e) for e in errors] if errors else [],
                 "steps": len(history.history),
                 "steps_summary": steps_summary,
+                "stagnation_reason": stagnation_reason,
                 "screenshot": display_screenshot
             }
             (job_artifacts / "result.json").write_text(
                 json.dumps(result_data, indent=2), encoding="utf-8"
             )
+
+            if stagnation_reason:
+                append_trace({
+                    "step": last_step_number,
+                    "ts": datetime.utcnow().isoformat(),
+                    "event": "final_stagnation",
+                    "reason": stagnation_reason,
+                })
+                return {
+                    "status": "needs_review",
+                    "message": stagnation_reason,
+                    "error": "",
+                    "intervention_reason": stagnation_reason,
+                    "screenshot_path": display_screenshot,
+                }
             
             # Determine status based on result
             if final_result:
@@ -516,6 +644,18 @@ class JobApplyAgent:
             }
             
         except Exception as e:
+            if trace_file:
+                try:
+                    trace_file.write(
+                        json.dumps({
+                            "ts": datetime.utcnow().isoformat(),
+                            "event": "agent_exception",
+                            "error": str(e),
+                        }) + "\n"
+                    )
+                    trace_file.flush()
+                except Exception:
+                    pass
             return {
                 "status": "failed",
                 "message": f"Agent error: {str(e)}",
@@ -524,6 +664,11 @@ class JobApplyAgent:
                 "screenshot_path": None,
             }
         finally:
+            if trace_file:
+                try:
+                    trace_file.close()
+                except Exception:
+                    pass
             try:
                 await browser.close()
             except Exception:
@@ -533,8 +678,9 @@ class JobApplyAgent:
         self,
         job_url: str,
         job_id: str,
+        job_seq_id: Optional[int] = None,
         job_title: Optional[str] = None,
         job_company: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Synchronous wrapper for apply()."""
-        return asyncio.run(self.apply(job_url, job_id, job_title, job_company))
+        return asyncio.run(self.apply(job_url, job_id, job_seq_id, job_title, job_company))

@@ -184,10 +184,10 @@ Increase context in LM Studio or reduce `JOB_APPLIER_MAX_HISTORY`.
 The system uses browser-use's built-in `select_dropdown` action. If issues persist, check if the dropdown is a standard `<select>` element or a custom component.
 
 ### Steps showing as "unknown" in dashboard
-Ensure the step tracker is parsing actions correctly. Check `artifacts/<job-id>/result.json` for raw action data.
+Ensure the step tracker is parsing actions correctly. Check `artifacts/job-<seq_id>/result.json` (or legacy `artifacts/<job-id>/result.json`) for raw action data.
 
 ### Application marked "applied" but wasn't
-Check `artifacts/<job-id>/result.json` for the actual agent output. The result includes the agent's final message.
+Check `artifacts/job-<seq_id>/result.json` (or legacy `artifacts/<job-id>/result.json`) for the actual agent output. The result includes the agent's final message.
 
 ## Development
 

@@ -32,8 +32,7 @@ Apply for job: {job_url}
 
 ## ACTION SEQUENCE (FOLLOW THIS ORDER!)
 1. **Click Apply** → Find "Apply", "Apply Now" button (page is already loaded)
-2. **SMART FILL** → Call `smart_fill` tool IMMEDIATELY to heuristic fill Name, Email, Phone, etc.
-   - This saves steps. If fields are filled, move on.
+2. **Initial Form Pass** → Optionally call `smart_fill` for standard text fields, then call `scan_form_fields` to see remaining empty fields.
 3. **Handle Login** → If login required:
    - Try credentials first (email + password MUST match)
    - If create account: use SAME password in both "password" and "confirm password" fields
@@ -45,16 +44,24 @@ Apply for job: {job_url}
    - WAIT 3 seconds for auto-fill to complete
 4. **Check Pre-filled Fields** → After resume upload:
    - Many fields are now pre-filled from resume parsing
-   - Only fill fields that are EMPTY
+   - Call `scan_form_fields` again and only fill fields that are EMPTY
 5. **Fill Remaining Forms** → For empty fields only:
-   - Use `select_dropdown` action for Country, State, Company dropdowns
+   - Use `select_dropdown` for standard `<select>` dropdowns
+   - Use `fill_dropdown` for custom/dynamic dropdowns (combobox, autocomplete, type-ahead)
+   - Use `check_checkbox` for checkboxes (do not rely on repeated click)
    - For password fields: ALWAYS use the exact same value for both password and confirm
 6. **Submit** → Click final Submit button
 7. **Verify Success** → Look for "Application Submitted" or "Thank you" message
 
 ## FORM HANDLING TOOLS
-- **Dropdowns (<select>)**: Use `select_dropdown` action with the option text.
-- **File Uploads**: Use `upload_file` action for resume/CV uploads.
+- **Standard `<select>` dropdowns**: Use `select_dropdown`.
+- **Custom/dynamic dropdowns** (autocomplete, combobox, type-ahead): Use `fill_dropdown`. NEVER use `select_dropdown` on custom React/Vue dropdowns.
+- **Checkboxes**: Use `check_checkbox` (more reliable than direct clicking).
+- **Consent checkboxes**: First click "Read More" / scroll terms to bottom, THEN use `check_checkbox`.
+- **File uploads**: Use `upload_resume` for resume/CV uploads.
+- **Form overview**: Use `scan_form_fields` to see all fields, types, and current values.
+- **Diagnostics**: Use `check_page_state` when stuck or if the page does not progress.
+- **Bulk text fill**: Use `smart_fill` for standard Name/Email/Phone style fields.
 - **Password + Confirm**: Use IDENTICAL values. Copy the password exactly to confirm field.
 
 ## PASSWORD HANDLING (CRITICAL)
@@ -65,6 +72,7 @@ When creating an account:
 
 ## TROUBLESHOOTING
 - **Hidden Errors**: If the page doesn't change after clicking "Next/Submit", **SCROLL TO TOP**. Errors are often hidden there.
+- **Anti-Loop Rule**: If an action fails twice on the same element, STOP repeating it. Switch action type, target a different element, or call `check_page_state`.
 - **Sign In / Button Loops**:
   - **Click Button, Not Container**: The agent often tries to click the whole "Sign In" card. You MUST click the specific `<button>` or text "Sign In".
   - **Verify Navigation**: If the page URL doesn't change after clicking, you clicked the wrong thing. Try a different index.
@@ -77,13 +85,16 @@ When creating an account:
 
 ## STOPPING CONDITIONS
 - **SUCCESS**: See "Application Submitted" / "Thank you for applying" message ONLY
-- **Premature Done**: Do NOT stop just because you uploaded a resume. You MUST complete the form. Do NOT use `done` action until "Application Submitted".
+- **Premature Done**: NEVER call `done` after uploading resume or filling fields. That is NOT completion.
+- **Completion Rule**: ONLY call `done` with success after visible confirmation is on the CURRENT PAGE.
+- **Unable To Proceed**: If you cannot complete the application, call `done` with a clear explanation so the system marks `needs_review`.
 - **NEEDS_REVIEW**: CAPTCHA, 2FA, unknown questions, errors persisting after retry
 - **FAILED**: Page won't load, unrecoverable errors
 
 ## EFFICIENCY REMINDERS
 - Page is ALREADY LOADED - don't navigate again
-- Upload resume FIRST to leverage auto-fill
+- Use `scan_form_fields` to understand the form before filling
+- Use `fill_dropdown` for any dropdown that is not a standard `<select>`
 - Skip fields that are already populated
 - Do NOT repeat yourself in thinking
 - Fill multiple fields per step when possible

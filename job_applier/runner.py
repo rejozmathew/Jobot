@@ -109,6 +109,7 @@ class JobRunner:
             result = await agent.apply(
                 job_url=job.url,
                 job_id=job.id,
+                job_seq_id=job.seq_id,
                 job_title=job.title,
                 job_company=job.company,
             )
@@ -131,6 +132,7 @@ class JobRunner:
             )
             return {
                 "job_id": job.id,
+                "job_seq_id": job.seq_id,
                 "url": job.url,
                 "status": new_status.value,
                 "message": result.get("message", ""),
@@ -166,6 +168,7 @@ class JobRunner:
 
         self._running = True
         self._current_job = job
+        self._current_task = asyncio.current_task()
 
         try:
             agent = self._create_agent()
@@ -173,6 +176,7 @@ class JobRunner:
             result = await agent.apply(
                 job_url=job.url,
                 job_id=job.id,
+                job_seq_id=job.seq_id,
                 job_title=job.title,
                 job_company=job.company,
             )
@@ -196,6 +200,7 @@ class JobRunner:
 
             return {
                 "job_id": job.id,
+                "job_seq_id": job.seq_id,
                 "url": job.url,
                 "status": new_status.value,
                 "message": result.get("message", ""),
@@ -203,6 +208,10 @@ class JobRunner:
                 "intervention_reason": result.get("intervention_reason"),
             }
 
+        except asyncio.CancelledError:
+            print("⚠️ Task cancelled.")
+            self.queue.update_status(job.id, JobStatus.FAILED, error="Stopped by user")
+            return {"status": "stopped"}
         except Exception as e:
             # Mark job as failed
             self.queue.update_status(
@@ -212,6 +221,7 @@ class JobRunner:
             )
             return {
                 "job_id": job.id,
+                "job_seq_id": job.seq_id,
                 "url": job.url,
                 "status": "failed",
                 "error": str(e),
@@ -220,6 +230,7 @@ class JobRunner:
             self._running = False
             self._current_job = None
             self._current_agent = None
+            self._current_task = None
 
     def run_one_sync(self) -> Optional[Dict[str, Any]]:
         """Synchronous wrapper for run_one()."""
