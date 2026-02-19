@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, List
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum as SQLEnum
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum as SQLEnum, text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
 from sqlalchemy.pool import StaticPool
 
@@ -125,6 +125,7 @@ class ApplicationStep(Base):
     
     # Diagnostics
     step_memory = Column(Text, nullable=True)
+    llm_thinking = Column(Text, nullable=True)
     next_goal = Column(Text, nullable=True)
     evaluation = Column(Text, nullable=True)
     
@@ -150,6 +151,7 @@ class ApplicationStep(Base):
             "page_url": self.page_url,
             "page_title": self.page_title,
             "step_memory": self.step_memory,
+            "llm_thinking": self.llm_thinking,
             "next_goal": self.next_goal,
             "evaluation": self.evaluation,
         }
@@ -250,6 +252,12 @@ class DatabaseManager:
     def init_db(self) -> None:
         """Create all tables if they don't exist."""
         Base.metadata.create_all(bind=self.engine)
+        # Lightweight SQLite migration for older databases.
+        with self.engine.begin() as conn:
+            cols = conn.execute(text("PRAGMA table_info(application_steps)")).fetchall()
+            col_names = {str(row[1]) for row in cols}
+            if "llm_thinking" not in col_names:
+                conn.execute(text("ALTER TABLE application_steps ADD COLUMN llm_thinking TEXT"))
 
     def get_session(self) -> Session:
         """Get a new database session."""

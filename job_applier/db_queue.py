@@ -332,6 +332,7 @@ class JobQueueDB:
         error_message: Optional[str] = None,
         page_url: Optional[str] = None,
         step_memory: Optional[str] = None,
+        llm_thinking: Optional[str] = None,
         next_goal: Optional[str] = None,
         evaluation: Optional[str] = None,
     ) -> ApplicationStep:
@@ -349,6 +350,7 @@ class JobQueueDB:
                 error_message=error_message,
                 page_url=page_url,
                 step_memory=step_memory,
+                llm_thinking=llm_thinking,
                 next_goal=next_goal,
                 evaluation=evaluation,
                 timestamp=datetime.utcnow(),
