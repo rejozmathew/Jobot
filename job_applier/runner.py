@@ -35,7 +35,7 @@ class JobRunner:
         self.profile_path = profile_path or os.getenv("JOB_APPLIER_PROFILE_PATH", "./profile.json")
         self.artifacts_dir = artifacts_dir or os.getenv("JOB_APPLIER_ARTIFACTS_DIR", "./artifacts")
         self.max_steps = max_steps or int(os.getenv("JOB_APPLIER_MAX_STEPS", "30"))
-        self.max_history_items = max_history_items or int(os.getenv("JOB_APPLIER_MAX_HISTORY", "10"))
+        self.max_history_items = max_history_items or int(os.getenv("JOB_APPLIER_MAX_HISTORY", "7"))
         self.headless = headless
         self._running = False
         self._current_job: Optional[QueuedJob] = None
@@ -253,6 +253,21 @@ class JobRunner:
             # Small delay between jobs to avoid overwhelming
             await asyncio.sleep(1)
         
+        return results
+
+    async def run_selection(self, job_ids: list[str]) -> list[Dict[str, Any]]:
+        """
+        Process a specific list of jobs sequentially.
+
+        Jobs are run one-by-one in the provided order.
+        """
+        results: list[Dict[str, Any]] = []
+        for job_id in job_ids:
+            result = await self.run_specific(job_id)
+            if result is not None:
+                results.append(result)
+            # Small delay between jobs to avoid overwhelming
+            await asyncio.sleep(1)
         return results
 
     def run_all_sync(self) -> list[Dict[str, Any]]:

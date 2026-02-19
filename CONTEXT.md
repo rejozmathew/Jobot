@@ -212,3 +212,41 @@ python run_applier.py serve
 
 Start a new session with:
 > "I'm working on auto-job-applier. Read CONTEXT.md for background. I want to implement [specific enhancement]."
+
+---
+
+## Reliability Fixes (2026-02-19)
+
+### Changelog
+- Instructions now require mandatory page assessment before actioning.
+- Login flow now defaults to Create Account instead of Sign In.
+- Added explicit login-failure stop rules and external SSO stop guidance.
+- Stagnation detection now normalizes element indices in fingerprints (`#1234` -> `#N`).
+- Stagnation thresholds tightened (warning at 2 repeats, hard stop at 3 repeats).
+- Added URL-unchanged stagnation detection when repeated tool errors occur on the same page.
+- `workday_create_account` now detects Sign In vs Create Account and handles external SSO redirect detection.
+- Added `llm_thinking` column in `application_steps` for debug reasoning storage.
+
+## Debugging Failed Applications
+
+### Quick Check
+1. `artifacts/job-NNNNN/result.json` for final status and stagnation reason.
+2. `artifacts/job-NNNNN/recording.gif` for visual replay.
+
+### Deep Analysis
+1. `artifacts/job-NNNNN/trace.jsonl` for per-step model output and loop signals.
+2. Query database:
+   - `SELECT step_number, action_type, element_description, error_message, llm_thinking FROM application_steps WHERE job_id='...' ORDER BY step_number;`
+3. Look for repeated actions, ignored login errors, and same-URL loops.
+
+### Common Failure Patterns
+- Login loops: Sign In attempted without account creation path.
+- Stagnation: repeated action on same effective element or same URL with repeated errors.
+- External SSO redirect: domain changed from job site to corporate auth provider.
+- Consent checkbox block: requires "Read More" / scroll before toggle.
+
+## Known Issues Update
+- Resolved: login loops caused by dynamic element indices bypassing stagnation checks.
+- Resolved: Workday Sign In pages being treated like Create Account pages.
+- Resolved: inability to inspect captured model reasoning separately from UI memory.
+- Remaining: heuristic non-LLM form filling and broader stale-element recovery.

@@ -75,12 +75,22 @@ def extract_action_summary(action: Any) -> str:
         index = sel.get('index', '?')
         summary_parts.append(f"Filled dynamic dropdown #{index} with '{text[:30]}'")
 
-    # Handle custom 'check_checkbox' action
+    # Handle custom 'check_checkbox' action (legacy)
     elif 'check_checkbox' in action_data:
         chk = action_data['check_checkbox']
         index = chk.get('index', '?')
         checked = chk.get('checked', True)
         summary_parts.append(f"Set checkbox #{index} to {checked}")
+
+    # Handle 'toggle_checkbox' action
+    elif 'toggle_checkbox' in action_data:
+        tc = action_data['toggle_checkbox']
+        label = tc.get('label_text', '?')
+        summary_parts.append(f"Toggle checkbox '{label[:40]}'")
+
+    # Handle 'workday_create_account' action
+    elif 'workday_create_account' in action_data:
+        summary_parts.append("Workday Create Account (all-in-one)")
 
     # Handle 'upload_file' action
     elif 'upload_file' in action_data:
@@ -306,6 +316,8 @@ def infer_action_type(action: Any) -> str:
         'select_dropdown': 'select',
         'fill_dropdown': 'select',
         'check_checkbox': 'click',
+        'toggle_checkbox': 'click',
+        'workday_create_account': 'input',
         'upload_file': 'upload',
         'upload_resume': 'upload',
         'scan_form_fields': 'extract',

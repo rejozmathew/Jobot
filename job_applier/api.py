@@ -74,6 +74,11 @@ class RunResponse(BaseModel):
     job: Optional[dict] = None
 
 
+class RunSelectionRequest(BaseModel):
+    """Request to run a specific selection of jobs."""
+    job_ids: List[str]
+
+
 # ----- API Endpoints -----
 
 @app.get("/health")
@@ -248,6 +253,73 @@ async def run_all(background_tasks: BackgroundTasks):
     }
 
 
+@app.post("/run/selection")
+async def run_selection(request: RunSelectionRequest, background_tasks: BackgroundTasks):
+    """Process a selected list of jobs sequentially in the background."""
+    global _background_task_running
+
+    if _runner.is_running or _background_task_running:
+        return {"message": "Already processing jobs", "status": _runner.get_status()}
+
+    requested = [str(job_id or "").strip() for job_id in request.job_ids]
+    requested = [job_id for job_id in requested if job_id]
+    if not requested:
+        raise HTTPException(status_code=400, detail="No job IDs provided")
+
+    # De-duplicate while preserving order.
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for job_id in requested:
+        if job_id in seen:
+            continue
+        seen.add(job_id)
+        deduped.append(job_id)
+
+    eligible_statuses = {JobStatus.QUEUED.value, JobStatus.FAILED.value, JobStatus.NEEDS_REVIEW.value}
+    selected_job_ids: list[str] = []
+    skipped: list[dict] = []
+
+    for job_id in deduped:
+        job = _queue.get(job_id)
+        if not job:
+            skipped.append({"job_id": job_id, "reason": "not_found"})
+            continue
+        if job.status not in eligible_statuses:
+            skipped.append({"job_id": job_id, "reason": f"status_{job.status}"})
+            continue
+        selected_job_ids.append(job_id)
+
+    if not selected_job_ids:
+        return {
+            "message": "No selectable jobs in selection",
+            "selected": len(deduped),
+            "started": 0,
+            "skipped": skipped,
+        }
+
+    _background_task_running = True
+
+    async def process_selected():
+        global _background_task_running
+        try:
+            await _runner.run_selection(selected_job_ids)
+        finally:
+            _background_task_running = False
+
+    background_tasks.add_task(lambda: asyncio.run(process_selected()))
+
+    message = f"Started selected jobs: {len(selected_job_ids)}"
+    if skipped:
+        message += f" ({len(skipped)} skipped)"
+
+    return {
+        "message": message,
+        "selected": len(deduped),
+        "started": len(selected_job_ids),
+        "skipped": skipped,
+    }
+
+
 @app.post("/run/pause")
 def pause_execution():
     """Pause the current job execution."""
@@ -387,6 +459,12 @@ HTML_TEMPLATE = """
             font-size: 1rem;
             font-weight: 600;
             transition: all 0.2s;
+        }
+        .btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
         
         .btn-primary {
@@ -694,6 +772,17 @@ HTML_TEMPLATE = """
             gap: 4px;
             align-items: center;
         }
+        .select-cell {
+            text-align: center;
+        }
+        .select-checkbox {
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+        .select-checkbox:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
         
         /* Queue filters */
         .queue-controls {
@@ -752,6 +841,7 @@ HTML_TEMPLATE = """
                 <button class="btn btn-primary" onclick="addJobs()">Add to Queue</button>
                 <button class="btn btn-success" onclick="runNext()">▶ Run Next</button>
                 <button class="btn btn-success" onclick="runAll()">▶▶ Run All</button>
+                <button id="run-selection-btn" class="btn btn-success" onclick="runSelection()" disabled>▶✓ Run Selection</button>
             </div>
         </div>
         
@@ -798,6 +888,7 @@ HTML_TEMPLATE = """
             </div>
             <div class="table-container">
             <table>
+                <col style="width: 36px;" />
                 <col style="width: 40px;" />
                 <col style="width: 80px;" />
                 <col style="width: 100px;" />
@@ -807,6 +898,7 @@ HTML_TEMPLATE = """
                 <col style="width: 160px;" />
                 <thead>
                     <tr>
+                        <th class="select-cell"><input id="select-all-visible" class="select-checkbox" type="checkbox" title="Select all visible selectable jobs" onclick="toggleSelectAllVisible(this.checked)" /></th>
                         <th></th>
                         <th>Job #</th>
                         <th>Status</th>
@@ -817,7 +909,7 @@ HTML_TEMPLATE = """
                     </tr>
                 </thead>
                 <tbody id="queue-table">
-                    <tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+                    <tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -833,6 +925,57 @@ HTML_TEMPLATE = """
             sortBy: 'updated_at',
             sortDir: 'desc',
         };
+        const selectedJobs = new Set();
+        let currentVisibleSelectableJobIds = [];
+
+        function isJobSelectable(job, isRunnerActive) {
+            return ['queued', 'failed', 'needs_review'].includes(job.status) && !isRunnerActive;
+        }
+
+        function updateSelectionUi(isRunnerActive = false) {
+            const runSelectionBtn = document.getElementById('run-selection-btn');
+            if (runSelectionBtn) {
+                const selectedCount = selectedJobs.size;
+                runSelectionBtn.textContent = selectedCount > 0
+                    ? `▶✓ Run Selection (${selectedCount})`
+                    : '▶✓ Run Selection';
+                runSelectionBtn.disabled = selectedCount === 0 || isRunnerActive;
+            }
+
+            const selectAll = document.getElementById('select-all-visible');
+            if (selectAll) {
+                const totalVisibleSelectable = currentVisibleSelectableJobIds.length;
+                const selectedVisibleCount = currentVisibleSelectableJobIds.filter((jobId) => selectedJobs.has(jobId)).length;
+                selectAll.checked = totalVisibleSelectable > 0 && selectedVisibleCount === totalVisibleSelectable;
+                selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < totalVisibleSelectable;
+                selectAll.disabled = totalVisibleSelectable === 0 || isRunnerActive;
+            }
+        }
+
+        function toggleJobSelection(jobId, checked) {
+            if (checked) {
+                selectedJobs.add(jobId);
+            } else {
+                selectedJobs.delete(jobId);
+            }
+            updateSelectionUi();
+        }
+
+        function toggleSelectAllVisible(checked) {
+            for (const jobId of currentVisibleSelectableJobIds) {
+                if (checked) {
+                    selectedJobs.add(jobId);
+                } else {
+                    selectedJobs.delete(jobId);
+                }
+            }
+            updateSelectionUi();
+            for (const input of document.querySelectorAll('.job-select-input')) {
+                if (!input.disabled) {
+                    input.checked = checked;
+                }
+            }
+        }
         
         function showMessage(text, type = 'success') {
             const el = document.getElementById('message');
@@ -888,6 +1031,23 @@ HTML_TEMPLATE = """
             showMessage('Starting all jobs...', 'success');
             const res = await api('/run/all', { method: 'POST' });
             showMessage(res.message);
+            refreshQueue();
+        }
+
+        async function runSelection() {
+            const jobIds = Array.from(selectedJobs);
+            if (jobIds.length === 0) {
+                showMessage('Select at least one job', 'error');
+                return;
+            }
+
+            showMessage(`Starting selected jobs (${jobIds.length})...`, 'success');
+            const res = await api('/run/selection', {
+                method: 'POST',
+                body: JSON.stringify({ job_ids: jobIds }),
+            });
+            showMessage(res.message || `Started selected jobs (${jobIds.length})`);
+            selectedJobs.clear();
             refreshQueue();
         }
         
@@ -1054,6 +1214,15 @@ HTML_TEMPLATE = """
                 // Update table
                 const tbody = document.getElementById('queue-table');
                 const allJobs = res.jobs || [];
+                const allJobsById = new Map(allJobs.map((job) => [job.id, job]));
+
+                // Drop selections that no longer exist or are no longer selectable.
+                for (const selectedId of Array.from(selectedJobs)) {
+                    const job = allJobsById.get(selectedId);
+                    if (!job || !['queued', 'failed', 'needs_review'].includes(job.status)) {
+                        selectedJobs.delete(selectedId);
+                    }
+                }
                 
                 // Apply search + status filter
                 let jobs = allJobs.slice();
@@ -1117,23 +1286,27 @@ HTML_TEMPLATE = """
                 if (meta) {
                     meta.textContent = `Showing ${jobs.length} of ${allJobs.length}`;
                 }
+
+                currentVisibleSelectableJobIds = jobs
+                    .filter((job) => isJobSelectable(job, res.is_running))
+                    .map((job) => job.id);
+                updateSelectionUi(res.is_running);
                 
                 if (allJobs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">No jobs in queue</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">No jobs in queue</td></tr>';
                     return;
                 }
                 if (jobs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">No matching jobs</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">No matching jobs</td></tr>';
                     return;
                 }
                 
                 tbody.innerHTML = jobs.map(job => {
-                    const retryBtn = ['failed', 'needs_review'].includes(job.status) ? 
-                        `<button class="btn btn-primary btn-small" onclick="event.stopPropagation(); retryJob('${job.id}')">Retry</button>` : '';
-                    
                     const isExpanded = expandedJobs.has(job.id);
                     const expandClass = isExpanded ? 'expanded' : '';
                     const visibleClass = isExpanded ? 'visible' : '';
+                    const canSelect = isJobSelectable(job, res.is_running);
+                    const isSelected = selectedJobs.has(job.id);
                     
                     // Show error/intervention reason if present
                     let errorHtml = '';
@@ -1149,6 +1322,15 @@ HTML_TEMPLATE = """
                     
                     return `
                         <tr class="job-row" onclick="toggleDetails('${job.id}')">
+                            <td class="select-cell">
+                                <input
+                                    class="select-checkbox job-select-input"
+                                    type="checkbox"
+                                    ${isSelected ? 'checked' : ''}
+                                    ${canSelect ? '' : 'disabled'}
+                                    onclick="event.stopPropagation(); toggleJobSelection('${job.id}', this.checked)"
+                                />
+                            </td>
                             <td class="expand-cell">
                                 <button class="expand-btn ${expandClass}" id="expand-btn-${job.id}" onclick="event.stopPropagation(); toggleDetails('${job.id}')">+</button>
                             </td>
@@ -1177,7 +1359,7 @@ HTML_TEMPLATE = """
                             </td>
                         </tr>
                         <tr class="detail-row ${visibleClass}" id="detail-row-${job.id}">
-                            <td colspan="7" class="detail-cell">
+                            <td colspan="8" class="detail-cell">
                                 ${errorHtml}
                                 <strong>📋 Application Steps:</strong>
                                 <div id="steps-${job.id}">
@@ -1196,7 +1378,7 @@ HTML_TEMPLATE = """
                 console.error('Failed to refresh queue:', e);
                 const tbody = document.getElementById('queue-table');
                 if (tbody) {
-                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--error);">Error loading data: ${e.message}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--error);">Error loading data: ${e.message}</td></tr>`;
                 }
             }
         }
