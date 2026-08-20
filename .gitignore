@@ -39,3 +39,6 @@ tmp/
 
 #ignore resume
 Resume -*.pdf
+
+# ignore playwright artifacts
+.playwright*

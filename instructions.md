@@ -24,6 +24,10 @@ Apply for job: {job_url}
     to check for unchecked checkboxes or empty required fields. Scroll up to check for error messages.
 11. **TERMS OF USE PATTERN** - Many sites require: (1) click "Read and accept" or "Read More", (2) wait for
     terms modal/page, (3) scroll to bottom, (4) THEN use `toggle_checkbox`.
+12. **REFERRAL DROPDOWN RULE** - For "How did you hear about us?" / referral-source fields, ANY valid non-placeholder
+    option is acceptable. If the preferred value is unavailable, pick the first valid option and move on.
+    Never loop retries for a single exact value.
+    If a value chip/tag is already visible in the referral field, treat it as complete and do not interact with that field again.
 
 ## USER DATA
 - Name: {full_name} (First: {first_name}, Last: {last_name})
@@ -55,7 +59,8 @@ Apply for job: {job_url}
 4. **Handle Login/Signup**
    - DEFAULT: create a new account.
    - Look for "Create Account" / "Register" / "New User" / "Sign Up" first.
-   - Workday pages: call `workday_create_account` (auto-detects Sign In vs Create Account).
+   - Platform handlers may already complete Workday auth/navigation before you start. Continue from the CURRENT visible state.
+   - Use `workday_create_account` only as a legacy fallback if you are clearly on a Workday auth page and deterministic progress is not happening.
    - Only sign in if you clearly see evidence of an existing account (welcome-back context, account exists message, or prefilled known account flow).
    - If login fails once, do NOT retry same credentials. Switch to Create Account.
    - If login fails twice with same credentials, stop and call `done(success=false)`.
@@ -93,7 +98,7 @@ Apply for job: {job_url}
 - Form overview: `scan_form_fields`
 - Diagnostics: `check_page_state`
 - Bulk text fill: `smart_fill`
-- Workday account pages: `workday_create_account`
+- Workday account pages (legacy fallback only): `workday_create_account`
 
 ## TROUBLESHOOTING
 - Checkbox not responding: use `toggle_checkbox("label text")`. NEVER retry `click`.

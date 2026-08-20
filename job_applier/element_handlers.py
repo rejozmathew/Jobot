@@ -13,17 +13,20 @@ first" on iframe-heavy ATS sites (Workday, iCIMS, Greenhouse).
 # Note: Do NOT use "from __future__ import annotations" here
 # as it breaks browser-use registry type validation.
 
+import asyncio
 import json
 import logging
 import os
 import re
+from urllib.parse import unquote
 from typing import Any, Optional
 
 from browser_use.agent.views import ActionResult
 from browser_use.browser import BrowserSession
 from browser_use.filesystem.file_system import FileSystem
 from browser_use.tools.service import Tools
-from browser_use.tools.views import DoneAction, InputTextAction, UploadFileAction
+from browser_use.tools.views import DoneAction, InputTextAction, NavigateAction, UploadFileAction
+from .platform_handlers import HandlerResult, run_workday_legacy_create_account
 
 CONFIRMATION_PHRASES = (
     "application submitted",
@@ -47,6 +50,23 @@ CAPTCHA_PHRASES = (
 
 EMAIL_BASIC_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 EMAIL_TRAILING_ARTIFACT_RE = re.compile(r"[}\]\"'`)\s]+$")
+URL_TRAILING_ARTIFACT_RE = re.compile(
+    r"(?i)(?:%27|%22|'|\")?(?:%7d|}){2}(?:%5d|\])(?:%20|\s)*(?:%7d|}){0,6}(?:%20|\s)*$"
+)
+INPUT_JSON_SPLIT_PATTERNS = (
+    re.compile(r"\}\}\s*,\s*\{"),  # e.g. "value}}, {"
+    re.compile(r"\}\}\]\}\}"),  # e.g. "value'}}]}}]}"
+    re.compile(r"\}\}\]\}"),  # e.g. "value'}}]}"
+    re.compile(r"\}\}\]"),  # e.g. "value'}}]"
+)
+INPUT_HARD_CUT_MARKERS = (
+    "<tool_call",
+    "<|im_start|>",
+    "<|im_end|>",
+    "files_to_display",
+    '"done":',
+    "```",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +105,7 @@ class JobApplierTools(Tools):
         action_map = self.registry.registry.actions
         base_upload_meta = action_map.get("upload_file")
         base_input_meta = action_map.get("input")
+        base_navigate_meta = action_map.get("navigate")
 
         @self.registry.action("Scan all form fields and report current values, empty required fields, and checkbox states.")
         async def scan_form_fields(browser_session: BrowserSession):
@@ -129,7 +150,15 @@ class JobApplierTools(Tools):
                 has_sensitive_data: bool = False,
                 sensitive_data: dict[str, str | dict[str, str]] | None = None,
             ):
-                cleaned_text, changed = self._sanitize_email_input_text(params.text)
+                cleaned_text, changed, sanitize_note = self._sanitize_input_text(params.text)
+                email_cleaned, email_changed = self._sanitize_email_input_text(cleaned_text)
+                if email_changed:
+                    cleaned_text = email_cleaned
+                    changed = True
+                    if sanitize_note:
+                        sanitize_note = f"{sanitize_note}; trimmed email artifact suffix"
+                    else:
+                        sanitize_note = "Trimmed email artifact suffix"
                 effective_params = params
                 if changed:
                     effective_params = InputTextAction(index=params.index, text=cleaned_text, clear=params.clear)
@@ -145,7 +174,34 @@ class JobApplierTools(Tools):
                     return ActionResult(error=f"input failed: {exc}")
 
                 if changed and isinstance(result, ActionResult):
-                    note = "Sanitized trailing JSON artifact characters from email before input."
+                    note = sanitize_note or "Sanitized malformed LLM artifact text before input."
+                    if result.extracted_content:
+                        result.extracted_content = f"{result.extracted_content}\n{note}"
+                    else:
+                        result.extracted_content = note
+                return result
+
+        if base_navigate_meta is not None:
+            @self.registry.action("Navigate to URL in same/new tab.", param_model=NavigateAction)
+            async def navigate(
+                params: NavigateAction,
+                browser_session: BrowserSession,
+            ):
+                cleaned_url, changed, sanitize_note = self._sanitize_navigate_url(params.url)
+                effective_params = params
+                if changed:
+                    effective_params = NavigateAction(url=cleaned_url, new_tab=params.new_tab)
+
+                try:
+                    result = await base_navigate_meta.function(
+                        params=effective_params,
+                        browser_session=browser_session,
+                    )
+                except Exception as exc:
+                    return ActionResult(error=f"navigate failed: {exc}")
+
+                if changed and isinstance(result, ActionResult):
+                    note = sanitize_note or "Sanitized malformed URL artifact before navigate."
                     if result.extracted_content:
                         result.extracted_content = f"{result.extracted_content}\n{note}"
                     else:
@@ -160,37 +216,60 @@ class JobApplierTools(Tools):
                 available_file_paths: list[str],
                 file_system: FileSystem,
             ):
+                resolved_path, resolve_note = self._resolve_upload_path(
+                    requested_path=params.path,
+                    available_file_paths=available_file_paths,
+                )
+                effective_params = params
+                effective_available_paths = list(available_file_paths or [])
+                if resolved_path and resolved_path != params.path:
+                    effective_params = UploadFileAction(index=params.index, path=resolved_path)
+                    if resolved_path not in effective_available_paths:
+                        effective_available_paths.append(resolved_path)
+
                 base_result: Any = None
                 base_error = ""
                 try:
                     base_result = await base_upload_meta.function(
-                        params=params,
+                        params=effective_params,
                         browser_session=browser_session,
-                        available_file_paths=available_file_paths,
+                        available_file_paths=effective_available_paths,
                         file_system=file_system,
                     )
                     base_error = str(getattr(base_result, "error", "") or "")
                 except Exception as exc:
                     base_error = str(exc or "")
 
-                if base_error and not self._is_no_file_upload_error(base_error):
+                if base_error and not self._is_recoverable_upload_error(base_error):
                     if isinstance(base_result, ActionResult):
                         return base_result
                     return ActionResult(error=base_error)
 
                 if not base_error:
                     if isinstance(base_result, ActionResult):
-                        confirmation = await self._wait_for_upload_processing(browser_session, params.path)
+                        confirmation = await self._wait_for_upload_processing(browser_session, effective_params.path)
                         self._append_upload_followup_hint(base_result, confirmation)
+                        if resolve_note:
+                            note = f"Resolved upload path to '{effective_params.path}' ({resolve_note})."
+                            if base_result.extracted_content:
+                                base_result.extracted_content = f"{base_result.extracted_content}\n{note}"
+                            else:
+                                base_result.extracted_content = note
                     return base_result
 
                 fallback_result = await self._upload_file_via_cdp_fallback(
-                    file_path=params.path,
+                    file_path=effective_params.path,
                     browser_session=browser_session,
                 )
                 if fallback_result and not fallback_result.error:
-                    confirmation = await self._wait_for_upload_processing(browser_session, params.path)
+                    confirmation = await self._wait_for_upload_processing(browser_session, effective_params.path)
                     self._append_upload_followup_hint(fallback_result, confirmation)
+                    if resolve_note:
+                        note = f"Resolved upload path to '{effective_params.path}' ({resolve_note})."
+                        if fallback_result.extracted_content:
+                            fallback_result.extracted_content = f"{fallback_result.extracted_content}\n{note}"
+                        else:
+                            fallback_result.extracted_content = note
                 return fallback_result
 
         if self.get_output_model() is None:
@@ -199,8 +278,52 @@ class JobApplierTools(Tools):
                 return await self._guarded_done(params=params, browser_session=browser_session, file_system=file_system)
 
     @staticmethod
-    def _is_no_file_upload_error(error_text: str) -> bool:
-        return "No file upload element found" in str(error_text or "")
+    def _is_recoverable_upload_error(error_text: str) -> bool:
+        message = str(error_text or "").lower()
+        return (
+            "no file upload element found" in message
+            or "is not available" in message
+            or "available_file_paths" in message
+        )
+
+    @staticmethod
+    def _sanitize_input_text(value: str) -> tuple[str, bool, str | None]:
+        original = str(value or "")
+        candidate = original.strip()
+        if not candidate:
+            return original, False, None
+
+        changed = False
+        notes: list[str] = []
+        lowered = candidate.lower()
+        cut_positions: list[int] = []
+        for marker in INPUT_HARD_CUT_MARKERS:
+            pos = lowered.find(marker)
+            if pos > 0:
+                cut_positions.append(pos)
+        if cut_positions:
+            candidate = candidate[: min(cut_positions)].rstrip()
+            changed = True
+            notes.append("truncated tool-call artifact suffix")
+
+        for pattern in INPUT_JSON_SPLIT_PATTERNS:
+            match = pattern.search(candidate)
+            if match and match.start() > 0:
+                candidate = candidate[: match.start()].rstrip(" \t\r\n'\"`")
+                changed = True
+                notes.append("trimmed JSON tail artifact")
+                break
+
+        trailing_cleaned = re.sub(r"(?:\s*['\"`])?\s*[}\]]{2,}\s*$", "", candidate).rstrip(" \t\r\n'\"`")
+        if trailing_cleaned and trailing_cleaned != candidate:
+            candidate = trailing_cleaned
+            changed = True
+            notes.append("removed trailing bracket artifact")
+
+        if not changed or not candidate:
+            return original, False, None
+        note = "; ".join(dict.fromkeys(notes)) if notes else "sanitized input text"
+        return candidate, True, note
 
     @staticmethod
     def _sanitize_email_input_text(value: str) -> tuple[str, bool]:
@@ -214,6 +337,92 @@ class JobApplierTools(Tools):
         if not EMAIL_BASIC_RE.match(stripped):
             return original, False
         return stripped, True
+
+    @staticmethod
+    def _sanitize_navigate_url(value: str) -> tuple[str, bool, str | None]:
+        original = str(value or "").strip()
+        if not original:
+            return original, False, None
+
+        candidate = original
+        changed = False
+        notes: list[str] = []
+
+        text_cleaned, text_changed, text_note = JobApplierTools._sanitize_input_text(candidate)
+        if text_changed and text_cleaned:
+            candidate = text_cleaned
+            changed = True
+            if text_note:
+                notes.append(text_note)
+
+        if candidate.endswith(("%27", "%22", "%60")):
+            candidate = candidate[:-3].rstrip()
+            changed = True
+            notes.append("trimmed trailing encoded quote artifact")
+
+        stripped = URL_TRAILING_ARTIFACT_RE.sub("", candidate).rstrip()
+        if stripped and stripped != candidate:
+            candidate = stripped
+            changed = True
+            notes.append("trimmed trailing encoded JSON artifact")
+
+        decoded = unquote(candidate)
+        lower_candidate = candidate.lower()
+        artifact_markers = ("%27%7d%7d%5d", "%22%7d%7d%5d", "%7d%7d%5d")
+        for marker in artifact_markers:
+            idx = lower_candidate.find(marker)
+            if idx > 0:
+                candidate = candidate[:idx].rstrip()
+                changed = True
+                notes.append("removed encoded artifact suffix")
+                break
+
+        if decoded and "}}" in decoded and not candidate:
+            return original, False, None
+
+        if not candidate.lower().startswith(("http://", "https://")):
+            return original, False, None
+
+        if not changed or candidate == original:
+            return original, False, None
+        note = "; ".join(dict.fromkeys(notes)) if notes else "sanitized navigate URL"
+        return candidate, True, note
+
+    @staticmethod
+    def _resolve_upload_path(requested_path: str, available_file_paths: list[str] | None) -> tuple[str, str | None]:
+        requested = str(requested_path or "").strip()
+        if not requested:
+            return requested, None
+
+        available = [str(path).strip() for path in (available_file_paths or []) if str(path).strip()]
+        requested_norm = os.path.normcase(os.path.normpath(requested))
+        for candidate in available:
+            candidate_norm = os.path.normcase(os.path.normpath(candidate))
+            if candidate_norm == requested_norm:
+                return candidate, None
+
+        requested_abs = os.path.abspath(requested)
+        if os.path.exists(requested_abs):
+            requested_abs_norm = os.path.normcase(os.path.normpath(requested_abs))
+            for candidate in available:
+                candidate_norm = os.path.normcase(os.path.normpath(candidate))
+                if candidate_norm == requested_abs_norm:
+                    return candidate, "matched absolute path from allow-list"
+            return requested_abs, "resolved relative path to absolute"
+
+        requested_basename = os.path.basename(requested_norm)
+        if requested_basename:
+            basename_matches = [
+                candidate
+                for candidate in available
+                if os.path.basename(os.path.normcase(os.path.normpath(candidate))) == requested_basename
+            ]
+            if len(basename_matches) == 1:
+                return basename_matches[0], "matched file by basename from allow-list"
+
+        if available:
+            return requested, f"using requested path; available candidates={len(available)}"
+        return requested, None
 
     @staticmethod
     def _append_upload_followup_hint(result: ActionResult, confirmation_note: str | None = None) -> None:
@@ -240,7 +449,7 @@ class JobApplierTools(Tools):
         try:
             page = await browser_session.get_current_page()
             if page is not None:
-                await page.wait_for_timeout(5000)
+                await asyncio.sleep(5.0)
                 if file_path:
                     filename = os.path.basename(str(file_path))
                     found = await page.evaluate(
@@ -498,9 +707,84 @@ class JobApplierTools(Tools):
         if page is None:
             return ActionResult(error="toggle_checkbox: no active page")
 
+        requested_label = label_text.strip()
+
+        async def read_locator_state(locator) -> Optional[bool]:
+            try:
+                return await locator.is_checked()
+            except Exception:
+                pass
+            try:
+                aria_value = (await locator.get_attribute("aria-checked") or "").strip().lower()
+                if aria_value == "true":
+                    return True
+                if aria_value == "false":
+                    return False
+            except Exception:
+                pass
+            try:
+                state_raw = await locator.evaluate(
+                    """
+                    (el) => {
+                        if (!el) return null;
+                        const aria = (el.getAttribute('aria-checked') || '').toLowerCase();
+                        if (aria === 'true') return true;
+                        if (aria === 'false') return false;
+                        if (typeof el.checked === 'boolean') return !!el.checked;
+                        return null;
+                    }
+                    """
+                )
+                return state_raw if isinstance(state_raw, bool) else None
+            except Exception:
+                return None
+
+        # Fast path: leverage accessibility tree for checkbox controls.
+        # This reliably handles Workday consent checkboxes where generic clicks fail.
+        try:
+            role_pattern = re.compile(re.escape(requested_label), re.IGNORECASE)
+            role_locator = page.get_by_role("checkbox", name=role_pattern)
+            role_count = await role_locator.count()
+            if role_count > 0:
+                target = role_locator.first
+                state_before = await read_locator_state(target)
+                try:
+                    await target.check(timeout=2500, force=True)
+                except Exception:
+                    await target.click(timeout=2500, force=True)
+                await asyncio.sleep(0.1)
+                state_after = await read_locator_state(target)
+                if state_after is True or (state_before is True and state_after is True):
+                    msg = (
+                        "toggle_checkbox: toggled checkbox via role locator "
+                        f"(label~'{_truncate(requested_label, 80)}') "
+                        f"({state_before} -> {state_after}) [VERIFIED]"
+                    )
+                    return ActionResult(extracted_content=msg)
+                if isinstance(state_before, bool) and isinstance(state_after, bool) and state_after != state_before:
+                    msg = (
+                        "toggle_checkbox: toggled checkbox via role locator "
+                        f"(label~'{_truncate(requested_label, 80)}') "
+                        f"({state_before} -> {state_after}) [VERIFIED]"
+                    )
+                    return ActionResult(extracted_content=msg)
+                logger.debug(
+                    "toggle_checkbox role locator unverified: label=%s before=%s after=%s",
+                    requested_label,
+                    state_before,
+                    state_after,
+                )
+        except Exception as exc:
+            logger.debug("toggle_checkbox role locator path failed: %s", exc)
+
+        token_base = f"job-applier-toggle-{os.urandom(6).hex()}"
+
         raw = await page.evaluate(
             """
-            (labelText) => {
+            (params) => {
+                const labelText = String(params?.labelText || '');
+                const tokenBase = String(params?.tokenBase || 'job-applier-toggle');
+
                 const normalize = (s) => (s || '')
                     .toLowerCase()
                     .replace(/&rsquo;|&lsquo;|[\u2018\u2019]/g, "'")
@@ -530,6 +814,10 @@ class JobApplierTools(Tools):
                     if (typeof el.checked === 'boolean') return el.checked;
                     return null;
                 };
+
+                const describeElement = (el) =>
+                    el.tagName + (el.id ? '#' + el.id : '') +
+                    (el.getAttribute('role') ? '[role=' + el.getAttribute('role') + ']' : '');
 
                 // Strategy 1: Find all checkbox-like elements and match by nearby text
                 const checkboxSelectors = [
@@ -652,57 +940,146 @@ class JobApplierTools(Tools):
                     };
                 }
 
-                // Record state before click
                 const stateBefore = getCheckedState(bestMatch);
+                const desc = describeElement(bestMatch);
 
-                // Click the element - use .click() which triggers React/framework handlers
-                bestMatch.click();
-
-                // Also dispatch events for frameworks that need them
-                bestMatch.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
-
-                // For native checkboxes, ensure change event fires
-                if (bestMatch.tagName === 'INPUT' && bestMatch.type === 'checkbox') {
-                    bestMatch.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-
-                // Check state after click
-                const stateAfter = getCheckedState(bestMatch);
-
-                // If state didn't change, try alternative: toggle via property for native, or click label
-                if (stateAfter === stateBefore) {
-                    if (bestMatch.tagName === 'INPUT' && bestMatch.type === 'checkbox') {
-                        bestMatch.checked = !bestMatch.checked;
-                        bestMatch.dispatchEvent(new Event('change', { bubbles: true }));
+                // Fast native path: directly set checked=true on real checkbox inputs.
+                // Some Workday variants ignore wrapper clicks but honor input/change events.
+                if (
+                    bestMatch.tagName === 'INPUT'
+                    && (bestMatch.getAttribute('type') || '').toLowerCase() === 'checkbox'
+                    && stateBefore !== true
+                ) {
+                    try {
+                        bestMatch.checked = true;
                         bestMatch.dispatchEvent(new Event('input', { bubbles: true }));
-                    } else {
-                        // For role=checkbox, try clicking the parent or associated label
-                        const clickTargets = [bestMatch.parentElement];
-                        if (bestMatch.id) {
-                            const lbl = document.querySelector('label[for="' + bestMatch.id + '"]');
-                            if (lbl) clickTargets.push(lbl);
+                        bestMatch.dispatchEvent(new Event('change', { bubbles: true }));
+                        const forcedAfter = getCheckedState(bestMatch);
+                        if (forcedAfter === true) {
+                            return {
+                                success: true,
+                                element: desc,
+                                state_before: stateBefore,
+                                state_after: forcedAfter,
+                                verified: true,
+                            };
                         }
-                        for (const ct of clickTargets) {
-                            if (ct) ct.click();
-                        }
+                    } catch (err) {
+                        // Continue with fallback candidate-click strategies below.
                     }
                 }
 
-                // Final state check
-                const finalState = getCheckedState(bestMatch);
-                const desc = bestMatch.tagName + (bestMatch.id ? '#' + bestMatch.id : '')
-                    + (bestMatch.getAttribute('role') ? '[role=' + bestMatch.getAttribute('role') + ']' : '');
+                const targetToken = tokenBase + '-target';
+                bestMatch.setAttribute('data-job-applier-toggle-target', targetToken);
+                const targetSelector = '[data-job-applier-toggle-target="' + targetToken + '"]';
+                const escapeSelectorValue = (value) => {
+                    const text = String(value || '');
+                    if (!text) return '';
+                    if (window.CSS && typeof window.CSS.escape === 'function') {
+                        return window.CSS.escape(text);
+                    }
+                    return text.replace(/["\\\\]/g, '\\\\$&');
+                };
+                const fallbackSelectors = [];
+                const addFallbackSelector = (selector) => {
+                    if (!selector || fallbackSelectors.includes(selector)) return;
+                    fallbackSelectors.push(selector);
+                };
+                if (bestMatch.id) {
+                    addFallbackSelector('#' + escapeSelectorValue(bestMatch.id));
+                }
+                const automationId = bestMatch.getAttribute('data-automation-id');
+                if (automationId) {
+                    addFallbackSelector('[data-automation-id="' + escapeSelectorValue(automationId) + '"]');
+                }
+                const nameAttr = bestMatch.getAttribute('name');
+                if (nameAttr) {
+                    addFallbackSelector('[name="' + escapeSelectorValue(nameAttr) + '"]');
+                }
+                if (bestMatch.tagName === 'INPUT') {
+                    const typeAttr = bestMatch.getAttribute('type');
+                    if (typeAttr) {
+                        addFallbackSelector('input[type="' + escapeSelectorValue(typeAttr) + '"]');
+                    }
+                }
+
+                const candidates = [];
+                const seen = new Set();
+                const addCandidate = (el, name) => {
+                    if (!el || !isVisible(el) || seen.has(el)) return;
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width < 2 || rect.height < 2) return;
+                    const textBlob = normalize((el.textContent || '').slice(0, 240));
+                    const hasLinkDescendant = !!el.querySelector('a[href], [role="link"]');
+                    if (hasLinkDescendant && (textBlob.includes('privacy policy') || textBlob.includes('read and accept') || textBlob.includes('read more'))) {
+                        return;
+                    }
+                    const token = tokenBase + '-candidate-' + (candidates.length + 1);
+                    el.setAttribute('data-job-applier-toggle-token', token);
+                    candidates.push({
+                        selector: '[data-job-applier-toggle-token="' + token + '"]',
+                        name,
+                        element: describeElement(el),
+                    });
+                    seen.add(el);
+                };
+
+                addCandidate(bestMatch, 'best_match');
+                addCandidate(bestMatch.closest('label'), 'closest_label');
+                if (bestMatch.tagName === 'INPUT' && bestMatch.type === 'checkbox') {
+                    if (bestMatch.id) {
+                        addCandidate(document.querySelector('label[for="' + bestMatch.id + '"]'), 'label_for');
+                    }
+                    if (bestMatch.labels) {
+                        for (const lbl of bestMatch.labels) addCandidate(lbl, 'labels');
+                    }
+                    addCandidate(bestMatch.parentElement, 'parent');
+                }
+                addCandidate(bestMatch.closest('[role="checkbox"]'), 'closest_role_checkbox');
+                addCandidate(bestMatch.nextElementSibling, 'next_sibling');
+                addCandidate(bestMatch.previousElementSibling, 'prev_sibling');
+                let ancestor = bestMatch.parentElement;
+                for (let i = 0; i < 2 && ancestor; i++) {
+                    addCandidate(ancestor, 'ancestor_' + (i + 1));
+                    ancestor = ancestor.parentElement;
+                }
+                if (bestMatch.parentElement) {
+                    for (const child of Array.from(bestMatch.parentElement.children).slice(0, 8)) {
+                        addCandidate(child, 'parent_child');
+                    }
+                }
+                addCandidate(bestMatch.closest('[data-automation-id*="checkbox" i]'), 'automation_id_checkbox_parent');
+                addCandidate(bestMatch.closest('[data-automation-id*="consent" i]'), 'automation_id_consent_parent');
+                addCandidate(bestMatch.closest('[data-automation-id*="createaccount" i]'), 'automation_id_createaccount_parent');
+
+                if (!candidates.length) {
+                    return {
+                        success: false,
+                        error: 'Matched checkbox has no visible click targets',
+                        element: describeElement(bestMatch),
+                        state_before: stateBefore,
+                        target_selector: targetSelector,
+                    };
+                }
 
                 return {
-                    success: finalState !== stateBefore,
+                    success: true,
                     element: desc,
                     state_before: stateBefore,
-                    state_after: finalState,
-                    verified: finalState !== stateBefore,
+                    state_after: stateBefore,
+                    verified: false,
+                    target_selector: targetSelector,
+                    candidate_selectors: candidates.map(c => c.selector),
+                    candidate_names: candidates.map(c => c.name),
+                    candidate_elements: candidates.map(c => c.element),
+                    fallback_selectors: fallbackSelectors,
                 };
             }
             """,
-            label_text.strip(),
+            {
+                "labelText": requested_label,
+                "tokenBase": token_base,
+            },
         )
 
         payload = self._parse_json(raw)
@@ -714,9 +1091,157 @@ class JobApplierTools(Tools):
         state_before = payload.get("state_before")
         state_after = payload.get("state_after")
         verified = bool(payload.get("verified"))
+        target_selector = payload.get("target_selector") or ""
+        candidate_selectors = payload.get("candidate_selectors") or []
+        candidate_names = payload.get("candidate_names") or []
+        candidate_elements = payload.get("candidate_elements") or []
+        fallback_selectors = payload.get("fallback_selectors") or []
+        state_selectors: list[str] = []
+        if isinstance(target_selector, str) and target_selector:
+            state_selectors.append(target_selector)
+        if isinstance(fallback_selectors, list):
+            for selector in fallback_selectors:
+                if isinstance(selector, str) and selector and selector not in state_selectors:
+                    state_selectors.append(selector)
+        logger.debug(
+            "toggle_checkbox payload: success=%s element=%s candidates=%d fallbacks=%d selectors=%d",
+            success,
+            element_desc,
+            len(candidate_selectors),
+            len(fallback_selectors) if isinstance(fallback_selectors, list) else 0,
+            len(state_selectors),
+        )
+
+        async def read_state() -> Optional[bool]:
+            state_raw = await page.evaluate(
+                """
+                (payload) => {
+                    const selectors = (payload && payload.selectors) || [];
+                    const labelText = String((payload && payload.labelText) || '');
+                    const normalize = (s) => (s || '')
+                        .toLowerCase()
+                        .replace(/[\\u2018\\u2019]/g, "'")
+                        .replace(/[\\u201C\\u201D]/g, '"')
+                        .replace(/\\s+/g, ' ')
+                        .trim();
+                    const target = normalize(labelText);
+                    const targetWords = target.split(/\\s+/).filter((word) => word.length > 2);
+                    const isVisible = (el) => {
+                        if (!el) return false;
+                        const style = window.getComputedStyle(el);
+                        if (!style) return false;
+                        if (style.display === 'none' || style.visibility === 'hidden') return false;
+                        const rect = el.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0;
+                    };
+                    const getState = (el) => {
+                        if (!el) return null;
+                        const aria = (el.getAttribute('aria-checked') || '').toLowerCase();
+                        if (aria === 'true') return true;
+                        if (aria === 'false') return false;
+                        if (typeof el.checked === 'boolean') return !!el.checked;
+                        return null;
+                    };
+                    for (const selector of selectors || []) {
+                        if (!selector) continue;
+                        let el = null;
+                        try {
+                            el = document.querySelector(selector);
+                        } catch (err) {
+                            continue;
+                        }
+                        if (!el) continue;
+                        const state = getState(el);
+                        if (typeof state === 'boolean') {
+                            return { state, selector };
+                        }
+                    }
+
+                    // Fallback: re-locate by label text in case IDs/selectors changed after rerender.
+                    if (targetWords.length > 0) {
+                        const checkboxSelectors = [
+                            'input[type="checkbox"]',
+                            '[role="checkbox"]',
+                            '[aria-checked]',
+                        ];
+                        let bestMatch = null;
+                        let bestScore = 0;
+                        for (const selector of checkboxSelectors) {
+                            for (const el of Array.from(document.querySelectorAll(selector))) {
+                                if (!isVisible(el)) continue;
+                                const texts = [];
+                                texts.push(el.getAttribute('aria-label') || '');
+                                texts.push(el.textContent || '');
+                                if (el.id) {
+                                    const linkedLabel = document.querySelector('label[for="' + el.id + '"]');
+                                    if (linkedLabel) texts.push(linkedLabel.textContent || '');
+                                }
+                                if (el.labels) {
+                                    for (const lbl of el.labels) texts.push(lbl.textContent || '');
+                                }
+                                if (el.parentElement) texts.push(el.parentElement.textContent || '');
+                                const combined = normalize(texts.join(' '));
+                                if (!combined) continue;
+                                const combinedWords = new Set(combined.split(/\\s+/));
+                                const matchCount = targetWords.filter((word) => combinedWords.has(word)).length;
+                                const ratio = targetWords.length > 0 ? matchCount / targetWords.length : 0;
+                                if (ratio < 0.55) continue;
+                                let score = ratio * 10;
+                                if (combined.includes(target)) score += 5;
+                                if (el.tagName === 'INPUT' && (el.getAttribute('type') || '').toLowerCase() === 'checkbox') score += 2;
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    bestMatch = el;
+                                }
+                            }
+                        }
+                        if (bestMatch) {
+                            const state = getState(bestMatch);
+                            if (typeof state === 'boolean') {
+                                return { state, selector: 'label_match' };
+                            }
+                        }
+                    }
+
+                    return { state: null, selector: null };
+                }
+                """,
+                {"selectors": state_selectors, "labelText": requested_label},
+            )
+            if isinstance(state_raw, dict):
+                state_value = state_raw.get("state")
+                return state_value if isinstance(state_value, bool) else None
+            return None
+
+        async def cleanup_tokens() -> None:
+            await page.evaluate(
+                """
+                (tokenPrefix) => {
+                    for (const el of document.querySelectorAll('[data-job-applier-toggle-target], [data-job-applier-toggle-token]')) {
+                        const targetToken = el.getAttribute('data-job-applier-toggle-target') || '';
+                        const clickToken = el.getAttribute('data-job-applier-toggle-token') || '';
+                        if (targetToken.startsWith(tokenPrefix)) {
+                            el.removeAttribute('data-job-applier-toggle-target');
+                        }
+                        if (clickToken.startsWith(tokenPrefix)) {
+                            el.removeAttribute('data-job-applier-toggle-token');
+                        }
+                    }
+                }
+                """,
+                token_base,
+            )
+
+        if success and state_before is True:
+            await cleanup_tokens()
+            msg = (
+                f"toggle_checkbox: checkbox already checked for {element_desc}; "
+                "no toggle needed [VERIFIED]"
+            )
+            return ActionResult(extracted_content=msg)
 
         if success and verified:
-            msg = f"toggle_checkbox: toggled {element_desc} ({state_before} â†’ {state_after}) [VERIFIED]"
+            msg = f"toggle_checkbox: toggled {element_desc} ({state_before} -> {state_after}) [VERIFIED]"
             return ActionResult(extracted_content=msg)
 
         if not success and "error" in payload:
@@ -727,11 +1252,113 @@ class JobApplierTools(Tools):
                 hint = f" Visible checkboxes on page: {', '.join(visible[:5])}"
             return ActionResult(error=f"toggle_checkbox: {error_msg}{hint} [UNVERIFIED]")
 
+        if candidate_selectors:
+            current_state = state_before if isinstance(state_before, bool) else await read_state()
+            click_attempted = False
+            try:
+                for index, selector in enumerate(candidate_selectors[:8]):
+                    try:
+                        locator = page.locator(selector).first
+                        await locator.scroll_into_view_if_needed(timeout=1500)
+                        await locator.click(timeout=2500, force=True)
+                        click_attempted = True
+                    except Exception:
+                        js_clicked_raw = await page.evaluate(
+                            """
+                            (candidateSelector) => {
+                                let el = null;
+                                try {
+                                    el = document.querySelector(candidateSelector);
+                                } catch (err) {
+                                    return false;
+                                }
+                                if (!el) return false;
+                                el.click();
+                                return true;
+                            }
+                            """,
+                            selector,
+                        )
+                        if not js_clicked_raw:
+                            continue
+                        click_attempted = True
+
+                    await asyncio.sleep(0.12)
+                    next_state = await read_state()
+                    if (
+                        isinstance(current_state, bool)
+                        and isinstance(next_state, bool)
+                        and next_state != current_state
+                    ):
+                        detail = candidate_elements[index] if index < len(candidate_elements) else "candidate"
+                        name = candidate_names[index] if index < len(candidate_names) else f"candidate_{index + 1}"
+                        msg = (
+                            f"toggle_checkbox: toggled {element_desc} via {name} ({detail}) "
+                            f"({current_state} -> {next_state}) [VERIFIED]"
+                        )
+                        verified = True
+                        state_after = next_state
+                        return ActionResult(extracted_content=msg)
+                    if isinstance(next_state, bool):
+                        current_state = next_state
+
+                # Last resort: direct property toggle for native checkbox inputs.
+                fallback_raw = await page.evaluate(
+                    """
+                    (selectors) => {
+                        let el = null;
+                        for (const selector of selectors || []) {
+                            if (!selector) continue;
+                            try {
+                                el = document.querySelector(selector);
+                            } catch (err) {
+                                continue;
+                            }
+                            if (el) break;
+                        }
+                        if (!el) return false;
+                        if (!(el.tagName === 'INPUT' && el.type === 'checkbox')) return false;
+                        el.checked = !el.checked;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+                    """,
+                    state_selectors,
+                )
+                if fallback_raw:
+                    await asyncio.sleep(0.08)
+                    next_state = await read_state()
+                    if (
+                        isinstance(current_state, bool)
+                        and isinstance(next_state, bool)
+                        and next_state != current_state
+                    ):
+                        msg = (
+                            f"toggle_checkbox: toggled {element_desc} via native fallback "
+                            f"({current_state} -> {next_state}) [VERIFIED]"
+                        )
+                        verified = True
+                        state_after = next_state
+                        return ActionResult(extracted_content=msg)
+            finally:
+                await cleanup_tokens()
+
+            if click_attempted:
+                state_after = await read_state()
+                if state_after is None and current_state is True:
+                    msg = (
+                        f"toggle_checkbox: checkbox remains checked for {element_desc} "
+                        f"({state_before} -> {state_after}) [VERIFIED]"
+                    )
+                    return ActionResult(extracted_content=msg)
+
         # Click executed but state didn't change - still report what happened
         msg = (
             f"toggle_checkbox: clicked {element_desc} but state may not have changed "
-            f"({state_before} â†’ {state_after}). The checkbox may need 'Read More' clicked first, "
-            f"or try clicking the checkbox via its element index instead. [UNVERIFIED]"
+            f"({state_before} -> {state_after}). The checkbox may need 'Read More' clicked first, "
+            f"or try clicking the checkbox via its element index instead. "
+            f"[UNVERIFIED; candidates={len(candidate_selectors)} selectors={len(state_selectors)}]"
         )
         return ActionResult(extracted_content=msg)
 
@@ -746,13 +1373,56 @@ class JobApplierTools(Tools):
         login = self.profile_data.get("login", {})
         email = default_account.get("email") or login.get("email") or identity.get("email") or ""
         password = default_account.get("password") or login.get("password") or ""
+        if not password:
+            # Create-account flows still need a deterministic password even without saved login creds.
+            password = os.getenv("JOB_APPLIER_FALLBACK_PASSWORD", "ApplyFlow#2026!")
 
-        if not email or not password:
-            return ActionResult(error="workday_create_account: no login credentials in profile data")
+        if not email:
+            return ActionResult(error="workday_create_account: no email available in profile data")
+        if not password:
+            return ActionResult(error="workday_create_account: no password available (and fallback is empty)")
 
         page = await browser_session.get_current_page()
         if page is None:
             return ActionResult(error="workday_create_account: no active page")
+
+        try:
+            legacy_outcome = await run_workday_legacy_create_account(
+                browser_session=browser_session,
+                profile=self.profile_data,
+                job_url=self.job_url or "",
+            )
+            metadata = {
+                "legacy_wrapper": True,
+                "platform": "workday",
+                "handler_result": legacy_outcome.result.value,
+                "handler_state": legacy_outcome.state,
+                "blocker_code": legacy_outcome.blocker_code or "",
+            }
+            if legacy_outcome.result == HandlerResult.BLOCKED:
+                return ActionResult(
+                    error=f"workday_create_account (legacy wrapper blocked): {legacy_outcome.message}",
+                    metadata=metadata,
+                )
+            if legacy_outcome.result == HandlerResult.FAILED:
+                return ActionResult(
+                    error=f"workday_create_account (legacy wrapper failed): {legacy_outcome.message}",
+                    metadata=metadata,
+                )
+            if legacy_outcome.result == HandlerResult.SUBMITTED:
+                return ActionResult(
+                    extracted_content=f"workday_create_account (legacy wrapper): {legacy_outcome.message}",
+                    metadata=metadata,
+                )
+            return ActionResult(
+                extracted_content=(
+                    f"workday_create_account (legacy wrapper): {legacy_outcome.message}\n"
+                    f"handoff: {legacy_outcome.handoff_context}"
+                ),
+                metadata=metadata,
+            )
+        except Exception as wrapper_exc:
+            logger.warning("workday_create_account legacy wrapper failed, falling back to inline handler: %s", wrapper_exc)
 
         async def run_workday_js(skip_detection: bool, allow_terms_click: bool = True) -> dict[str, Any]:
             raw = await page.evaluate(
@@ -1025,7 +1695,7 @@ class JobApplierTools(Tools):
                 )
 
         if payload.get("needs_retry"):
-            await page.wait_for_timeout(2500)
+            await asyncio.sleep(2.5)
             payload = await run_workday_js(skip_detection=True, allow_terms_click=True)
             if payload.get("is_external_sso"):
                 host = payload.get("current_host") or "unknown"
@@ -1038,7 +1708,7 @@ class JobApplierTools(Tools):
                 )
 
         if payload.get("needs_terms_retry"):
-            await page.wait_for_timeout(2000)
+            await asyncio.sleep(2.0)
             payload = await run_workday_js(skip_detection=True, allow_terms_click=False)
             if payload.get("is_external_sso"):
                 host = payload.get("current_host") or "unknown"
@@ -1056,7 +1726,7 @@ class JobApplierTools(Tools):
         # --- Fix 3A: Check for "account already exists" after submit ---
         if payload.get("success") or not payload.get("errors"):
             try:
-                await page.wait_for_timeout(3000)
+                await asyncio.sleep(3.0)
                 exists_check = await page.evaluate("""() => {
                     const text = (document.body.innerText || '').toLowerCase();
                     const patterns = [
@@ -1443,3 +2113,4 @@ def create_job_applier_controller(
 ) -> JobApplierTools:
     """Factory function to create the JobApplierTools controller."""
     return JobApplierTools(profile_data=profile_data, job_url=job_url)
+

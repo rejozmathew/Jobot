@@ -21,12 +21,47 @@ Usage:
 
 import argparse
 import asyncio
+import io
 import os
 import sys
 import webbrowser
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+
+def _configure_console_encoding() -> None:
+    """Ensure Unicode log output works on Windows terminals."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+                continue
+        except Exception:
+            pass
+        try:
+            buffer = getattr(stream, "buffer", None)
+            if buffer is None:
+                continue
+            setattr(
+                sys,
+                stream_name,
+                io.TextIOWrapper(
+                    buffer,
+                    encoding="utf-8",
+                    errors="replace",
+                    line_buffering=True,
+                ),
+            )
+        except Exception:
+            # Keep original stream if reconfiguration is not supported.
+            pass
+
+
+_configure_console_encoding()
 
 # Load environment variables
 load_dotenv()
@@ -63,8 +98,30 @@ def cmd_serve(args):
     )
 
 
+def _set_platform(args):
+    plat = getattr(args, "platform", "auto")
+    if plat and plat != "auto":
+        import os as _os
+        _os.environ["JOB_APPLIER_PLATFORM"] = plat
+
+
+def _set_flags(args):
+    """Thread --dry-run / --submit through to handlers via env vars."""
+    import os as _os
+    if getattr(args, "dry_run", False):
+        _os.environ["JOB_APPLIER_DRY_RUN"] = "true"
+        _os.environ["JOB_APPLIER_GH_DRY_RUN"] = "true"
+        _os.environ["JOB_APPLIER_GH_SKIP_SUBMIT"] = "true"
+    elif getattr(args, "submit", False):
+        _os.environ["JOB_APPLIER_DRY_RUN"] = "false"
+        _os.environ["JOB_APPLIER_GH_DRY_RUN"] = "false"
+        _os.environ["JOB_APPLIER_GH_SKIP_SUBMIT"] = "false"
+
+
 def cmd_apply(args):
     """Add URL to queue and process immediately."""
+    _set_platform(args)
+    _set_flags(args)
     runner = JobRunner(headless=args.headless)
     
     # Add to queue
@@ -81,11 +138,19 @@ def cmd_apply(args):
     print(f"   Browser headless: {args.headless}")
     print(f"   Watch the browser window for progress\n")
     
-    result = runner.run_one_sync()
+    result = runner.run_specific_sync(job.id)
     
     if result:
         status = result.get("status", "unknown")
-        print(f"\n{'✅' if status == 'applied' else '⚠️' if status == 'needs_review' else '❌'} Result: {status}")
+        if status == "applied":
+            icon = "✅"
+        elif status == "dry_run":
+            icon = "🧪"
+        elif status == "needs_review":
+            icon = "⚠️"
+        else:
+            icon = "❌"
+        print(f"\n{icon} Result: {status}")
         if result.get("message"):
             print(f"   Message: {result['message']}")
         if result.get("error"):
@@ -108,6 +173,7 @@ def cmd_add(args):
 
 def cmd_run_all(args):
     """Process all queued jobs."""
+    _set_platform(args)
     runner = JobRunner(headless=args.headless)
     
     stats = runner.queue.get_stats()
@@ -221,16 +287,26 @@ def main():
     apply_parser.add_argument("--title", help="Job title")
     apply_parser.add_argument("--company", help="Company name")
     apply_parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
+    apply_parser.add_argument("--platform", choices=["auto","workday","greenhouse","generic"], default="auto",
+                              help="Force a platform handler (e.g. greenhouse for company sites that embed Greenhouse)")
+    apply_parser.add_argument("--dry-run", action="store_true",
+                              help="Fill the form and stop before Submit (default for Greenhouse)")
+    apply_parser.add_argument("--submit", action="store_true",
+                              help="Click Submit (overrides profile skip_submit/dry_run)")
     apply_parser.set_defaults(func=cmd_apply)
     
     # add command
     add_parser = subparsers.add_parser("add", help="Add URLs to queue")
     add_parser.add_argument("urls", nargs="+", help="Job URLs to add")
+    add_parser.add_argument("--platform", choices=["auto","workday","greenhouse","generic"], default="auto",
+                            help="Force a platform handler for all URLs")
     add_parser.set_defaults(func=cmd_add)
     
     # run-all command
     run_parser = subparsers.add_parser("run-all", help="Process all queued jobs")
     run_parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
+    run_parser.add_argument("--platform", choices=["auto","workday","greenhouse","generic"], default="auto",
+                            help="Force a platform handler for all jobs")
     run_parser.set_defaults(func=cmd_run_all)
     
     # status command

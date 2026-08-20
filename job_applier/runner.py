@@ -26,6 +26,8 @@ class JobRunner:
         artifacts_dir: Optional[str] = None,
         max_steps: Optional[int] = None,
         max_history_items: Optional[int] = None,
+        llm_timeout: Optional[int] = None,
+        step_timeout: Optional[int] = None,
         headless: bool = False,
     ):
         # Use database-backed queue
@@ -36,6 +38,8 @@ class JobRunner:
         self.artifacts_dir = artifacts_dir or os.getenv("JOB_APPLIER_ARTIFACTS_DIR", "./artifacts")
         self.max_steps = max_steps or int(os.getenv("JOB_APPLIER_MAX_STEPS", "30"))
         self.max_history_items = max_history_items or int(os.getenv("JOB_APPLIER_MAX_HISTORY", "7"))
+        self.llm_timeout = llm_timeout or int(os.getenv("JOB_APPLIER_LLM_TIMEOUT", "180"))
+        self.step_timeout = step_timeout or int(os.getenv("JOB_APPLIER_STEP_TIMEOUT", "90"))
         self.headless = headless
         self._running = False
         self._current_job: Optional[QueuedJob] = None
@@ -80,6 +84,8 @@ class JobRunner:
             artifacts_dir=self.artifacts_dir,
             max_steps=self.max_steps,
             max_history_items=self.max_history_items,
+            llm_timeout=self.llm_timeout,
+            step_timeout=self.step_timeout,
             headless=self.headless,
             db_queue=self.queue,  # Pass queue for step tracking
         )
@@ -235,6 +241,10 @@ class JobRunner:
     def run_one_sync(self) -> Optional[Dict[str, Any]]:
         """Synchronous wrapper for run_one()."""
         return asyncio.run(self.run_one())
+
+    def run_specific_sync(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Synchronous wrapper for run_specific()."""
+        return asyncio.run(self.run_specific(job_id))
 
     async def run_all(self) -> list[Dict[str, Any]]:
         """

@@ -123,6 +123,11 @@ python run_applier.py migrate           # Run migration
 | `JOB_APPLIER_DB_PATH` | `./job_applier.db` | SQLite database path |
 | `JOB_APPLIER_MAX_STEPS` | `100` | Max agent steps per job |
 | `JOB_APPLIER_MAX_HISTORY` | `10` | Context history limit |
+| `JOB_APPLIER_PLATFORM_HANDLERS` | `1` | Enable deterministic platform handlers before LLM loop |
+| `JOB_APPLIER_WORKDAY_DETERMINISTIC` | `1` | Enable Workday deterministic state machine |
+| `JOB_APPLIER_WORKDAY_FALLBACK_LLM` | `1` | Allow LLM continuation after deterministic Workday progress |
+| `JOB_APPLIER_LLM_TIMEOUT` | `180` | LLM call timeout seconds |
+| `JOB_APPLIER_STEP_TIMEOUT` | `90` | Per-step timeout seconds |
 
 ### Local LLM Recommendations
 
@@ -134,6 +139,20 @@ For best results with local models:
 ## Project Structure
 
 ```
+
+## Platform Handler Architecture
+
+The runtime now uses a deterministic-first platform handler flow:
+
+1. Detect platform from URL (`workday`, `generic`, and future handlers)
+2. Run deterministic platform handler first
+3. Route outcome:
+   - `SUBMITTED`: finalize as applied
+   - `BLOCKED`: finalize with blocker reason
+   - `PROGRESSED` or `NEEDS_LLM`: hand off to existing LLM loop with context
+
+Workday logic is isolated under `job_applier/platform_handlers/workday.py` and no longer mixed into generic behavior.
+This keeps Workday-specific recovery from blocking other sites.
 auto-job-applier/
 ├── job_applier/
 │   ├── __init__.py
@@ -169,11 +188,13 @@ auto-job-applier/
 
 ## Platforms Tested
 
-- ✅ TCW (iCIMS) - 62 steps
-- ✅ Alvarez & Marsal (Workday) - 170 steps
-- ✅ SuccessFactors
-- ✅ Greenhouse
-- ⚠️ LinkedIn Easy Apply (may need manual auth)
+Recent live validation (February 25, 2026) on shared URLs:
+
+- ✅ iCIMS (TCW) - submission achieved in prior run (`job-00012`)
+- ⚠️ Workday (Pluralsight) - progressed to application pages; current blocker is auth/data conflict variation by session
+- ⚠️ Workday (The Mutual Group) - auth loop / tenant auth constraints after deterministic retries
+- ⚠️ Greenhouse (Oura) - reached form; resume upload element detection still fragile in this posting
+- ⚠️ Kaiser Permanente jobs page - posting currently not available / redirects to search or error page
 
 ## Troubleshooting
 
@@ -182,6 +203,18 @@ Increase context in LM Studio or reduce `JOB_APPLIER_MAX_HISTORY`.
 
 ### Agent gets stuck on dropdowns
 The system uses browser-use's built-in `select_dropdown` action. If issues persist, check if the dropdown is a standard `<select>` element or a custom component.
+
+### Workday referral/source loops
+Workday deterministic recovery now treats referral/source as "any valid non-placeholder value" and should not insist on one exact option.
+If a run still loops, inspect `artifacts/job-<seq_id>/result.json` for `platform_steps` and `platform_handoff_context`.
+
+### Workday auth loops (Create Account vs Sign In)
+The handler caps create/sign-in retries and will attempt sign-in switch before giving control back to the LLM.
+If the same tenant keeps looping, it is usually an account-state or tenant auth policy blocker.
+
+### CAPTCHA / anti-bot barriers
+When CAPTCHA or human verification appears, the run is expected to stop with `needs_review` or `failed`.
+This is treated as a blocker, not a retriable automation loop.
 
 ### Steps showing as "unknown" in dashboard
 Ensure the step tracker is parsing actions correctly. Check `artifacts/job-<seq_id>/result.json` (or legacy `artifacts/<job-id>/result.json`) for raw action data.
