@@ -354,6 +354,7 @@ class GreenhouseHandler(BasePlatformHandler):
         self._record("form:ready", {"fields": len(inv)})
 
         # 3) Fill standard fields by id (identity block).
+        select_fields: list[tuple[str, str]] = []
         for fid, sources in STD_FIELD_MAP.items():
             f = next((x for x in inv if x["id"] == fid), None)
             if not f:
@@ -363,6 +364,8 @@ class GreenhouseHandler(BasePlatformHandler):
                 continue
             if f["kind"] == "select":
                 ok = await self._fill_select(page, fid, val)
+                if ok:
+                    select_fields.append((fid, val))
             else:
                 ok = await self._fill_text(page, fid, val)
             self._record("std", {"id": fid, "value": val, "ok": ok})
@@ -387,6 +390,8 @@ class GreenhouseHandler(BasePlatformHandler):
             used.add(best["id"])
             if best["kind"] == "select":
                 ok = await self._fill_select(page, best["id"], val)
+                if ok:
+                    select_fields.append((best["id"], val))
             elif best["kind"] == "checkbox":
                 ok = await self._fill_checkbox(page, best["id"], val)
             else:
@@ -412,6 +417,16 @@ class GreenhouseHandler(BasePlatformHandler):
         # 6) Pre-submit verification.
         empty = await self._empty_required(page, inv)
         self._record("pre_submit", {"empty_required": empty})
+
+        # 6b) job-boards.greenhouse.io re-renders the form after fill and can
+        #     RESET react-select values (Country, visa, etc.) even though text
+        #     fields survive. Re-verify every select-kind field we filled and
+        #     re-fill any that got cleared — immediately before submit — so the
+        #     values are committed in the final DOM state.
+        if select_fields:
+            await self._reverify_selects(page, inv, select_fields)
+            empty = await self._empty_required(page, inv)
+            self._record("pre_submit_re", {"empty_required": empty})
 
         # 7) dry_run / skip_submit: stop before Submit.
         if self._flag("dry_run") or self._flag("skip_submit", default=True):
@@ -462,22 +477,61 @@ class GreenhouseHandler(BasePlatformHandler):
 
         for attempt in range(2):
             await page.evaluate(EL_FOCUS_JS, {"id": fid})
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.4)
             await browser.press_key("ArrowDown", 40)
-            await asyncio.sleep(1.2)
+            await asyncio.sleep(1.8)
             await browser.type_text(value[:14])
-            await asyncio.sleep(1.3)
+            # Remote-search dialers (Greenhouse country) need the list to settle
+            # before Enter commits; generous wait fixes flaky selects.
+            await asyncio.sleep(2.6)
             await browser.press_key("Enter", 13)
-            await asyncio.sleep(0.9)
+            await asyncio.sleep(1.2)
             v = await self._committed(page, fid)
             if v:
                 self._record("select:ok", {"id": fid, "committed": v[:40], "attempt": attempt + 1})
+                return True
+            # Enter didn't commit (non-remote react-select, e.g. Gusto Location):
+            # the option is usually still visible in the open menu — click it.
+            clicked = await self._eval(page, """(args) => {
+                const el = document.querySelector('[id="' + args.id + '"]');
+                if (!el) return false;
+                const root = el.closest('[class*="css-"]') || el.parentElement;
+                const scope = (root && root.querySelector('[role="listbox"], .virtual-list, ul')) || document;
+                const opts = Array.from(scope.querySelectorAll('[role="option"], li, [class*="option"]'));
+                const want = args.val.toLowerCase();
+                const hit = opts.find(o => (o.textContent||'').toLowerCase().includes(want))
+                          || opts.find(o => (o.textContent||'').toLowerCase().includes(want.slice(0,6)));
+                if (hit) { hit.scrollIntoView({block:'center'}); hit.click(); return true; }
+                return false; }""", {"id": fid, "val": value})
+            await asyncio.sleep(1.0)
+            v = await self._committed(page, fid)
+            if v:
+                self._record("select:ok_click", {"id": fid, "committed": v[:40], "attempt": attempt + 1})
                 return True
             await browser.press_key("Escape", 27)
             await asyncio.sleep(0.3)
         self._record("select:failed", {"id": fid, "value": value,
                                         "options": await self._eval(page, OPTIONS_JS, None)})
         return False
+
+    async def _reverify_selects(self, page: CDPPage, all_fields: list[dict],
+                                select_fields: list[tuple[str, str]]) -> None:
+        """job-boards.greenhouse.io re-renders the form after fill and can reset
+        react-select values (Country, visa, etc.) even though text inputs survive.
+        Re-check each select-kind field right before submit and re-fill any that
+        went empty so the values are committed in the final DOM state."""
+        fbyid = {f["id"]: f for f in all_fields}
+        for fid, val in select_fields:
+            f = fbyid.get(fid)
+            if not f or f["kind"] != "select":
+                continue
+            if (await self._committed(page, fid)) == val:
+                continue
+            self._record("select:reset_detected", {"id": fid, "label": f["label"][:60]})
+            ok = await self._fill_select(page, fid, val)
+            if not ok:
+                self._record("select:refill_failed", {"id": fid, "label": f["label"][:60]})
+        self._record("select_reverified", {"fields": [fid for fid, _ in select_fields]})
 
     async def _fill_checkbox(self, page, fid: str, value: str) -> bool:
         want = str(value).lower() in ("yes", "true", "1", "on")
@@ -550,13 +604,23 @@ class GreenhouseHandler(BasePlatformHandler):
         return self._outcome(HandlerResult.FAILED, "FAILED", "exhausted")
 
     async def _heal_empty(self, page, inv: list[dict], errs: list[str]) -> int:
-        """Fill required-but-empty text/select fields with 'N/A' (Greenhouse
-        conditional-logic quirk: follow-up fields stay required after a No)."""
+        """Fill required-but-empty CONDITIONAL text fields with 'N/A' (Greenhouse
+        quirk: follow-up fields stay required after a No, e.g. Brex 'EID').
+
+        CRITICAL: never touch a standard identity select (country,
+        candidate-location, ...) or a field that already holds a committed value.
+        Earlier this clobbered correct Country/Location values with 'N/A' and
+        guaranteed a failed submit (Gusto)."""
         healed = 0
+        std_ids = set(STD_FIELD_MAP.keys())
         for f in inv:
             if not f.get("label"):
                 continue
-            if f.get("kind") in ("file",):
+            if f.get("kind") in ("file", "checkbox", "radio"):
+                continue
+            # Standard identity fields are never N/A candidates — they have a real
+            # profile value. Re-filling them is the re-render race, not a heal.
+            if f["id"] in std_ids:
                 continue
             if f.get("kind") == "select":
                 v = await self._committed(page, f["id"])
@@ -573,9 +637,7 @@ class GreenhouseHandler(BasePlatformHandler):
             ) or any(k in label_l for k in ("eid", "employer id", "agency", "role", "name of"))
             if not tied:
                 continue
-            ok = (await self._fill_select(page, f["id"], "N/A")
-                  if f.get("kind") == "select"
-                  else await self._fill_text(page, f["id"], "N/A"))
+            ok = await self._fill_text(page, f["id"], "N/A")
             if ok:
                 healed += 1
                 self._record("heal:filled", {"label": f["label"][:60]})
