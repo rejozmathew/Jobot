@@ -22,6 +22,7 @@ Usage:
 import argparse
 import asyncio
 import io
+import json
 import os
 import sys
 import webbrowser
@@ -69,10 +70,10 @@ load_dotenv()
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from job_applier.db_queue import JobQueue, AddJobRequest
+from job_applier.db_queue import JobQueue
 from job_applier.database import JobStatus
-from job_applier.runner import JobRunner
 from job_applier.migrate import migrate_from_json, check_migration_status
+from job_applier.application_tracker import ApplicationTracker
 
 
 def cmd_serve(args):
@@ -119,46 +120,74 @@ def _set_flags(args):
 
 
 def cmd_apply(args):
-    """Add URL to queue and process immediately."""
+    """Apply immediately and track the same job/attempt in SQLite."""
+    from job_applier.runner import JobRunner
+    from job_applier.platform_handlers.registry import detect_platform
+
     _set_platform(args)
     _set_flags(args)
     runner = JobRunner(headless=args.headless)
-    
-    # Add to queue
-    request = AddJobRequest(
+    tracker = _application_tracker()
+    platform = args.platform if args.platform != "auto" else detect_platform(args.url)
+    tracked = tracker.start_attempt(
         url=args.url,
-        title=args.title,
-        company=args.company,
+        company=args.company or "",
+        title=args.title or "",
+        platform=platform,
+        workflow="deterministic-dry-run" if args.dry_run else "deterministic",
     )
-    job = runner.queue.add(request)
-    print(f"✅ Added job: {job.id[:8]}... - {args.url}")
-    
-    # Run immediately
+    job = runner.queue.get(tracked["job_id"])
+    if job is None:
+        raise RuntimeError(f"Tracked job missing from queue: {tracked['job_id']}")
+    attempt_id = tracked["attempt_id"]
+    print(f"✅ Tracking job #{tracked['seq_id']} / attempt #{attempt_id} - {args.url}")
+    account = tracked.get("account_strategy") or {}
+    print(f"   Account strategy: {account.get('action', 'unknown')} ({account.get('source', 'unknown')})")
+
+    tracker.transition_phase(attempt_id, "handler", note="run_applier apply")
     print(f"\n🔄 Starting application process...")
     print(f"   Browser headless: {args.headless}")
     print(f"   Watch the browser window for progress\n")
-    
+
     result = runner.run_specific_sync(job.id)
-    
-    if result:
-        status = result.get("status", "unknown")
-        if status == "applied":
-            icon = "✅"
-        elif status == "dry_run":
-            icon = "🧪"
-        elif status == "needs_review":
-            icon = "⚠️"
-        else:
-            icon = "❌"
-        print(f"\n{icon} Result: {status}")
-        if result.get("message"):
-            print(f"   Message: {result['message']}")
-        if result.get("error"):
-            print(f"   Error: {result['error']}")
-        if result.get("intervention_reason"):
-            print(f"   Intervention needed: {result['intervention_reason']}")
+    status = result.get("status", "failed") if result else "failed"
+    message = result.get("message", "") if result else "No result returned"
+    error = result.get("error", "") if result else "No result returned"
+    if status == "applied":
+        icon = "✅"
+    elif status == "dry_run":
+        icon = "🧪"
+    elif status == "needs_review":
+        icon = "⚠️"
     else:
-        print("❌ No result returned")
+        icon = "❌"
+    print(f"\n{icon} Result: {status}")
+    if message:
+        print(f"   Message: {message}")
+    if error:
+        print(f"   Error: {error}")
+    if result and result.get("intervention_reason"):
+        print(f"   Intervention needed: {result['intervention_reason']}")
+
+    if status != "applied":
+        tracker.record_hiccup(
+            attempt_id,
+            category="handler_outcome",
+            description=error or message or f"Handler ended as {status}",
+            status="open" if status in {"failed", "needs_review"} else "resolved",
+            reusable_fix="Review the portal-specific handler or continue with Simplify residual filling",
+        )
+    tracker.transition_phase(attempt_id, "verification", note="confirm terminal outcome")
+    terminal_outcome = status if status in {"applied", "blocked", "skipped", "failed", "needs_review"} else (
+        "needs_review" if status == "dry_run" else "failed"
+    )
+    tracking_result = tracker.finish_attempt(
+        attempt_id,
+        outcome=terminal_outcome,
+        evidence=message if status == "applied" else "",
+        note=message or error,
+    )
+    print(f"\n📈 Tracking:\n{json.dumps(tracking_result, indent=2)}")
 
 
 def cmd_add(args):
@@ -173,6 +202,8 @@ def cmd_add(args):
 
 def cmd_run_all(args):
     """Process all queued jobs."""
+    from job_applier.runner import JobRunner
+
     _set_platform(args)
     runner = JobRunner(headless=args.headless)
     
@@ -208,6 +239,8 @@ def cmd_status(args):
     print(f"   Applied:      {stats['applied']}")
     print(f"   Needs Review: {stats['needs_review']}")
     print(f"   Failed:       {stats['failed']}")
+    print(f"   Blocked:      {stats.get('blocked', 0)}")
+    print(f"   Skipped:      {stats.get('skipped', 0)}")
     
     if args.verbose:
         jobs = queue.list_all()
@@ -220,6 +253,8 @@ def cmd_status(args):
                     "applied": "✅",
                     "needs_review": "⚠️",
                     "failed": "❌",
+                    "blocked": "⛔",
+                    "skipped": "⏭️",
                 }.get(job.status, "❓")
                 seq_label = f"#{job.seq_id}" if job.seq_id else ""
                 print(f"   {status_emoji} [{job.status}] {seq_label} {job.url}")
@@ -227,6 +262,106 @@ def cmd_status(args):
                     print(f"      Notes: {job.notes[:80]}...")
                 if job.intervention_reason:
                     print(f"      Reason: {job.intervention_reason[:80]}...")
+
+
+def _application_tracker() -> ApplicationTracker:
+    return ApplicationTracker(os.getenv("JOB_APPLIER_DB_PATH", "./job_applier.db"))
+
+
+def cmd_track_start(args):
+    result = _application_tracker().start_attempt(
+        url=args.url,
+        company=args.company,
+        title=args.title,
+        platform=args.platform,
+        workflow=args.workflow,
+    )
+    print(json.dumps(result, indent=2))
+
+
+def cmd_track_phase(args):
+    result = _application_tracker().transition_phase(args.attempt_id, args.phase, note=args.note)
+    print(json.dumps(result, indent=2))
+
+
+def cmd_track_hiccup(args):
+    result = _application_tracker().record_hiccup(
+        args.attempt_id,
+        category=args.category,
+        description=args.description,
+        field_label=args.field,
+        resolution=args.resolution,
+        reusable_fix=args.reusable_fix,
+        status=args.status,
+        seconds_lost=args.seconds_lost,
+    )
+    print(json.dumps(result, indent=2))
+
+
+def cmd_track_end(args):
+    result = _application_tracker().finish_attempt(
+        args.attempt_id,
+        outcome=args.outcome,
+        evidence=args.evidence,
+        note=args.note,
+    )
+    print(json.dumps(result, indent=2))
+
+
+def cmd_history(args):
+    rows = _application_tracker().job_history(status=args.status)
+    print(f"{'id':>5} {'status':13} {'attempts':>8} {'seconds':>8}  company / title")
+    for row in rows:
+        seconds = row.get("latest_duration_seconds")
+        print(
+            f"{str(row.get('seq_id') or '-'):>5} {str(row.get('status') or '-')[:13]:13} "
+            f"{row.get('attempt_count', 0):>8} {str(round(seconds, 1) if seconds is not None else '-'):>8}  "
+            f"{row.get('company') or '?'} / {row.get('title') or '?'}"
+        )
+
+
+def cmd_hiccups(args):
+    rows = _application_tracker().hiccup_summary(platform=args.platform)
+    print(f"{'platform':12} {'category':24} {'count':>5} {'lost_s':>8} {'open':>5}  reusable fix")
+    for row in rows:
+        fixes = "; ".join(row.get("reusable_fixes") or [])
+        print(
+            f"{row['platform'][:12]:12} {row['category'][:24]:24} {row['count']:>5} "
+            f"{row['seconds_lost']:>8.1f} {row['open_count']:>5}  {fixes}"
+        )
+
+
+def cmd_account_check(args):
+    result = _application_tracker().account_strategy(
+        company=args.company,
+        platform=args.platform,
+        url=args.url,
+    )
+    print(json.dumps(result, indent=2))
+
+
+def cmd_account_set(args):
+    result = _application_tracker().set_company_account(
+        company=args.company,
+        platform=args.platform,
+        url=args.url,
+        email=args.email,
+        status=args.status,
+        note=args.note,
+    )
+    print(json.dumps(result, indent=2))
+
+
+def cmd_companies(args):
+    rows = _application_tracker().company_history()
+    if args.applied_only:
+        rows = [row for row in rows if row.get("applied_count", 0) > 0]
+    print(f"{'company':28} {'roles':>5} {'applied':>7} {'platforms':20} account state")
+    for row in rows:
+        print(
+            f"{row['company'][:28]:28} {row['role_count']:>5} {row['applied_count']:>7} "
+            f"{','.join(row['platforms'])[:20]:20} sign-in accounts: {row['account_count']}"
+        )
 
 
 def cmd_migrate(args):
@@ -313,6 +448,66 @@ def main():
     status_parser = subparsers.add_parser("status", help="Show queue status")
     status_parser.add_argument("-v", "--verbose", action="store_true", help="Show all jobs")
     status_parser.set_defaults(func=cmd_status)
+
+    # Unified application tracking commands (same SQLite database as the queue).
+    track_start = subparsers.add_parser("track-start", help="Start a timed application attempt")
+    track_start.add_argument("url", help="Official job URL")
+    track_start.add_argument("--company", required=True)
+    track_start.add_argument("--title", required=True)
+    track_start.add_argument("--platform", required=True)
+    track_start.add_argument("--workflow", default="simplify")
+    track_start.set_defaults(func=cmd_track_start)
+
+    track_phase = subparsers.add_parser("track-phase", help="Move an attempt to a measured phase")
+    track_phase.add_argument("attempt_id", type=int)
+    track_phase.add_argument("phase")
+    track_phase.add_argument("--note", default="")
+    track_phase.set_defaults(func=cmd_track_phase)
+
+    track_hiccup = subparsers.add_parser("track-hiccup", help="Record portal friction and its reusable fix")
+    track_hiccup.add_argument("attempt_id", type=int)
+    track_hiccup.add_argument("category")
+    track_hiccup.add_argument("--description", required=True)
+    track_hiccup.add_argument("--field", default="")
+    track_hiccup.add_argument("--resolution", default="")
+    track_hiccup.add_argument("--reusable-fix", default="")
+    track_hiccup.add_argument("--status", choices=["open", "resolved"], default=None)
+    track_hiccup.add_argument("--seconds-lost", type=float, default=None)
+    track_hiccup.set_defaults(func=cmd_track_hiccup)
+
+    track_end = subparsers.add_parser("track-end", help="Finish an attempt and update job status")
+    track_end.add_argument("attempt_id", type=int)
+    track_end.add_argument("outcome", choices=["applied", "blocked", "skipped", "failed", "needs_review"])
+    track_end.add_argument("--evidence", default="")
+    track_end.add_argument("--note", default="")
+    track_end.set_defaults(func=cmd_track_end)
+
+    history = subparsers.add_parser("history", help="List tracked jobs and application outcomes")
+    history.add_argument("--status", default=None)
+    history.set_defaults(func=cmd_history)
+
+    hiccups = subparsers.add_parser("hiccups", help="Summarize recurring friction by portal")
+    hiccups.add_argument("--platform", default=None)
+    hiccups.set_defaults(func=cmd_hiccups)
+
+    account_check = subparsers.add_parser("account-check", help="Choose sign-in versus account creation")
+    account_check.add_argument("--company", required=True)
+    account_check.add_argument("--platform", required=True)
+    account_check.add_argument("--url", required=True)
+    account_check.set_defaults(func=cmd_account_check)
+
+    account_set = subparsers.add_parser("account-set", help="Record a confirmed company portal account")
+    account_set.add_argument("--company", required=True)
+    account_set.add_argument("--platform", required=True)
+    account_set.add_argument("--url", required=True)
+    account_set.add_argument("--email", required=True)
+    account_set.add_argument("--status", choices=["confirmed", "created", "signed_in", "failed"], default="confirmed")
+    account_set.add_argument("--note", default="")
+    account_set.set_defaults(func=cmd_account_set)
+
+    companies = subparsers.add_parser("companies", help="Summarize prior roles and reusable accounts by company")
+    companies.add_argument("--applied-only", action="store_true", help="Show only companies with an applied job")
+    companies.set_defaults(func=cmd_companies)
     
     # migrate command
     migrate_parser = subparsers.add_parser("migrate", help="Migrate from JSON to SQLite database")

@@ -236,7 +236,13 @@ class JobQueueDB:
             job.updated_at = datetime.utcnow()
             
             # Set completed_at for terminal states
-            if status in [JobStatus.APPLIED, JobStatus.FAILED, JobStatus.NEEDS_REVIEW]:
+            if status in [
+                JobStatus.APPLIED,
+                JobStatus.FAILED,
+                JobStatus.NEEDS_REVIEW,
+                JobStatus.BLOCKED,
+                JobStatus.SKIPPED,
+            ]:
                 job.completed_at = datetime.utcnow()
             
             if notes is not None:
@@ -286,6 +292,8 @@ class JobQueueDB:
             applied = session.query(Job).filter(Job.status == JobStatus.APPLIED.value).count()
             needs_review = session.query(Job).filter(Job.status == JobStatus.NEEDS_REVIEW.value).count()
             failed = session.query(Job).filter(Job.status == JobStatus.FAILED.value).count()
+            blocked = session.query(Job).filter(Job.status == JobStatus.BLOCKED.value).count()
+            skipped = session.query(Job).filter(Job.status == JobStatus.SKIPPED.value).count()
             
             return {
                 "total": total,
@@ -294,6 +302,8 @@ class JobQueueDB:
                 "applied": applied,
                 "needs_review": needs_review,
                 "failed": failed,
+                "blocked": blocked,
+                "skipped": skipped,
             }
         finally:
             session.close()

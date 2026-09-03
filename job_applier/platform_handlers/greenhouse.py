@@ -133,7 +133,7 @@ MAP_FIELDS_JS = r"""
     const k = keyOf(c);
     if (!k || seen.has(k)) continue;
     const kind = kindOf(c);
-    if (!/question_\d+|^first_name$|^last_name$|^preferred_name$|^email$|^phone$|^country$|^candidate-location$|^location$|^website$|^linkedin$|^resume$|name|email|phone|location|country|website|linkedin/i.test(k)) continue;
+    if (!/^\d+$|question_\d+|^first_name$|^last_name$|^preferred_name$|^email$|^phone$|^country$|^candidate-location$|^location$|^website$|^linkedin$|^resume$|name|email|phone|location|country|website|linkedin/i.test(k)) continue;
     seen.add(k);
     out.push({
       id: k,

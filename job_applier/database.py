@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, List
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum as SQLEnum, text
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey, UniqueConstraint, Enum as SQLEnum, text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
 from sqlalchemy.pool import StaticPool
 
@@ -23,6 +23,8 @@ class JobStatus(str, Enum):
     APPLIED = "applied"
     NEEDS_REVIEW = "needs_review"
     FAILED = "failed"
+    BLOCKED = "blocked"
+    SKIPPED = "skipped"
 
 
 class StepResult(str, Enum):
@@ -222,6 +224,73 @@ class Screenshot(Base):
             "page_url": self.page_url,
             "page_title": self.page_title,
         }
+
+
+class ApplicationAttempt(Base):
+    """One end-to-end attempt to apply for a tracked job."""
+    __tablename__ = "application_attempts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False, index=True)
+    platform = Column(String(50), nullable=False)
+    workflow = Column(String(100), nullable=True)
+    outcome = Column(String(50), nullable=True)
+    evidence = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    meets_target = Column(Boolean, nullable=True)
+
+
+class AttemptPhase(Base):
+    """Measured phase within an application attempt."""
+    __tablename__ = "attempt_phases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    attempt_id = Column(Integer, ForeignKey("application_attempts.id"), nullable=False, index=True)
+    phase = Column(String(50), nullable=False)
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    ended_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    note = Column(Text, nullable=True)
+
+
+class ApplicationHiccup(Base):
+    """Portal-specific friction, its resolution, and reusable fix."""
+    __tablename__ = "application_hiccups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    attempt_id = Column(Integer, ForeignKey("application_attempts.id"), nullable=False, index=True)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False, index=True)
+    platform = Column(String(50), nullable=False, index=True)
+    phase = Column(String(50), nullable=True)
+    category = Column(String(100), nullable=False, index=True)
+    field_label = Column(Text, nullable=True)
+    description = Column(Text, nullable=False)
+    resolution = Column(Text, nullable=True)
+    reusable_fix = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="resolved")
+    seconds_lost = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class CompanyPortalAccount(Base):
+    """Known candidate account for a company-specific ATS portal."""
+    __tablename__ = "company_portal_accounts"
+    __table_args__ = (UniqueConstraint("portal_key", "email", name="uq_portal_account_email"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_key = Column(String(255), nullable=False, index=True)
+    company_name = Column(String(255), nullable=False)
+    platform = Column(String(50), nullable=False, index=True)
+    portal_key = Column(String(255), nullable=False, index=True)
+    email = Column(String(320), nullable=False)
+    status = Column(String(30), nullable=False, default="confirmed")
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_successful_login_at = Column(DateTime, nullable=True)
 
 
 # =============================================================================

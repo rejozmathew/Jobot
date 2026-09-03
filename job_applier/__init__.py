@@ -1,15 +1,14 @@
-"""Job Applier - Automated job application system built on browser-use."""
+"""Job Applier package with lazy imports for browser-heavy components."""
 
-from .agent import JobApplyAgent
-from .db_queue import JobQueue, JobQueueDB, QueuedJob, AddJobRequest
 from .database import JobStatus, get_db_manager, get_session
-from .runner import JobRunner
-from .migrate import migrate_from_json, check_migration_status
+from .db_queue import AddJobRequest, JobQueue, JobQueueDB, QueuedJob
+from .migrate import check_migration_status, migrate_from_json
+from .application_tracker import ApplicationTracker
 
 __all__ = [
     "JobApplyAgent",
     "JobQueue",
-    "JobQueueDB", 
+    "JobQueueDB",
     "QueuedJob",
     "AddJobRequest",
     "JobStatus",
@@ -18,4 +17,18 @@ __all__ = [
     "get_session",
     "migrate_from_json",
     "check_migration_status",
+    "ApplicationTracker",
 ]
+
+
+def __getattr__(name):
+    """Load browser-use components only for commands that actually apply."""
+    if name == "JobApplyAgent":
+        from .agent import JobApplyAgent
+
+        return JobApplyAgent
+    if name == "JobRunner":
+        from .runner import JobRunner
+
+        return JobRunner
+    raise AttributeError(name)
