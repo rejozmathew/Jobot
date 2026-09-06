@@ -1,0 +1,41 @@
+# JobBot modernization — Windows Hermes implementation handoff
+
+Prepared: 2026-09-06.
+
+This is a specification and instruction package. It does not contain an implemented application, and it is not a report of passed application tests.
+
+## Final decision
+
+Use the existing **Windows Hermes** as the primary builder and integration tester, using the strongest appropriate model actually available through its configured provider. Retain the current job-application conversation long enough to capture its working knowledge and explicitly switch into an engineering task. Do not continue applying to jobs while rewriting the same application or shared skills.
+
+All implementation and current testing happen on the main Windows PC. Ubuntu is not a prerequisite. After Windows acceptance and review, publish sanitized code and skills to GitHub and perform a separate update/validation of the existing `ubuntubot` installation.
+
+Codex is optional as a fresh reviewer, not a required coordinator or middleman. Do not have Codex and Hermes simultaneously edit the same checkout. This choice is about preserving the user's tested workflow, not a claim that one harness is universally superior.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `PRD.md` | Authoritative behavior, architecture, boundaries, and scope |
+| `IMPLEMENTATION_PROMPTS.md` | Kickoff for the current Windows Hermes conversation and staged checkpoints |
+| `ACCEPTANCE_AND_DATA.md` | Windows acceptance checks, safe fresh test data, and evidence requirements |
+| `LATER_UBUNTU_ROLLOUT.md` | Deferred GitHub-to-VM update, private data migration, and verification |
+| `SOURCE_NOTES.md` | Reviewed baseline, supplied skills, official documentation, and evidence limits |
+
+Put these files under `docs/jobbot-v1/` in the Windows repository. The builder creates a living `EXECUTION_PLAN.md` and requirement-to-test map there. Capture private runtime details outside Git in a verified ignored location. The plan records what has been done; it must not silently change the PRD.
+
+## Start
+
+Paste the kickoff in `IMPLEMENTATION_PROMPTS.md` into the existing Windows Hermes job-application conversation. It instructs Hermes to inspect the actual checkout and skills, preserve working knowledge, create an implementation branch without discarding local changes, initialize separate synthetic test data, and then implement in stages.
+
+One coordinated task is preferred over many unrelated prompts. The stage prompts are checkpoints or resumption instructions, not a request to start five agents. Continue reversible local engineering without asking after every file change. Credentials, destructive changes, live external actions, and deployment remain explicit boundaries.
+
+## What stays
+
+Hermes reasons and applies sequentially in bounded batch sessions. Simplify handles bulk filling. The app owns the queue, account registry, attempt state, concise timeline, timing, controls, and durable procedural lessons. Multiple discovery tools and manual URLs feed one intake service. The worker protocol is independent of Hermes, model choice, and autofill provider.
+
+## What not to do
+
+Do not rewrite the autofill engine, rebuild Hermes, port Autograph broadly, replace the frontend framework, or add cover-letter generation to this release. Do not wipe existing databases or copy credentials/browser profiles into Git. Do not debug against Ubuntu yet. Do not claim Windows tests establish Ubuntu production readiness.
+
+The first Windows database is a new synthetic development instance, not a deletion of the old database. A real Windows pilot's submissions/accounts are real history and must survive eventual migration. A new email address does not justify applying again to a previously submitted requisition.
