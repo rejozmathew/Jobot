@@ -58,23 +58,32 @@ class EventServices:
             self._get(db,'application_attempts',attempt_id)
             return [dict(x) for x in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY recorded_at,id',(attempt_id,))]
 
-    def action_start(self, attempt_id, *, worker_id, fence, action_id, tool_name):
+    def action_start(self, attempt_id, *, worker_id, fence, action_id, tool_name, writes_browser=True):
+        if type(writes_browser) is not bool:raise ProtocolError('invalid_writer_flag')
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
             run=self._get(db,'runs',a['run_id'])
             if run['control']!='running': raise ProtocolError(run['control'])
             old=db.execute('SELECT * FROM managed_actions WHERE id=?',(action_id,)).fetchone()
             if old:
-                if old['attempt_id']!=attempt_id or old['tool_name']!=tool_name: raise ProtocolError('idempotency_conflict')
+                if old['attempt_id']!=attempt_id or old['tool_name']!=tool_name or old['writes_browser']!=int(writes_browser): raise ProtocolError('idempotency_conflict')
                 if old['ended_at']: raise ProtocolError('action_already_finished')
                 return dict(old)
-            db.execute('INSERT INTO managed_actions(id,attempt_id,tool_name,started_at) VALUES (?,?,?,?)',(action_id,attempt_id,safe_text(tool_name),self.now()))
+            if writes_browser and (a['writer_state']!='idle' or db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1',(attempt_id,)).fetchone()):
+                raise ProtocolError('browser_writer_busy')
+            db.execute('INSERT INTO managed_actions(id,attempt_id,tool_name,started_at,writes_browser) VALUES (?,?,?,?,?)',(action_id,attempt_id,safe_text(tool_name),self.now(),int(writes_browser)))
             if not hasattr(self,'_action_clocks'):self._action_clocks={}
             self._action_clocks[action_id]=time.monotonic()
             return dict(db.execute('SELECT * FROM managed_actions WHERE id=?',(action_id,)).fetchone())
 
-    def action_end(self, attempt_id, *, worker_id, fence, action_id, status):
+    def action_end(self, attempt_id, *, worker_id, fence, action_id, status, duration_seconds=None, observed_at=None):
         if status not in ('success','failed','aborted'):raise ProtocolError('invalid_action_status')
+        if duration_seconds is not None and (type(duration_seconds) not in (int,float) or not math.isfinite(duration_seconds) or duration_seconds<0):
+            raise ProtocolError('invalid_duration')
+        if observed_at is not None:
+            try:
+                if datetime.fromisoformat(observed_at).tzinfo is None:raise ValueError()
+            except (TypeError,ValueError):raise ProtocolError('timestamp_requires_timezone')
         with self.tx() as db:
             a=self._get(db,'application_attempts',attempt_id)
             if a['worker_id']!=worker_id or a['fence']!=fence:raise ProtocolError('stale_owner')
@@ -84,10 +93,11 @@ class EventServices:
                 if action['status']!=status:raise ProtocolError('idempotency_conflict')
                 return dict(action)
             start=getattr(self,'_action_clocks',{}).pop(action_id,None)
-            duration=time.monotonic()-start if start is not None else None
-            db.execute('UPDATE managed_actions SET ended_at=?,status=?,duration_seconds=?,uncertainty=? WHERE id=?',(self.now(),status,duration,int(start is None),action_id))
+            duration=duration_seconds if duration_seconds is not None else (time.monotonic()-start if start is not None else None)
+            completed_at=observed_at or self.now()
+            db.execute('UPDATE managed_actions SET ended_at=?,status=?,duration_seconds=?,uncertainty=? WHERE id=?',(completed_at,status,duration,int(duration is None),action_id))
             self._append_event(db,a,worker_id=worker_id,fence=fence,event_id='action-end:'+action_id,
-                action_id=action_id,event_type='tool_finished',observed_at=self.now(),
+                action_id=action_id,event_type='tool_finished',observed_at=completed_at,
                 duration_seconds=duration,payload={'tool_name':action['tool_name'],'status':status})
             return dict(self._get(db,'managed_actions',action_id))
 

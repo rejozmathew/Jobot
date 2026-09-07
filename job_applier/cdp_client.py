@@ -334,14 +334,29 @@ class CDPBrowser:
 
     @classmethod
     async def connect(cls, cdp_url: str, page_url_substring: str = "",
-                      create_new: bool = False) -> "CDPBrowser":
+                      create_new: bool = False, *, target_id: Optional[str] = None) -> "CDPBrowser":
         cdp_url = cdp_url.rstrip("/")
+        if target_id is not None:
+            import re
+            if not isinstance(target_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", target_id):
+                raise ValueError("invalid_target_id")
+            if create_new or page_url_substring:
+                raise ValueError("conflicting_target_options")
+            endpoint = urllib.parse.urlparse(cdp_url)
+            if (endpoint.scheme != "http" or endpoint.hostname not in ("127.0.0.1", "localhost", "::1")
+                    or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+                    or endpoint.path):
+                raise ValueError("owned_target_requires_loopback_cdp")
         with urllib.request.urlopen(cdp_url + "/json/list", timeout=5) as r:
             targets = json.load(r)
         pages = [t for t in targets if t.get("type") == "page"]
 
         chosen = None
-        if page_url_substring:
+        if target_id is not None:
+            chosen = next((t for t in pages if t.get("id") == target_id), None)
+            if chosen is None:
+                raise ValueError("owned_target_not_found")
+        elif page_url_substring:
             for t in pages:
                 if page_url_substring in (t.get("url") or ""):
                     chosen = t
@@ -358,6 +373,14 @@ class CDPBrowser:
         ws_url = chosen.get("webSocketDebuggerUrl")
         if not ws_url:
             raise RuntimeError("CDP target has no webSocketDebuggerUrl")
+        if target_id is not None:
+            debugger = urllib.parse.urlparse(ws_url)
+            if (debugger.scheme not in ("ws", "wss")
+                    or debugger.hostname not in ("127.0.0.1", "localhost", "::1")
+                    or debugger.port != (endpoint.port or 80)
+                    or debugger.path != "/devtools/page/" + target_id
+                    or debugger.username or debugger.password or debugger.query or debugger.fragment):
+                raise ValueError("unsafe_owned_debugger_url")
         ws = await _WS.connect(ws_url)
         session = _CDPSession(ws)
         await session.start()

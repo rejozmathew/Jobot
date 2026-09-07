@@ -1,0 +1,21 @@
+name: jobbot-worker
+version: 0.1.0
+description: Managed JobBot worker protocol and redacted observations.
+kind: standalone
+provides_tools:
+  - jobbot
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_api_request
+  - post_api_request
+  - api_request_error
+python_dependencies:
+  - httpx>=0.28,<1
+config_schema:
+  app_config:
+    type: str
+    description: Absolute path to the explicit JobBot worker configuration.
+  app_repo:
+    type: str
+    description: Absolute path to the reviewed Auto Job Applier checkout.

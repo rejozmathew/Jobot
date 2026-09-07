@@ -97,7 +97,12 @@ def migration_7(db):
         AND TRIM(COALESCE(a.evidence,''))<>'' ORDER BY a.completed_at,a.id""")
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7)]
+def migration_8(db):
+    add_columns(db,'managed_actions',{'writes_browser':'INTEGER NOT NULL DEFAULT 1'})
+    db.execute('CREATE UNIQUE INDEX one_browser_writer ON managed_actions(attempt_id) WHERE ended_at IS NULL AND writes_browser=1')
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8)]
 
 
 def migrate(path):

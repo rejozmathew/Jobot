@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- Synthetic fixture; not official Simplify support -->
+<head>
+  <meta charset="utf-8">
+  <title>Disabled Stand-in Form</title>
+  <style>
+    .notice { font-size: 12px; color: #666; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="notice">Synthetic fixture; not official Simplify support</div>
+  <h1 id="application-heading">Step 1: Application Information</h1>
+
+  <form id="application-form" onsubmit="event.preventDefault(); return false;">
+    <div>
+      <label for="applicant_name">Full Name *</label>
+      <input type="text" id="applicant_name" name="applicant_name" required value="" />
+    </div>
+    <div>
+      <button type="submit" id="submit-application-btn">Submit Application</button>
+    </div>
+  </form>
+
+  <div class="simplify-jobs-shadow-root"></div>
+
+  <script>
+    (function() {
+      const root = document.querySelector('.simplify-jobs-shadow-root');
+      if (!root) return;
+      const shadow = root.attachShadow({ mode: 'open' });
+      shadow.innerHTML = `
+        <div class="simplify-panel" data-status="unsupported">
+          <button id="autofill-trigger" type="button" disabled>Autofill This Page</button>
+          <button id="continue-trigger" type="button" disabled>Continue Application</button>
+        </div>
+      `;
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- Synthetic fixture; not official Simplify support -->
+<head>
+  <meta charset="utf-8">
+  <title>Supported Stand-in Form</title>
+  <style>
+    .notice { font-size: 12px; color: #666; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="notice">Synthetic fixture; not official Simplify support</div>
+  <h1 id="application-heading">Step 1: Application Information</h1>
+
+  <form id="application-form" onsubmit="event.preventDefault(); return false;">
+    <div>
+      <label for="applicant_name">Full Name *</label>
+      <input type="text" id="applicant_name" name="applicant_name" required value="" />
+    </div>
+    <div>
+      <label for="applicant_email">Email Address *</label>
+      <input type="email" id="applicant_email" name="applicant_email" required value="" />
+    </div>
+    <div>
+      <button type="submit" id="submit-application-btn">Submit Application</button>
+    </div>
+  </form>
+
+  <div class="simplify-jobs-shadow-root"></div>
+
+  <script>
+    (function() {
+      const root = document.querySelector('.simplify-jobs-shadow-root');
+      if (!root) return;
+      const shadow = root.attachShadow({ mode: 'open' });
+      shadow.innerHTML = `
+        <div class="simplify-panel" data-status="ready">
+          <button id="autofill-trigger" type="button">Autofill This Page</button>
+          <button id="continue-trigger" type="button">Continue Application</button>
+        </div>
+      `;
+
+      const autofillBtn = shadow.getElementById('autofill-trigger');
+      const continueBtn = shadow.getElementById('continue-trigger');
+      const panel = shadow.querySelector('.simplify-panel');
+
+      autofillBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        panel.setAttribute('data-status', 'active');
+        const nameField = document.getElementById('applicant_name');
+        if (nameField) {
+          nameField.value = 'Candidate Name';
+          nameField.dispatchEvent(new Event('input', { bubbles: true }));
+          nameField.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        panel.setAttribute('data-status', 'complete');
+      });
+
+      continueBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        const heading = document.getElementById('application-heading');
+        if (heading) {
+          heading.textContent = 'Step 2: Review and Confirmation';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

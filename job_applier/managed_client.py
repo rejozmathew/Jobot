@@ -10,6 +10,7 @@ class Client:
         if parsed.scheme!='http' or parsed.hostname not in ('127.0.0.1','localhost','::1') or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ProtocolError('loopback_url_required')
         if not token or not instance_id:raise ProtocolError('explicit_credentials_required')
+        self.instance_id=instance_id
         self.http=httpx.Client(base_url=base_url.rstrip('/'),headers={'Authorization':'Bearer '+token,'X-JobBot-Instance':instance_id},transport=transport,timeout=15,trust_env=False,follow_redirects=False)
 
     def call(self, operation, **kwargs):

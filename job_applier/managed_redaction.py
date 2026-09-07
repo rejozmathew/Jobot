@@ -4,7 +4,7 @@ import re
 PAYLOAD_FIELDS = frozenset({
     'category', 'error_type', 'tool', 'tool_name', 'status', 'page', 'evidence',
     'phase', 'helper_id', 'helper_version', 'lesson_id', 'field', 'resolution',
-    'reason_code', 'provider', 'model', 'input_tokens', 'output_tokens', 'operation',
+    'reason_code', 'provider', 'model', 'response_model', 'input_tokens', 'output_tokens', 'operation',
 })
 SECRET = re.compile(r'''(?ix)(?:\b(?:password|passwd|otp|(?:access_|refresh_|reset_)?token|api[_-]?key|cookie|authorization|secret)[\\"']*\s*[=:]|\bbearer\s+\S+)''')
 
