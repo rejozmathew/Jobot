@@ -10,11 +10,12 @@ from .managed_redaction import reject_secrets
 DEFAULTS={'mode':'development','submission_mode':'review','worker':'external','autofill':'simplify',
     'screenshots':False,'timezone':'UTC','trigger':'manual','allowed_fallback':'targeted',
     'field_seconds':60,'no_progress_seconds':45,'attempt_seconds':300,'lease_seconds':60,
-    'reasoning_provider':None,'reasoning_model':None,'learning_activation':'manual',
-    'notifications':'none','excluded_companies':[],'market_countries':['US']}
+    'reasoning_provider':None,'reasoning_model':None,'reasoning_effort':'low','learning_activation':'manual',
+    'notifications':'none','excluded_companies':[],'market_countries':['US'],'browser_mode':'headed'}
 CHOICES={'mode':('development','pilot'),'submission_mode':('review','submit'),
     'worker':('external','hermes'),'autofill':('simplify','native'),'trigger':('manual',),
-    'allowed_fallback':('targeted','block'),'learning_activation':('manual',),'notifications':('none',)}
+    'allowed_fallback':('targeted','block'),'learning_activation':('manual',),'notifications':('none',),
+    'browser_mode':('headed','headless'),'reasoning_effort':('low','medium','high','xhigh')}
 BOUNDS={'field_seconds':(1,300),'no_progress_seconds':(1,600),'attempt_seconds':(1,3600),'lease_seconds':(10,600)}
 PUBLIC_ID=re.compile(r'^[A-Za-z0-9_.:/-]{1,250}$')
 
@@ -46,6 +47,10 @@ class SettingsServices:
         if snapshot.get('autofill')=='native' and (not isinstance(capabilities.get('autofill_strategies'),list) or 'native' not in capabilities['autofill_strategies']):raise ProtocolError('autofill_capability_unavailable')
         for setting,reported in (('reasoning_provider','provider'),('reasoning_model','model')):
             if snapshot.get(setting) and capabilities.get(reported)!=snapshot[setting]:raise ProtocolError('reasoning_selection_mismatch')
+        if capabilities.get('reasoning_effort') and capabilities['reasoning_effort']!=snapshot.get('reasoning_effort','low'):
+            raise ProtocolError('reasoning_selection_mismatch')
+        if capabilities.get('browser_mode')=='headless' and snapshot.get('browser_mode','headed')=='headed':
+            raise ProtocolError('browser_mode_mismatch')
 
     def _settings_record(self,db):
         row=db.execute('SELECT * FROM settings_revisions ORDER BY version DESC LIMIT 1').fetchone()

@@ -10,7 +10,7 @@ from .managed_client import Client
 from .managed_shared import ProtocolError, uid
 
 HOOKS=('pre_tool_call','post_tool_call','pre_api_request','post_api_request','api_request_error')
-OPERATIONS=('status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy')
+OPERATIONS=('status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy','browser_observe')
 SCHEMA={'name':'jobbot','description':'Pull one reserved job, report verified milestones, and respect app-owned controls. Never starts a model or legacy agent.',
     'parameters':{'type':'object','properties':{'operation':{'type':'string','enum':list(OPERATIONS)},'parameters':{'type':'object'}},'required':['operation'],'additionalProperties':False}}
 
@@ -49,6 +49,21 @@ class PluginController:
             u=urlsplit(kwargs.get('base_url') or '')
             result['subscription_route']=(u.scheme=='https' and u.hostname=='chatgpt.com' and u.path.startswith('/backend-api/codex') and not u.query and not u.username and not u.password)
         except (ValueError,TypeError):result['subscription_route']=False
+        rc=kwargs.get('reasoning_config')
+        effort=None
+        if isinstance(rc,dict):
+            effort=rc.get('effort')
+            result['reasoning_config']=rc
+        elif hasattr(rc,'effort'):
+            effort=getattr(rc,'effort')
+            result['reasoning_config']={'effort':effort}
+        elif isinstance(rc,str):
+            effort=rc
+            result['reasoning_config']={'effort':effort}
+        if not effort and isinstance(kwargs.get('reasoning_effort'),str):
+            effort=kwargs.get('reasoning_effort')
+        if isinstance(effort,str):
+            result['reasoning_effort']=effort.lower()
         with self._lock:self.runtime[sid]=result
 
     def route(self, name, **kwargs):
@@ -66,6 +81,8 @@ class PluginController:
             raise ProtocolError('requested_runtime_not_verified')
         if cfg['provider']=='openai-codex' and not observed.get('subscription_route'):
             raise ProtocolError('subscription_route_not_verified')
+        if cfg.get('reasoning_effort') and observed.get('reasoning_effort') and observed['reasoning_effort']!=cfg['reasoning_effort']:
+            raise ProtocolError('requested_runtime_not_verified')
         with self._lock:
             if sid not in self.adapters:
                 client=Client(cfg['base_url'],cfg['instance_id'],os.environ[cfg['worker_token_env']])
@@ -75,7 +92,8 @@ class PluginController:
                     spool=Path(cfg['spool_dir'])/(hashlib.sha256(sid.encode()).hexdigest()+'.db')
                     self.adapters[sid]=HermesAdapter(client,worker_id=cfg['worker_id'],session_id=sid,
                         browser_profile=cfg['browser_profile'],skill_version=cfg['skill_version'],
-                        provider=cfg['provider'],model=cfg['model'],spool_path=spool)
+                        provider=cfg['provider'],model=cfg['model'],spool_path=spool,
+                        reasoning_effort=cfg.get('reasoning_effort'))
                 except Exception:
                     client.close();raise
             return self.adapters[sid]
@@ -152,7 +170,8 @@ class PluginController:
                         'writer_state':('state',),'ack_control':('quiescent',), 'submission_intent':('fixture','evidence'),
                         'record_account_event':('namespace','state','credential_ref','request_id','evidence'),
                         'report_upload':('asset_id','status','evidence'),'extend_budget':('seconds','reason'),
-                        'bind_target':('target_id','url'),'target_state':('target_id','state','evidence')}[op]
+                        'bind_target':('target_id','url'),'target_state':('target_id','state','evidence'),
+                        'browser_observe':('target_id','cdp_url','expected_url')}[op]
                     if any(k not in permitted for k in params):raise ProtocolError('invalid_payload')
                     if op=='submission_intent' and not params.get('evidence'):raise ProtocolError('invalid_payload')
                     result=adapter.client.call(op,**context,**params)

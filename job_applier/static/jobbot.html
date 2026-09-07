@@ -1,14 +1,362 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JobBot — Application Operations</title><link rel="stylesheet" href="/static/jobbot.css"><script src="/static/jobbot.js" defer></script></head>
-<body><header><div><p class="eyebrow">AUTO JOB APPLIER</p><h1>Application operations</h1></div><div class="header-actions"><span id="mode" class="badge">Not connected</span><button id="refresh" hidden>Refresh</button><button id="logout" hidden>Sign out</button></div></header>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JobBot — Application Operations</title>
+  <link rel="stylesheet" href="/static/jobbot.css">
+  <script src="/static/jobbot.js" defer></script>
+</head>
+<body>
+<header>
+  <div>
+    <p class="eyebrow">AUTO JOB APPLIER</p>
+    <h1>Application Operations</h1>
+  </div>
+  <div class="header-actions">
+    <span id="mode" class="badge">Not connected</span>
+    <button id="refresh" hidden>Refresh</button>
+    <button id="logout" hidden>Sign out</button>
+  </div>
+</header>
+
 <p id="notice" role="status" aria-live="polite"></p>
-<section id="login-panel" class="card narrow"><h2>Operator access</h2><p>Use the local operator credential for this instance. Candidate passwords and verification codes do not belong here.</p><form id="login-form"><label>Operator credential<input id="operator-token" type="password" autocomplete="off" required></label><button class="primary" type="submit">Connect</button></form></section>
-<main id="console" hidden><div id="instance" class="identity"></div>
-<nav aria-label="Workspace"><button data-tab="queue" class="active">Intake &amp; queue</button><button data-tab="run">Current run</button><button data-tab="accounts">Accounts &amp; history</button><button data-tab="knowledge">Lessons &amp; helpers</button><button data-tab="documents">Documents &amp; assessments</button><button data-tab="settings">Settings &amp; health</button></nav>
-<section id="tab-queue" class="tab"><div class="split"><section class="card"><h2>Add a posting</h2><p>Intake records evidence. It does not authorize execution.</p><form id="intake-form"><label>Official URL<input id="job-url" type="url" required></label><div class="form-row"><label>Company<input id="job-company" type="text"></label><label>Role title<input id="job-title" type="text"></label></div><button type="submit">Add to intake</button></form></section><section class="card"><h2>Reserve a batch</h2><label>Candidate<select id="candidate"></select></label><label>Configured browser profile<input id="browser-profile" type="text" required placeholder="Exact profile identifier"></label><div class="toolbar"><button id="mark-ready">Mark selected ready</button><button id="request-run" class="primary">Request run</button></div><p id="selection">No jobs selected</p><p>A request waits for an external worker to accept. No legacy agent is started by this page.</p></section></div><section class="card"><div class="section-title"><h2>Queue</h2><span id="queue-count"></span></div><div class="table-wrap"><table><thead><tr><th>Select</th><th>Company / role</th><th>State</th><th>Eligibility</th><th>Assessment</th><th>Sources</th></tr></thead><tbody id="queue-rows"></tbody></table></div></section></section>
-<section id="tab-run" class="tab" hidden><section class="card"><div class="section-title"><h2>Run control</h2><select id="run-picker" aria-label="Run"></select></div><div class="toolbar"><button data-control="pause">Request pause</button><button data-control="resume">Resume</button><button data-control="stop" class="danger">Request stop</button><button id="copy-handoff">Copy worker handoff</button></div><p id="run-state"></p><div id="run-counts" class="stats"></div><p id="run-owner" class="mono"></p><div id="focused-context"></div><details><summary>Owned targets and bounded extensions</summary><div id="target-list"></div><div id="extension-list"></div></details></section><div class="split"><section class="card"><h2>Attempts</h2><div id="attempts"></div></section><section class="card"><h2>Attempt timeline</h2><p id="attempt-summary">Select an attempt.</p><div id="events"></div></section></div></section>
-<section id="tab-accounts" class="tab" hidden><section class="card"><h2>Portal accounts</h2><p>Scoped to candidate and verified namespace. Application failure does not erase account state. No passwords or verification codes are displayed.</p><div class="table-wrap"><table><thead><tr><th>Company / namespace</th><th>Identity</th><th>Status</th><th>Last confirmed</th></tr></thead><tbody id="account-rows"></tbody></table></div></section><section class="card"><h2>Run history</h2><div id="history"></div></section></section>
-<section id="tab-settings" class="tab" hidden><section class="card"><div class="section-title"><h2>Effective settings</h2><span id="settings-version"></span></div><p>Changes apply to new requests. Existing attempts retain their snapshots. A requested reasoning model is not an automatic model switch.</p><form id="settings-form"><div id="setting-fields" class="settings-grid"></div><button class="primary" type="submit">Save settings</button></form></section><section class="card"><h2>Health &amp; resolved paths</h2><pre id="health"></pre></section></section>
-<section id="tab-knowledge" class="tab" hidden><div class="split"><section class="card"><h2>Observed lessons</h2><p>Candidate observations are advisory. Only an operator can activate verified procedural knowledge; facts and permissions are not rewritten.</p><div id="lesson-list"></div></section><section class="card"><h2>Versioned helper catalogue</h2><p>Registration checks the file and hash. Activation requires evidence and quiescent browser ownership. Code is not executed by this catalogue.</p><div id="helper-list"></div></section></div><section class="card"><h2>Register an existing helper</h2><form id="helper-form"><div class="settings-grid"><label>Helper ID<input id="helper-id" required></label><label>Version<input id="helper-version" required></label><label>Capability<input id="helper-capability" required></label><label>Approved file path<input id="helper-path" required></label><label>SHA-256<input id="helper-hash" minlength="64" maxlength="64" required></label><label>Platform<input id="helper-platform"></label><label>Namespace<input id="helper-namespace"></label><label>Test references (one per line)<textarea id="helper-tests"></textarea></label></div><button type="submit">Register candidate version</button></form></section></section>
-<section id="tab-documents" class="tab" hidden><div class="split"><section class="card"><h2>Document versions</h2><p>Available, selected, upload attempted and upload confirmed are distinct. Registration does not fetch, generate or upload a document.</p><div id="asset-list"></div></section><section class="card"><h2>External match assessments</h2><p>Unassessed is not zero. Scores are versioned evaluator outputs, not hiring probabilities.</p><div id="assessment-list"></div></section></div><section class="card"><h2>Register external document metadata</h2><form id="asset-form"><div class="settings-grid"><label>Candidate<select id="asset-identity" required></select></label><label>Document kind<select id="asset-kind"><option value="resume">Resume</option><option value="cover_letter">Cover letter</option></select></label><label>Version<input id="asset-version" required></label><label>Protected storage reference<input id="asset-ref" required placeholder="storage://..."></label><label>SHA-256<input id="asset-hash" minlength="64" maxlength="64" required></label><label>Provenance source<input id="asset-source" required></label></div><button type="submit">Register available version</button></form></section><section class="card"><h2>Select a document</h2><form id="asset-select-form"><div class="form-row"><label>Document version<select id="select-asset" required></select></label><label>Job<select id="select-asset-job" required></select></label></div><button type="submit">Select for this job</button></form></section></section>
-</main><footer>Evidence-led operations · Review-only development defaults · No automatic letter generation</footer></body></html>
+
+<section id="login-panel" class="card narrow">
+  <h2>Operator Access</h2>
+  <p>Enter local operator credential for this instance. Passwords and verification codes do not belong here.</p>
+  <form id="login-form">
+    <label>Operator credential
+      <input id="operator-token" type="password" autocomplete="off" required>
+    </label>
+    <button class="primary" type="submit">Connect</button>
+  </form>
+</section>
+
+<main id="console" hidden>
+  <nav aria-label="Workspace">
+    <button data-tab="queue" class="active">Applications</button>
+    <button data-tab="run">Activity</button>
+    <button data-tab="profile">Profile</button>
+    <button data-tab="settings">Settings</button>
+    <details class="advanced-nav"><summary>Advanced</summary><div class="advanced-menu">
+      <button data-tab="accounts">Accounts &amp; history</button>
+      <button data-tab="knowledge">Lessons &amp; helpers</button>
+      <button data-tab="documents">Document records</button>
+      <div id="instance" class="identity"></div>
+    </div></details>
+  </nav>
+
+  <!-- TAB: APPLICATIONS (QUEUE & START) -->
+  <section id="tab-queue" class="tab">
+    <section class="card">
+      <h2>Apply with your profile</h2>
+      <p>Select a job below. Your chosen model fills the application using this profile and resume.</p>
+      <div class="operate-grid">
+        <label>Candidate
+          <select id="candidate"></select>
+        </label>
+        <div>
+          <label>Active Resume</label>
+          <div style="margin-top: 6px;">
+            <span id="main-resume-filename" class="badge">None registered</span>
+          </div>
+        </div>
+        <label>Browser Profile
+          <input id="browser-profile" type="text" required placeholder="operator-chrome">
+        </label>
+        <label>Reasoning Model
+          <select id="main-model-picker">
+            <option value="gpt-5.6-luna">Luna (gpt-5.6-luna)</option>
+            <option value="gpt-5.6-terra">Terra (gpt-5.6-terra)</option>
+          </select>
+        </label>
+        <label>Reasoning Effort
+          <select id="main-effort-picker">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="xhigh">X-high</option>
+          </select>
+        </label>
+        <label>Submission Mode
+          <select id="main-submission-mode">
+            <option value="review">Review only</option>
+            <option value="submit">Submit when complete</option>
+          </select>
+        </label>
+      </div>
+      <div class="main-action-bar">
+        <button id="start-application-btn" class="primary large" type="button">Start application</button>
+        <span id="selection">No jobs selected</span>
+      </div>
+      <!-- Legacy controls preserved for compatibility -->
+      <div hidden>
+        <button id="mark-ready">Mark selected ready</button>
+        <button id="request-run">Request run</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <h2>Applications Queue</h2>
+        <span id="queue-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px;">Select</th>
+              <th>Company &amp; Role</th>
+              <th>Status</th>
+              <th>Assessment</th>
+            </tr>
+          </thead>
+          <tbody id="queue-rows"></tbody>
+        </table>
+      </div>
+      <details style="margin-top: 16px;">
+        <summary>Add a Posting &amp; Technical Details</summary>
+        <div style="margin-top: 12px; padding: 12px; background: var(--bg-subtle); border-radius: 4px;">
+          <h3>Add Posting Manually</h3>
+          <form id="intake-form">
+            <label>Official URL
+              <input id="job-url" type="url" required>
+            </label>
+            <div class="form-row">
+              <label>Company
+                <input id="job-company" type="text">
+              </label>
+              <label>Role title
+                <input id="job-title" type="text">
+              </label>
+            </div>
+            <button type="submit">Add to intake</button>
+          </form>
+        </div>
+      </details>
+    </section>
+  </section>
+
+  <!-- TAB: ACTIVITY (RUN & TIMELINE) -->
+  <section id="tab-run" class="tab" hidden>
+    <section class="card">
+      <div class="section-title">
+        <h2>Run Control &amp; Status</h2>
+        <select id="run-picker" aria-label="Run"></select>
+      </div>
+      <div class="toolbar" style="margin-bottom: 12px;">
+        <button data-control="pause">Request pause</button>
+        <button data-control="resume">Resume</button>
+        <button data-control="stop" class="danger">Request stop</button>
+        <button id="copy-handoff" hidden>Copy worker handoff</button>
+      </div>
+      <p id="run-state"></p>
+      <div id="run-counts" class="stats"></div>
+      <p id="run-owner" class="mono"></p>
+      <div id="focused-context"></div>
+      <details>
+        <summary>Owned targets and bounded extensions</summary>
+        <div id="target-list"></div>
+        <div id="extension-list"></div>
+      </details>
+    </section>
+
+    <div class="split">
+      <section class="card">
+        <h2>Attempts</h2>
+        <div id="attempts"></div>
+      </section>
+      <section class="card">
+        <h2>Attempt Timeline</h2>
+        <p id="attempt-summary">Select an attempt.</p>
+        <div id="events"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- TAB: CANDIDATE PROFILE -->
+  <section id="tab-profile" class="tab" hidden>
+    <div class="split">
+      <section class="card">
+        <div class="section-title">
+          <h2>Candidate Profile</h2>
+          <span id="profile-hash" class="mono"></span>
+        </div>
+        <p>Authoritative candidate facts. Edits apply to future attempts only; existing snapshots remain immutable.</p>
+        <div class="form-row">
+          <label>Selected Candidate
+            <select id="profile-candidate"></select>
+          </label>
+        </div>
+        <div class="identity" style="margin-bottom: 12px;">
+          <p><strong>Candidate ID: </strong><span id="profile-id" class="mono"></span> · <strong>Person key: </strong><span id="profile-person-key"></span></p>
+        </div>
+        <form id="profile-form">
+          <label>Email
+            <input id="profile-email" type="email" required>
+          </label>
+          <div class="form-row">
+            <label>Full Name
+              <input id="profile-full-name" type="text">
+            </label>
+            <label>Work Authorization
+              <input id="profile-work-auth" type="text">
+            </label>
+          </div>
+          <p><strong>Selected Resume: </strong><span id="profile-resume">None</span></p>
+          <details style="margin: 12px 0;">
+            <summary>Advanced Factual JSON (no secrets or account credentials)</summary>
+            <textarea id="profile-json" rows="8" class="mono" style="margin-top: 8px;"></textarea>
+          </details>
+          <div class="toolbar">
+            <button class="primary" type="submit">Save profile</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Import &amp; Resume Assets</h2>
+        <p>Import factual data from a legacy JSON file. Secrets, credentials, and policies are strictly excluded.</p>
+        <label>Legacy Profile JSON
+          <input id="profile-import-file" type="file" accept=".json">
+        </label>
+        <div id="profile-import-skipped" class="mono"></div>
+        <hr style="border: 0; border-top: 1px solid var(--border); margin: 16px 0;">
+        <h3>Register Local Resume</h3>
+        <p>Select a file to compute SHA-256 and register locally. Uploads do NOT submit to employers.</p>
+        <form id="profile-resume-form">
+          <label>Resume File (PDF, DOCX, TXT)
+            <input id="profile-resume-file" type="file" accept=".pdf,.docx,.doc,.txt,.rtf" required>
+          </label>
+          <div class="toolbar">
+            <button class="primary" type="submit">Upload &amp; register resume</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </section>
+
+  <!-- TAB: SETTINGS -->
+  <section id="tab-settings" class="tab" hidden>
+    <section class="card">
+      <div class="section-title">
+        <h2>Effective Settings</h2>
+        <span id="settings-version"></span>
+      </div>
+      <p>Operational settings apply to new requests. Existing attempts retain their immutable snapshots.</p>
+      <form id="settings-form">
+        <details open style="margin-bottom: 16px;">
+          <summary>All Operational Settings</summary>
+          <div id="setting-fields" class="settings-grid" style="margin-top: 12px;"></div>
+        </details>
+        <button class="primary" type="submit">Save settings</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <details>
+        <summary>Health &amp; Resolved System Paths</summary>
+        <pre id="health" style="margin-top: 12px;"></pre>
+      </details>
+    </section>
+  </section>
+
+  <!-- TAB: ACCOUNTS -->
+  <section id="tab-accounts" class="tab" hidden>
+    <section class="card">
+      <h2>Portal Accounts</h2>
+      <p>Scoped to candidate and verified namespace. Application failure does not erase account state. No passwords or verification codes are displayed.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Company / Namespace</th><th>Identity</th><th>Status</th><th>Last Confirmed</th></tr>
+          </thead>
+          <tbody id="account-rows"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Run History</h2>
+      <div id="history"></div>
+    </section>
+  </section>
+
+  <!-- TAB: KNOWLEDGE -->
+  <section id="tab-knowledge" class="tab" hidden>
+    <div class="split">
+      <section class="card">
+        <h2>Observed Lessons</h2>
+        <p>Candidate observations are advisory. Only an operator can activate verified procedural knowledge.</p>
+        <div id="lesson-list"></div>
+      </section>
+      <section class="card">
+        <h2>Versioned Helper Catalogue</h2>
+        <p>Registration verifies file and hash. Activation requires evidence and quiescent ownership.</p>
+        <div id="helper-list"></div>
+      </section>
+    </div>
+    <section class="card">
+      <h2>Register an Existing Helper</h2>
+      <form id="helper-form">
+        <div class="settings-grid">
+          <label>Helper ID<input id="helper-id" required></label>
+          <label>Version<input id="helper-version" required></label>
+          <label>Capability<input id="helper-capability" required></label>
+          <label>Approved File Path<input id="helper-path" required></label>
+          <label>SHA-256<input id="helper-hash" minlength="64" maxlength="64" required></label>
+          <label>Platform<input id="helper-platform"></label>
+          <label>Namespace<input id="helper-namespace"></label>
+          <label>Test References (one per line)<textarea id="helper-tests"></textarea></label>
+        </div>
+        <button type="submit">Register candidate version</button>
+      </form>
+    </section>
+  </section>
+
+  <!-- TAB: DOCUMENTS -->
+  <section id="tab-documents" class="tab" hidden>
+    <div class="split">
+      <section class="card">
+        <h2>Document Versions</h2>
+        <p>Available, selected, upload attempted and upload confirmed are distinct.</p>
+        <div id="asset-list"></div>
+      </section>
+      <section class="card">
+        <h2>External Match Assessments</h2>
+        <p>Scores are versioned evaluator outputs, not hiring probabilities.</p>
+        <div id="assessment-list"></div>
+      </section>
+    </div>
+    <section class="card">
+      <h2>Register External Document Metadata</h2>
+      <form id="asset-form">
+        <div class="settings-grid">
+          <label>Candidate<select id="asset-identity" required></select></label>
+          <label>Document Kind<select id="asset-kind"><option value="resume">Resume</option><option value="cover_letter">Cover letter</option></select></label>
+          <label>Version<input id="asset-version" required></label>
+          <label>Storage Reference<input id="asset-ref" required placeholder="storage://..."></label>
+          <label>SHA-256<input id="asset-hash" minlength="64" maxlength="64" required></label>
+          <label>Provenance Source<input id="asset-source" required></label>
+        </div>
+        <button type="submit">Register available version</button>
+      </form>
+    </section>
+    <section class="card">
+      <h2>Select a Document</h2>
+      <form id="asset-select-form">
+        <div class="form-row">
+          <label>Document Version<select id="select-asset" required></select></label>
+          <label>Job<select id="select-asset-job" required></select></label>
+        </div>
+        <button type="submit">Select for this job</button>
+      </form>
+    </section>
+  </section>
+</main>
+
+<footer>
+  Evidence-led operations · Review-only development defaults · No automatic letter generation
+</footer>
+</body>
+</html>

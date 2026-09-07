@@ -68,7 +68,9 @@ class EventServices:
             if writes_browser:self._budget_check(db,a)
             semantic=self._strategy_check(db,a,tool_name) if writes_browser else self._field_context(db,a)
             run=self._get(db,'runs',a['run_id'])
-            if run['control']!='running': raise ProtocolError(run['control'])
+            if run['control']!='running':
+                if writes_browser or tool_name != 'browser_observe' or run['control'] not in ('pause_requested','stop_requested'):
+                    raise ProtocolError(run['control'])
             old=db.execute('SELECT * FROM managed_actions WHERE id=?',(action_id,)).fetchone()
             if old:
                 if old['attempt_id']!=attempt_id or old['tool_name']!=tool_name or old['writes_browser']!=int(writes_browser): raise ProtocolError('idempotency_conflict')

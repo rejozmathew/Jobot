@@ -27,6 +27,8 @@ def attempt_timing_state(db,row,now):
 
 def public_attempt(row,now):
     a=dict(row)
+    raw_profile=row.get('profile_json') or a.get('profile_json') or ''
+    a['profile_hash']=hashlib.sha256(raw_profile.encode()).hexdigest()
     a.pop('profile_json',None)
     config=json.loads(a.get('settings_json') or '{}')
     start=datetime.fromisoformat(a['started_at'])
@@ -74,12 +76,24 @@ class ViewServices:
             current=None
             if chosen:
                 rows=[dict(r) for r in db.execute('SELECT * FROM run_jobs WHERE run_id=? ORDER BY position',(chosen['id'],))]
-                attempts=[public_attempt(attempt_timing_state(db,r,now),now) for r in db.execute('SELECT * FROM application_attempts WHERE run_id=? ORDER BY id',(chosen['id'],))]
+                attempts=[public_attempt(attempt_timing_state(db,r,now),now) for r in db.execute('SELECT a.*, j.company, j.title as job_title, j.url as job_url FROM application_attempts a JOIN jobs j ON j.id=a.job_id WHERE a.run_id=? ORDER BY a.id',(chosen['id'],))]
+                for a in attempts:
+                    if a.get('platform')=='unknown' and a.get('job_url'):
+                        from .managed_context import platform_for_url
+                        p=platform_for_url(a['job_url'])
+                        if p!='unknown':a['platform']=p
                 counts={'selected':len(rows),'current':sum(r['state']=='active' for r in rows),
                     'completed':sum(r['state'] in TERMINAL for r in rows),'remaining':sum(r['state']=='pending' for r in rows),
                     'blocked':sum(r['state'] in ('blocked','submission_unknown','interrupted') for r in rows),
                     'applied':sum(r['state'] in ('applied','already_applied') for r in rows)}
                 current=dict(chosen,run_id=chosen['id'],attempts=attempts,jobs=rows,**counts)
+                chosen_settings=json.loads(chosen['settings_json'])
+                chosen_caps=json.loads(chosen['capabilities_json'] or '{}')
+                current['requested_browser_mode']=chosen_settings.get('browser_mode','headed')
+                current['observed_browser_mode']=chosen_caps.get('observed_browser_mode','unknown')
+                current['requested_reasoning_effort']=chosen_settings.get('reasoning_effort','low')
+                current['actual_reasoning_effort']=chosen_caps.get('reasoning_effort')
+                current['observed_reasoning_effort']=chosen_caps.get('reasoning_effort')
                 current['targets']=[dict(r) for r in db.execute('SELECT t.* FROM owned_targets t JOIN application_attempts a ON a.id=t.attempt_id WHERE a.run_id=? ORDER BY t.created_at,t.id',(chosen['id'],))]
                 for target in current['targets']:
                     target['history']=[dict(r) for r in db.execute('SELECT * FROM target_history WHERE target_record_id=? ORDER BY created_at,id',(target['id'],))]
@@ -94,11 +108,14 @@ class ViewServices:
                     latest=next((p for p in payloads if any(p.get(k) for k in ('phase','activity','page','url','tool_name'))),{})
                     issue=next((p.get('error_type') or p.get('reason_code') or p.get('category') for p in payloads if p.get('status') in ('failed','error','blocked','aborted')),None)
                     versions=json.loads(focus['versions_json'] or '{}')
+                    from .managed_context import platform_for_url
                     current['focused_context']={'is_active':not bool(focus['completed_at']),'state':'active' if not focus['completed_at'] else 'last_completed',
                         'attempt_id':focus['id'],'job':{k:job[k] for k in ('id','company','title','url')},
+                        'platform':focus.get('platform') or platform_for_url(job['url']),
                         'page':latest.get('page') or latest.get('url') or job['url'],'activity':latest.get('activity') or latest.get('phase') or latest.get('tool_name') or focus.get('activity'),
-                        'latest_unresolved_issue':issue or (focus.get('confirmation_evidence') or focus.get('evidence') if focus['outcome'] in ('failed','blocked','interrupted','submission_unknown') else None),
-                        'worker_metadata':{k:versions.get(k) for k in ('skill_version','provider','model','protocol')},
+                        'worker_metadata':{k:versions.get(k) for k in ('skill_version','provider','model','protocol','reasoning_effort')},
+                        'actual_reasoning_effort':versions.get('reasoning_effort'),
+                        'latest_unresolved_issue':issue or (focus.get('evidence') if focus.get('outcome') not in ('applied','already_applied') else None),
                         'settings_hash':focus['settings_hash'],'uncertain_duration':focus['uncertain_duration']}
             schema=db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
         return {'health':dict(self.health(),schema_version=schema),'settings':self.settings_view(),

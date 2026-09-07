@@ -2,23 +2,45 @@
 (async () => {
   const visible = el => { const r=el.getBoundingClientRect(); return r.width>0 && r.height>0 && getComputedStyle(el).visibility!=='hidden'; };
   const publicUrl=location.origin+location.pathname;
-  const host=document.querySelector('.simplify-jobs-shadow-root');
-  const root=host && host.shadowRoot;
+  let hosts=Array.from(document.querySelectorAll('.simplify-jobs-shadow-root'));
+  if(!hosts.length && document.querySelector('.simplify-jobs-shadow-root')) hosts=[document.querySelector('.simplify-jobs-shadow-root')];
+  const roots=hosts.map(h=>h && (h.shadowRoot || (h.tagName ? h : null))).filter(Boolean);
   let scope=window.__jobbotSimplifyScope;
   if(!scope || scope.url!==location.href) scope=window.__jobbotSimplifyScope={url:location.href,id:crypto.randomUUID(),controls:new Map()};
   scope.controls=new Map();
   scope.fieldValues=scope.fieldValues||new Map();
   scope.valueEpoch=scope.valueEpoch||0;
+  const candidates={autofill:[],continue:[]};
+  for(const root of roots) {
+    const btns = (typeof root.querySelectorAll === 'function') ? root.querySelectorAll('button,[role="button"]') : [];
+    for(const button of btns) {
+      if(!visible(button))continue;
+      const label=(button.innerText || button.getAttribute('aria-label') || '').trim().toLowerCase();
+      const kind=/^autofill this page$/.test(label)?'autofill':/^continue application$/.test(label)?'continue':null;
+      if(!kind)continue;
+      const enabled=!button.disabled && button.getAttribute('aria-disabled')!=='true';
+      candidates[kind].push({button,enabled,root});
+    }
+  }
   const controls={autofill:{ref:null,enabled:false},continue:{ref:null,enabled:false}};
-  if(root) for(const button of root.querySelectorAll('button,[role="button"]')) {
-    if(!visible(button))continue;
-    const label=(button.innerText || button.getAttribute('aria-label') || '').trim().toLowerCase();
-    const kind=/^autofill this page$/.test(label)?'autofill':/^continue application$/.test(label)?'continue':null;
-    if(!kind)continue;
-    const ref=crypto.randomUUID();
-    const enabled=!button.disabled && button.getAttribute('aria-disabled')!=='true';
-    scope.controls.set(ref,{element:button,kind});
-    controls[kind]={ref,enabled};
+  for(const kind of ['autofill','continue']) {
+    const actionable = candidates[kind].filter(c=>c.enabled);
+    if(actionable.length === 1) {
+      const chosen = actionable[0];
+      const ref = crypto.randomUUID();
+      scope.controls.set(ref, {element:chosen.button, kind, root:chosen.root});
+      controls[kind] = {ref, enabled:true};
+    } else if(actionable.length > 1) {
+      // Ambiguous multiple actionable controls: fail-closed, do not guess
+      controls[kind] = {ref:null, enabled:false};
+    } else if(candidates[kind].length === 1) {
+      const chosen = candidates[kind][0];
+      const ref = crypto.randomUUID();
+      scope.controls.set(ref, {element:chosen.button, kind, root:chosen.root});
+      controls[kind] = {ref, enabled:false};
+    } else {
+      controls[kind] = {ref:null, enabled:false};
+    }
   }
   // No input values, selected labels, file names, passwords or OTPs leave the page.
   const nodes=[...document.querySelectorAll('input,select,textarea')].filter(visible).slice(0,200);
@@ -52,20 +74,36 @@
   const page_signature=await digest([publicUrl,marker?(marker.textContent||'').slice(0,160):stepHeadings,
     marker?[]:fields.map(({key,type})=>({key,type}))]);
   const fingerprint=await digest([page_signature,headings,fields,scope.valueEpoch]);
-  const text=root?(root.textContent||''):'';
-  const fixture=document.body.textContent.includes('Synthetic fixture; not official Simplify support');
-  const declared=fixture && root && root.querySelector('[data-status]')?.getAttribute('data-status');
-  let status='missing';
-  if(root) {
-    if(root.querySelector('[aria-busy="true"]')||/autofilling|filling your application|autofill in progress/i.test(text)) status='active';
-    else if(/need(?:s)? review/i.test(text))status='needs_review';
-    else if(/autofill complete|application autofilled/i.test(text))status='complete';
-    else if(/sign in to simplify|log in to simplify/i.test(text))status='login_required';
-    else if(/not supported|autofill unavailable/i.test(text))status='unsupported';
-    else if(controls.autofill.enabled)status='ready';
-    else status='unknown';
-    if(declared && ['ready','active','complete','needs_review','unsupported','login_required'].includes(declared))status=declared;
+  const fixture=document.body && document.body.textContent && document.body.textContent.includes('Synthetic fixture; not official Simplify support');
+  let declared=null;
+  if(fixture) {
+    for(const r of roots) {
+      const d=r.querySelector && r.querySelector('[data-status]')?.getAttribute('data-status');
+      if(d) { declared=d; break; }
+    }
   }
-  return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:!!root,status,controls,
+  let status='missing';
+  if(roots.length > 0) {
+    let hasActive=false, hasReview=false, hasComplete=false, hasLogin=false, hasUnsupported=false;
+    for(const r of roots) {
+      const busy = (typeof r.querySelector==='function') ? r.querySelector('[aria-busy="true"]') : null;
+      const text = r.textContent || '';
+      if(busy || /autofilling|filling your application|autofill in progress/i.test(text)) hasActive=true;
+      if(/need(?:s)? review/i.test(text)) hasReview=true;
+      if(/autofill complete|application autofilled/i.test(text)) hasComplete=true;
+      if(/sign in to simplify|log in to simplify/i.test(text)) hasLogin=true;
+      if(/not supported|autofill unavailable/i.test(text)) hasUnsupported=true;
+    }
+    // Fail-closed semantics: active visible writer in any relevant panel beats ready
+    if(hasActive) status='active';
+    else if(hasReview) status='needs_review';
+    else if(hasComplete) status='complete';
+    else if(hasLogin) status='login_required';
+    else if(hasUnsupported) status='unsupported';
+    else if(controls.autofill.enabled) status='ready';
+    else status='unknown';
+    if(declared && ['ready','active','complete','needs_review','unsupported','login_required'].includes(declared)) status=declared;
+  }
+  return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,
     source:fixture?'fixture':'observed_dom',field_summary:{visible:fields.length,required:fields.filter(x=>x.required).length,invalid:fields.filter(x=>x.invalid).length}};
 })()

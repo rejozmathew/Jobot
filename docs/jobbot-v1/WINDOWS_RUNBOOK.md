@@ -26,7 +26,8 @@ The explicit application configuration contains paths/endpoints and **credential
   "worker_id": "windows-hermes",
   "browser_profile": "<explicit-profile-id>",
   "provider": "openai-codex",
-  "model": "gpt-6-astra",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
   "skill_version": "<verified-canonical-skill-version>",
   "spool_dir": "<absolute-private-outbox-directory>"
 }
@@ -53,6 +54,23 @@ hermes plugins doctor <absolute-staged-plugin-directory> --ci
 The current plugin binds to the actual observed model/provider and rejects an unverified or mismatching runtime. `openai-codex` must use the intended subscription route. No automatic API-key, paid-provider or different-model fallback is authorized. A configured tool is not the same as a worker that has accepted a run.
 
 ## Operator flow
+
+### Explicit external application worker
+
+The native application worker used by the supervised pilot is launched separately with the installed Hermes interpreter (not a fabricated dashboard worker):
+
+```text
+<installed-hermes-python> -m job_applier.managed_hermes_worker --config <absolute-app-config.json> --hermes-root <installed-hermes-source> --wait-seconds 60
+```
+
+Run it from this checkout only after code is frozen and the authorized dashboard request exists. It honors the request's frozen provider/model/effort and submission mode; the model must be Luna or Terra through `openai-codex`, without a paid fallback. For the current live-proven path select **one Greenhouse job**, the approved candidate and exact resume. Workday wizard navigation, account handoff, upload and confirmation in this new worker are **not accepted yet**; the older Workday handler's history does not satisfy that gate.
+
+`attempt_report` and the attempt detail UI distinguish wall/phase time, model/tool time, measured native field actions, Simplify observations/residuals and problems/resolutions. These are different timing views, not values to add together. Simplify does not expose per-field timestamps; that attribution remains unknown. Historical missing field IDs are not backfilled.
+
+The worker saves employer confirmation evidence before closing its exact owned target. Closure uses a browser-level CDP connection, never the page connection being destroyed; it checks the ownership fence first and confirms target absence before marking closed and finishing. Normal unsuccessful exits use the same cleanup. Unrelated/dashboard tabs and the shared browser process are not closed. `cleanup_pending` or `ledger_pending` requires operator attention; a verified submission is never downgraded or automatically retried just because cleanup failed. This is not a hard-crash/unattended watchdog.
+
+### Dashboard sequence
+
 1. Authenticate and inspect the displayed **instance ID and resolved DB path**.
 2. Register/select the intended candidate through the controlled identity service. No identity is inferred from browser position or a different process's CWD.
 3. Intake jobs; inspect external source/assessment data and policy compatibility. Intake alone does not authorize execution.

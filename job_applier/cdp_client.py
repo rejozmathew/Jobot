@@ -317,6 +317,23 @@ class CDPPage:
 
 
 # ---------------------------------------------------------------------------
+def inspect_browser_mode(cdp_url: str) -> str:
+    """Inspect CDP endpoint to check whether browser is headless or headed."""
+    try:
+        req = urllib.request.Request(cdp_url.rstrip("/") + "/json/version")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            info = json.load(r)
+        b_str = (info.get("Browser") or info.get("product") or "").lower()
+        ua_str = (info.get("User-Agent") or "").lower()
+        if "headless" in b_str or "headless" in ua_str:
+            return "headless"
+        # A normal/overridden UA is not proof of a visible window.
+        return "unknown"
+    except Exception:
+        return "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Session (what handlers receive as `browser_session`)
 # ---------------------------------------------------------------------------
 class CDPBrowser:
@@ -326,16 +343,22 @@ class CDPBrowser:
     handler contract (``browser_session.get_current_page()``).
     """
 
-    def __init__(self, base_url: str, session: _CDPSession, page: CDPPage, target_id: str):
+    def __init__(self, base_url: str, session: _CDPSession, page: CDPPage, target_id: str,
+                 observed_mode: str = "unknown"):
         self.base_url = base_url.rstrip("/")
         self._session = session
         self._page = page
         self.target_id = target_id
+        self.observed_mode = observed_mode
 
     @classmethod
     async def connect(cls, cdp_url: str, page_url_substring: str = "",
-                      create_new: bool = False, *, target_id: Optional[str] = None) -> "CDPBrowser":
+                      create_new: bool = False, *, target_id: Optional[str] = None,
+                      expected_mode: Optional[str] = None) -> "CDPBrowser":
         cdp_url = cdp_url.rstrip("/")
+        observed_mode = inspect_browser_mode(cdp_url)
+        if expected_mode == "headed" and observed_mode == "headless":
+            raise ValueError("headless browser cannot satisfy headed request")
         if target_id is not None:
             import re
             if not isinstance(target_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", target_id):
@@ -388,7 +411,7 @@ class CDPBrowser:
         await session.call("DOM.enable")
         await session.call("Runtime.enable")
         page = CDPPage(session, chosen.get("id", ""), chosen.get("url", ""))
-        return cls(cdp_url, session, page, chosen.get("id", ""))
+        return cls(cdp_url, session, page, chosen.get("id", ""), observed_mode=observed_mode)
 
     async def get_current_page(self) -> CDPPage:
         return self._page

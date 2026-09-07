@@ -14,7 +14,7 @@ import uuid
 from .managed_migrations import connect, migrate
 
 
-from .managed_shared import ProtocolError, uid, dumps
+from .managed_shared import ProtocolError, uid, dumps, sanitize_legacy_profile
 from .managed_events import EventServices
 from .managed_accounts import AccountServices
 from .managed_continuity import ContinuityServices
@@ -148,6 +148,49 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,profile_json=excluded.profile_json,profile_hash=excluded.profile_hash', (identity_id,person_key,email,state,encoded,hashlib.sha256(encoded.encode()).hexdigest()))
             return dict(self._get(db,'candidates',identity_id))
 
+    def candidate(self, identity_id):
+        with self.tx() as db:
+            cand = dict(self._get(db, 'candidates', identity_id))
+            cand['profile'] = json.loads(cand['profile_json'])
+            asset = db.execute("SELECT * FROM document_assets WHERE identity_id=? AND kind='resume' ORDER BY created_at DESC LIMIT 1", (identity_id,)).fetchone()
+            from .managed_learning import public_record
+            cand['resume_asset'] = public_record(asset) if asset else None
+            cand['default_resume'] = cand['resume_asset']
+            return cand
+
+    def import_profile(self, data, *, identity_id=None, person_key=None):
+        sanitized, skipped = sanitize_legacy_profile(data)
+        identity_sec = sanitized.get('identity') or {}
+        email = identity_sec.get('email') or (data.get('email') if isinstance(data, dict) else None)
+        if not email or '@' not in email:
+            raise ProtocolError('invalid_identity')
+        import re
+        pk = person_key or identity_sec.get('full_name') or email.split('@')[0]
+        pk = re.sub(r'[^A-Za-z0-9_.-]', '_', str(pk).strip()) or 'candidate'
+        target_id = identity_id
+        with self.tx() as db:
+            if target_id:
+                prev = db.execute('SELECT * FROM candidates WHERE id=?', (target_id,)).fetchone()
+                if prev:
+                    if prev['email'] != email:
+                        match = db.execute('SELECT * FROM candidates WHERE email=?', (email,)).fetchone()
+                        target_id = match['id'] if match else f"cand-{hashlib.sha256(email.encode()).hexdigest()[:12]}"
+                    elif not person_key:
+                        pk = prev['person_key']
+            else:
+                match = db.execute('SELECT * FROM candidates WHERE email=?', (email,)).fetchone()
+                target_id = match['id'] if match else f"cand-{hashlib.sha256(email.encode()).hexdigest()[:12]}"
+                if match and not person_key:
+                    pk = match['person_key']
+        cand = self.identity(identity_id=target_id, person_key=pk, email=email, profile=sanitized)
+        return {
+            'identity_id': cand['id'],
+            'email': cand['email'],
+            'candidate': cand,
+            'skipped': skipped,
+            'profile_hash': cand['profile_hash']
+        }
+
     def eligibility(self, job_id, decision, *, reason):
         if decision not in ('ready','held','excluded') or not reason: raise ProtocolError('invalid_eligibility')
         with self.tx() as db:
@@ -201,6 +244,32 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             for position,key in enumerate(job_ids):
                 db.execute('INSERT INTO run_jobs(run_id,job_id,position) VALUES (?,?,?)',(run_id,key,position))
             return dict(self._get(db,'runs',run_id))
+
+    def next_request(self, browser_profile):
+        if not browser_profile or not isinstance(browser_profile, str):
+            raise ProtocolError('invalid_browser_profile')
+        with self.tx() as db:
+            row = db.execute(
+                "SELECT * FROM runs WHERE browser_profile=? AND state='awaiting_worker' AND control='running' ORDER BY requested_at ASC LIMIT 1",
+                (browser_profile,)
+            ).fetchone()
+            if not row:
+                return None
+            snapshot = json.loads(row['settings_json'])
+            model = snapshot.get('reasoning_model')
+            provider = snapshot.get('reasoning_provider')
+            effort = snapshot.get('reasoning_effort', 'low')
+            return {
+                'run_id': row['id'],
+                'model': model,
+                'provider': provider,
+                'effort': effort,
+                'reasoning_effort': effort,
+                'requested_model': model,
+                'requested_provider': provider,
+                'requested_effort': effort,
+                'settings': snapshot,
+            }
 
     def accept_run(self, run_id, *, worker_id, session_id, capabilities):
         reject_secrets(capabilities)

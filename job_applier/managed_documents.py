@@ -62,7 +62,9 @@ class DocumentServices:
         selected={}
         for row in rows:selected.setdefault(row['kind'],dict(public_record(row),selection_state='selected',availability_source='external_producer'))
         missing=[k for k in required if k not in selected]
-        return {'ready':not missing,'missing':missing,'assets':list(selected.values())}
+        default_resume = db.execute("SELECT * FROM document_assets WHERE identity_id=? AND kind='resume' ORDER BY created_at DESC LIMIT 1",(identity_id,)).fetchone()
+        return {'ready':not missing,'missing':missing,'assets':list(selected.values()),
+                'default_resume':public_record(default_resume) if default_resume else None}
 
     def documents_status(self,job_id,identity_id,attempt_id=None):
         with self.tx() as db:return self._documents_status(db,job_id,identity_id,attempt_id)

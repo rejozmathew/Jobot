@@ -21,16 +21,20 @@ IDENTIFIER = re.compile(r'^[A-Za-z0-9_.:/-]{1,250}$')
 
 class HermesAdapter(ModelObservers):
     def __init__(self, client, *, worker_id, session_id, browser_profile,
-                 skill_version, provider, model, spool_path):
+                 skill_version, provider, model, spool_path, reasoning_effort=None):
         for value in (worker_id, session_id, browser_profile, skill_version, provider, model):
             if not isinstance(value, str) or not IDENTIFIER.fullmatch(value):
                 raise ProtocolError('invalid_adapter_identity')
+        if reasoning_effort is not None and (not isinstance(reasoning_effort, str) or reasoning_effort not in ('low', 'medium', 'high', 'xhigh')):
+            raise ProtocolError('invalid_adapter_identity')
         self.client = client
         self.worker_id, self.session_id = worker_id, session_id
         self.browser_profile = browser_profile
         self.capabilities = dict(protocol=1, telemetry=True,
             browser_profile=browser_profile, skill_version=skill_version,
             provider=provider, model=model)
+        if reasoning_effort is not None:
+            self.capabilities['reasoning_effort'] = reasoning_effort
         self.spool_path = Path(spool_path)
         if not self.spool_path.is_absolute():
             raise ProtocolError('absolute_outbox_path_required')

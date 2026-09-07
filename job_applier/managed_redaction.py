@@ -5,6 +5,8 @@ PAYLOAD_FIELDS = frozenset({
     'category', 'error_type', 'tool', 'tool_name', 'status', 'page', 'evidence',
     'phase', 'helper_id', 'helper_version', 'lesson_id', 'field', 'resolution',
     'reason_code', 'provider', 'model', 'response_model', 'input_tokens', 'output_tokens', 'operation',
+    'source', 'fallback_reason', 'residual_fields', 'field_key', 'field_label', 'elapsed_seconds',
+    'field_attribution',
 })
 SECRET = re.compile(r'''(?ix)(?:\b(?:password|passwd|otp|(?:access_|refresh_|reset_)?token|api[_-]?key|cookie|authorization|secret)[\\"']*\s*[=:]|\bbearer\s+\S+)''')
 
@@ -27,6 +29,12 @@ def safe_payload(payload):
         if key not in PAYLOAD_FIELDS: continue
         if key in ('input_tokens','output_tokens'):
             if isinstance(value,int) and not isinstance(value,bool) and value>=0: result[key]=value
+            continue
+        if key == 'residual_fields' and isinstance(value, list):
+            result[key] = [safe_text(x)[:60] for x in value if isinstance(x, str)]
+            continue
+        if key == 'elapsed_seconds' and isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            result[key] = round(float(value), 4)
             continue
         if not isinstance(value,str): continue
         for secret in secrets: value=value.replace(secret,'[REDACTED]')

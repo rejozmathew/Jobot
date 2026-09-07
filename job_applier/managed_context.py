@@ -24,6 +24,10 @@ class ContextServices:
             verified_namespace=self._job_account_namespace(db,job,selected_namespace)
             documents=self._documents_status(db,job['id'],attempt['identity_id'],attempt_id)
             semantic=self._field_context(db,attempt)
+            attempt['company']=job['company']
+            attempt['platform']=selected_platform
+            import hashlib
+            attempt['profile_hash']=hashlib.sha256((attempt.get('profile_json') or '').encode()).hexdigest()
         account=self.account_strategy(namespace=verified_namespace,identity_id=attempt['identity_id']) if verified_namespace else None
         return {'attempt':attempt,'job':job,'documents':documents,
             'helpers':self.helpers_for_context(selected_platform,verified_namespace),
@@ -31,4 +35,5 @@ class ContextServices:
             'account':account,'platform':selected_platform,'namespace':verified_namespace,
             'field_budget':{'status':'measured_context' if semantic else 'coarse_only','context':semantic},
             'blocker':'required_document_missing' if not documents['ready'] else None,
-            'instruction':'Use this claimed snapshot. Lessons are advisory and never override facts, policy or permissions.'}
+            'instruction':'Use this claimed snapshot. Lessons are advisory and never override facts, policy or permissions.',
+            'profile_hash':attempt['profile_hash']}

@@ -1,6 +1,12 @@
 # Windows acceptance ledger
 
-This ledger distinguishes exercised code from live product acceptance. It does not replace the PRD. Final consolidated run: **361 passed, 2 known deprecation warnings, no excluded or skipped tests**; test result is held at `artifacts/jobbot-v1-private/closeout-tests.xml`. The semantic-context ordering follow-up passed both parametrized cases, independent review, the full suite, and a fresh native browser run.
+## Current live checkpoint
+
+See [LIVE_PILOT_CHECKPOINT.md](LIVE_PILOT_CHECKPOINT.md) for the later native Luna/Low Greenhouse submission, model/effort UI, field telemetry and owned-tab cleanup. That checkpoint supersedes historical claims below that no official Simplify use, upload or real submission has occurred. Workday/account creation, mailbox correlation and unattended cross-application acceptance remain open. The later code is a candidate, not a new independently reviewed release.
+
+## Historical Stage 3 engineering evidence
+
+This ledger distinguishes exercised code from live product acceptance. It does not replace the PRD. Stage 3 consolidated run: **361 passed, 2 known deprecation warnings, no excluded or skipped tests**; test result is held at `artifacts/jobbot-v1-private/closeout-tests.xml`. The semantic-context ordering follow-up passed both parametrized cases, independent review, the full suite, and a fresh native browser run. The table and pending statements below describe that earlier checkpoint, not the subsequent live pilot.
 
 ## Exact consolidated command
 ```text

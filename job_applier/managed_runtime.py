@@ -73,6 +73,10 @@ class RuntimeServices:
                 return dict(old)
             prior=db.execute('SELECT * FROM owned_targets WHERE attempt_id=? AND target_id=?',(attempt_id,target_id)).fetchone()
             if prior:raise ProtocolError('closed_target_cannot_rebind')
+            from .managed_context import platform_for_url
+            detected_platform = platform_for_url(canonical)
+            if detected_platform != 'unknown' and a['platform'] == 'unknown':
+                db.execute('UPDATE application_attempts SET platform=? WHERE id=?', (detected_platform, attempt_id))
             rid=uid();db.execute('INSERT INTO owned_targets(id,attempt_id,profile,target_id,url,state,evidence,created_at,updated_at,identity_key) VALUES (?,?,?,?,?,?,?,?,?,?)',(rid,attempt_id,a['browser_profile'],target_id,display,'open','Explicit worker target binding',self.now(),self.now(),identity))
             return dict(self._get(db,'owned_targets',rid))
 
@@ -88,3 +92,96 @@ class RuntimeServices:
             db.execute('UPDATE owned_targets SET state=?,evidence=?,updated_at=? WHERE id=?',(state,evidence,self.now(),target['id']))
             db.execute('INSERT INTO target_history VALUES (?,?,?,?,?)',(uid(),target['id'],state,evidence,self.now()))
             return dict(self._get(db,'owned_targets',target['id']))
+
+    def browser_observe(self,attempt_id,*,worker_id,fence,target_id=None,cdp_url=None,expected_url=None):
+        endpoint_url=cdp_url or "http://127.0.0.1:9222"
+        endpoint=urlsplit(endpoint_url)
+        if (endpoint.scheme!="http" or endpoint.hostname not in ("127.0.0.1","localhost","::1")
+                or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+                or endpoint.path):
+            raise ProtocolError('owned_target_requires_loopback_cdp')
+        action_id=uid()
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence)
+            job=self._get(db,'jobs',a['job_id'])
+            if target_id is not None:
+                target=db.execute('SELECT * FROM owned_targets WHERE attempt_id=? AND target_id=? AND state!=?',(attempt_id,target_id,'closed')).fetchone()
+            else:
+                target=db.execute('SELECT * FROM owned_targets WHERE attempt_id=? AND state!=? ORDER BY created_at DESC, id DESC LIMIT 1',(attempt_id,'closed')).fetchone()
+            if target is None:raise ProtocolError('target_not_owned')
+            if expected_url is not None:
+                expected_canonical=canonical_url(expected_url)
+                if expected_canonical!=canonical_url(target['url']) and expected_canonical!=canonical_url(job['url']):
+                    raise ProtocolError('target_job_mismatch')
+        settings=json.loads(a['settings_json'])
+        def verify_url(url):
+            identity=job_key(canonical_url(url))
+            with self.tx() as db:
+                self._owner(db,attempt_id,worker_id,fence)
+                related=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone()
+                if identity!=target['identity_key'] and not related:
+                    raise ProtocolError('target_job_mismatch')
+        async def read_bound_browser():
+            import asyncio
+            from .cdp_client import CDPBrowser
+            from .simplify_boundary import SimplifyBoundary
+            browser=await CDPBrowser.connect(endpoint_url,target_id=target['target_id'],expected_mode=settings.get('browser_mode','headed'))
+            try:
+                page=await browser.get_current_page()
+                verify_url(await page.evaluate('location.href'))
+                boundary=SimplifyBoundary(page,budget_seconds=5)
+                before=await boundary.observe()
+                await asyncio.sleep(0.15)
+                after=await boundary.observe()
+                verify_url(after['url'])
+                verify_url(await page.evaluate('location.href'))
+                if settings.get('mode')=='pilot' and after.get('source')=='fixture':
+                    raise ProtocolError('official_extension_observation_required')
+                stable=all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
+                return after,stable,browser.observed_mode
+            finally:
+                await browser.close()
+        self.action_start(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,tool_name='browser_observe',writes_browser=False)
+        try:
+            import asyncio
+            obs,stable,observed_mode=asyncio.run(read_bound_browser())
+            from .managed_context import platform_for_url
+            obs_url=obs.get('url') or target['url']
+            detected_platform=platform_for_url(obs_url)
+            status=obs.get('status','unknown')
+            if status=='active':
+                new_writer='active'
+                quiescent=False
+            elif stable and obs.get('panel') and status in ('complete','needs_review','ready'):
+                new_writer='idle'
+                quiescent=True
+            else:
+                new_writer='unknown'
+                quiescent=False
+            with self.tx() as db:
+                a=self._owner(db,attempt_id,worker_id,fence)
+                other_actions=db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND id!=?',(attempt_id,action_id)).fetchone()
+                quiescent=quiescent and not bool(other_actions)
+                db.execute('UPDATE application_attempts SET writer_state=? WHERE id=?',(new_writer,attempt_id))
+                run=self._get(db,'runs',a['run_id']);caps=json.loads(run['capabilities_json'] or '{}')
+                caps['observed_browser_mode']=observed_mode
+                db.execute('UPDATE runs SET capabilities_json=? WHERE id=?',(json.dumps(caps),a['run_id']))
+                if detected_platform != 'unknown':
+                    db.execute('UPDATE application_attempts SET platform=? WHERE id=?',(detected_platform,attempt_id))
+            self.action_end(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,status='success')
+            return {
+                'operation':'browser_observe',
+                'status':status,
+                'writer_state':new_writer,
+                'quiescent':quiescent,
+                'observed_browser_mode':observed_mode,
+                'platform':detected_platform,
+                'company':job['company'],
+                'target_id':target['target_id'],
+                'url':target['url'],
+                'observation':obs,
+                'action_id':action_id,
+            }
+        except Exception:
+            self.action_end(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,status='failed')
+            raise
