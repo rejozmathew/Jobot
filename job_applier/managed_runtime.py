@@ -5,7 +5,7 @@ import re
 from urllib.parse import urlsplit,urlunsplit
 from .managed_shared import ProtocolError,uid
 from .managed_redaction import safe_text
-from .managed_identity import canonical_url,job_key,RELATED
+from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope
 
 
 class RuntimeServices:
@@ -115,12 +115,16 @@ class RuntimeServices:
                     raise ProtocolError('target_job_mismatch')
         settings=json.loads(a['settings_json'])
         def verify_url(url):
-            identity=job_key(canonical_url(url))
+            try:
+                identity=job_key(canonical_url(url))
+            except ProtocolError:
+                identity=None
             with self.tx() as db:
                 self._owner(db,attempt_id,worker_id,fence)
-                related=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone()
+                related=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone() if identity else None
                 if identity!=target['identity_key'] and not related:
-                    raise ProtocolError('target_job_mismatch')
+                    if not is_same_application_scope(job['url'], url) and not is_same_application_scope(target['url'], url):
+                        raise ProtocolError('target_job_mismatch')
         async def read_bound_browser():
             import asyncio
             from .cdp_client import CDPBrowser
@@ -149,18 +153,31 @@ class RuntimeServices:
             obs_url=obs.get('url') or target['url']
             detected_platform=platform_for_url(obs_url)
             status=obs.get('status','unknown')
-            if status=='active':
-                new_writer='active'
-                quiescent=False
-            elif stable and obs.get('panel') and status in ('complete','needs_review','ready'):
-                new_writer='idle'
-                quiescent=True
-            else:
-                new_writer='unknown'
-                quiescent=False
             with self.tx() as db:
                 a=self._owner(db,attempt_id,worker_id,fence)
                 other_actions=db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND id!=?',(attempt_id,action_id)).fetchone()
+                unended_writer=db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1 AND id!=?',(attempt_id,action_id)).fetchone()
+                prior_writer=a['writer_state']
+                has_active_autofill=(prior_writer=='active' or bool(unended_writer))
+
+                if status=='active':
+                    new_writer='active'
+                    quiescent=False
+                elif has_active_autofill:
+                    if stable and obs.get('panel') and status in ('complete','needs_review','ready'):
+                        new_writer='idle'
+                        quiescent=True
+                    else:
+                        new_writer='active'
+                        quiescent=False
+                else:
+                    if stable:
+                        new_writer='idle'
+                        quiescent=True
+                    else:
+                        new_writer='unknown'
+                        quiescent=False
+
                 quiescent=quiescent and not bool(other_actions)
                 db.execute('UPDATE application_attempts SET writer_state=? WHERE id=?',(new_writer,attempt_id))
                 run=self._get(db,'runs',a['run_id']);caps=json.loads(run['capabilities_json'] or '{}')

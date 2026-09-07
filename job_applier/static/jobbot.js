@@ -1,14 +1,19 @@
 'use strict';
 const $=id=>document.getElementById(id);
 const state={instance:null,view:null,selected:new Set(),run:null,attempt:null,busy:false,queueKey:null,settingsVersion:null,profileCandidate:null,profileDirty:false};
-function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;}
+function el(tag,text,cls,children){const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;if(Array.isArray(children)){for(const c of children)if(c)n.append(c);}return n;}
 function badge(value){const n=el('span',value??'Unknown','badge');n.dataset.state=value??'unknown';return n;}
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);}
 function stamp(value){if(!value)return '—';const d=new Date(value);if(Number.isNaN(d.getTime()))return 'Unknown';return new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'medium',timeZone:state.view?.settings?.values?.timezone||'UTC'}).format(d);}
 function duration(n){return typeof n==='number'?`${n.toFixed(1)} s`:'Unknown';}
 async function request(path,body,method='POST'){
  const headers={};if(body!==undefined)headers['Content-Type']='application/json';if(state.instance)headers['X-JobBot-Instance']=state.instance;
- const r=await fetch(path,{method,headers,credentials:'same-origin',body:body===undefined?undefined:JSON.stringify(body)});
+ const options={method,headers,credentials:'same-origin',body:body===undefined?undefined:JSON.stringify(body)};
+ let r=await fetch(path,options);
+ if(r.status===401&&path!='/login'){
+  const opened=await fetch('/',{credentials:'same-origin',cache:'no-store'});
+  if(opened.ok)r=await fetch(path,options);
+ }
  const data=r.status===204?{}:await r.json();
  if(!r.ok){if(r.status===401&&path!='/login')showLogin();throw new Error(data.error||`HTTP ${r.status}`);}return data;
 }
@@ -29,8 +34,8 @@ function sanitizeLegacyClient(data){
  }
  return {clean,skipped:skipped.sort()};
 }
-function showLogin(){state.instance=null;state.view=null;state.run=null;state.attempt=null;state.queueKey=null;state.settingsVersion=null;state.profileCandidate=null;state.selected.clear();for(const id of ['queue-rows','account-rows','history','attempts','events','health','instance','run-owner','focused-context','target-list','extension-list','lesson-list','helper-list','asset-list','assessment-list','profile-import-skipped'])$(id)?.replaceChildren();for(const f of document.querySelectorAll('form'))f.reset();$('console').hidden=true;$('login-panel').hidden=false;$('logout').hidden=true;$('refresh').hidden=true;$('mode').textContent='Not connected';if($('profile-hash'))$('profile-hash').textContent='';if($('profile-id'))$('profile-id').textContent='';if($('profile-person-key'))$('profile-person-key').textContent='';if($('profile-resume'))$('profile-resume').textContent='None';if($('main-resume-filename'))$('main-resume-filename').textContent='None registered';}
-function showConsole(){state.profileDirty=false;$('console').hidden=false;$('login-panel').hidden=true;$('logout').hidden=false;$('refresh').hidden=false;}
+function showLogin(){state.instance=null;state.view=null;state.run=null;state.attempt=null;state.queueKey=null;state.settingsVersion=null;state.profileCandidate=null;state.selected.clear();for(const id of ['queue-rows','account-rows','history','attempts','events','health','instance','run-owner','focused-context','target-list','extension-list','lesson-list','helper-list','asset-list','assessment-list','profile-import-skipped'])$(id)?.replaceChildren();for(const f of document.querySelectorAll('form'))f.reset();$('console').hidden=true;$('login-panel').hidden=false;$('refresh').hidden=true;$('mode').textContent='Disconnected';if($('profile-hash'))$('profile-hash').textContent='';if($('profile-id'))$('profile-id').textContent='';if($('profile-person-key'))$('profile-person-key').textContent='';if($('profile-resume'))$('profile-resume').textContent='None';if($('main-resume-filename'))$('main-resume-filename').textContent='None registered';}
+function showConsole(){state.profileDirty=false;$('console').hidden=false;$('login-panel').hidden=true;$('refresh').hidden=false;}
 function choice(id,items,value){const select=$(id),before=value??select.value;select.replaceChildren();for(const [v,label]of items){const option=el('option',label);option.value=v;select.append(option);}if(items.some(x=>x[0]===before))select.value=before;}
 function selection(){$('selection').textContent=`${state.selected.size} job(s) selected`;}
 function link(url,label){try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))return el('span',label);const a=el('a',label);a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';return a;}catch{return el('span',label);}}
@@ -44,7 +49,9 @@ function renderQueue(v){
   check.onchange=()=>{if(check.checked)state.selected.add(job.id);else state.selected.delete(job.id);selection();};
   const cell=el('td');cell.append(check);tr.append(cell);
   const title=el('td');title.append(link(job.url,job.title||'Untitled posting'),el('small',job.company||'Unknown company'));tr.append(title);
-  const statusTd=el('td');statusTd.append(badge(job.status));tr.append(statusTd);
+  const statusTd=el('td');statusTd.append(badge(job.status));
+  if(job.failure_reason)statusTd.append(el('div',`Reason: ${job.failure_reason}`,'job-reason'));
+  tr.append(statusTd);
   const assessment=job.assessment;tr.append(el('td',assessment?(assessment.recommendation||'Assessment available'):'Unassessed'));
   $('queue-rows').append(tr);
  }
@@ -95,6 +102,9 @@ function renderRun(v){
   const n=el('div',undefined,'attempt');const b=el('button',`Attempt ${a.id}`);b.onclick=()=>loadAttempt(a.id);n.append(b,badge(a.outcome||'active'),document.createTextNode(' '+duration(a.elapsed_seconds)));
   n.append(el('small',`Heartbeat ${duration(a.heartbeat_age_seconds)} ago · verified progress ${duration(a.progress_age_seconds)} ago · writer ${a.writer_state}`));if(a.stalled)n.append(badge('stalled'));if(a.over_target)n.append(el('p','Target exceeded — bounded extension or intervention required.'));
   const evidence=a.confirmation_evidence||a.evidence;
+  if(a.failure_reason){
+    n.append(el('div',`Reason: ${a.failure_reason}`,'attempt-reason'));
+  }
   if(evidence||a.outcome==='applied'||a.outcome==='completed'){
    n.append(el('div',`${a.outcome==='applied'?'Employer confirmation':'Outcome details'}: ${evidence||'No confirmation evidence recorded'}`,'verified-evidence'));
   }
@@ -121,6 +131,7 @@ function renderSettings(s){
  }
  if($('main-effort-picker'))$('main-effort-picker').value=s.values.reasoning_effort||'low';
  if($('main-submission-mode'))$('main-submission-mode').value=s.values.submission_mode||'review';
+ if($('main-browser-mode'))$('main-browser-mode').value=s.values.browser_mode||'headed';
  if(state.settingsVersion===s.version)return;state.settingsVersion=s.version;
  const box=$('setting-fields');box.replaceChildren();
  for(const [key,value]of Object.entries(s.values)){const label=el('label',key.replaceAll('_',' '));let input;
@@ -170,7 +181,15 @@ async function renderProfile(v){
  }
 }
 
-async function loadAttempt(id){state.attempt=id;try{const report=await api('attempt_report',{attempt_id:id});const a=report.attempt,t=report.timing;const loc=[a.company,a.platform].filter(Boolean).join(' · ');$('attempt-summary').textContent=`Attempt ${id}${loc?' · '+loc:''} · ${a.outcome||'active'} · ${duration(t.wall_seconds)} wall time · ${stamp(a.started_at)} → ${stamp(a.completed_at)}`;$('events').replaceChildren();$('events').append(el('p',`Observed coverage ${duration(t.observed_union_seconds)}; unattributed ${duration(t.unattributed_seconds)}. Tool ${duration(t.category_seconds.tool)}; model ${duration(t.category_seconds.model)}. ${t.uncertainty?'Some timing is uncertain.':''}`),el('p',t.overlap_note));if(a.profile_hash)$('events').append(el('p',`Attempt profile hash: ${a.profile_hash}`,'mono'));
+async function loadAttempt(id){state.attempt=id;try{const report=await api('attempt_report',{attempt_id:id});const a=report.attempt,t=report.timing;const loc=[a.company,a.platform].filter(Boolean).join(' · ');$('attempt-summary').textContent=`Attempt ${id}${loc?' · '+loc:''} · ${a.outcome||'active'} · ${duration(t.wall_seconds)} wall time · ${stamp(a.started_at)} → ${stamp(a.completed_at)}`;$('events').replaceChildren();
+ const reasonText=a.failure_reason||report.failure_reason;
+ if(reasonText){
+  const p=el('p',undefined,'attempt-failure-prominent');
+  const strong=el('strong','Reason: ');
+  p.append(strong,document.createTextNode(reasonText));
+  $('events').append(p);
+ }
+ $('events').append(el('p',`Observed coverage ${duration(t.observed_union_seconds)}; unattributed ${duration(t.unattributed_seconds)}. Tool ${duration(t.category_seconds.tool)}; model ${duration(t.category_seconds.model)}. ${t.uncertainty?'Some timing is uncertain.':''}`),el('p',t.overlap_note));if(a.profile_hash)$('events').append(el('p',`Attempt profile hash: ${a.profile_hash}`,'mono'));
  const table=el('table'),body=el('tbody');for(const phase of report.phases){const r=el('tr');r.append(el('td',phase.phase),el('td',duration(phase.duration_seconds)));body.append(r);}table.append(body);$('events').append(table);
  if(report.fields&&Object.keys(report.fields).length){
   const fTable=el('table'),fBody=el('tbody');
@@ -186,9 +205,9 @@ async function loadAttempt(id){state.attempt=id;try{const report=await api('atte
  }
  if(report.problems&&report.problems.length){
   const pTable=el('table'),pBody=el('tbody');
-  pBody.append(el('tr',undefined,undefined,[el('th','Category'),el('th','Field'),el('th','Source'),el('th','Status')]));
+  pBody.append(el('tr',undefined,undefined,[el('th','Category'),el('th','Field'),el('th','Fallback Reason'),el('th','Source'),el('th','Status'),el('th','Resolution')]));
   for(const p of report.problems){
-   pBody.append(el('tr',undefined,undefined,[el('td',p.category),el('td',p.field_key||'-'),el('td',p.source||'native'),el('td',p.status)]));
+   pBody.append(el('tr',undefined,undefined,[el('td',p.category||'-'),el('td',p.field_key||'-'),el('td',p.fallback_reason||'-'),el('td',p.source||'native'),el('td',p.status||'-'),el('td',p.resolution||'-')]));
   }
   pTable.append(pBody);$('events').append(el('h4','Problems & Recoveries'),pTable);
  }
@@ -202,8 +221,7 @@ async function refresh(){if(!state.instance||state.busy)return;state.busy=true;t
  renderQueue(v);renderRun(v);renderAccounts(v);renderResources(v);renderSettings(v.settings);await renderProfile(v);$('health').textContent=JSON.stringify(v.health,null,2);if(state.attempt)await loadAttempt(state.attempt);
  }catch(e){notice(e.message,true);}finally{state.busy=false;}}
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!=='tab-'+name);document.querySelectorAll('[data-tab]').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));}
-$('login-form').onsubmit=async e=>{e.preventDefault();try{const data=await request('/login',{token:$('operator-token').value});$('operator-token').value='';state.instance=data.instance_id;showConsole();notice('Connected to operator instance.');await refresh();}catch(err){$('operator-token').value='';notice(err.message,true);}};
-$('logout').onclick=async()=>{try{await request('/logout');showLogin();notice('Signed out.');}catch(e){notice(e.message,true);}};
+$('reconnect').onclick=()=>location.reload();
 $('refresh').onclick=refresh;document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 $('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:crypto.randomUUID()});notice(`Recorded ${job.id}; ${job.status}, ${job.eligibility}.`);$('intake-form').reset();await refresh();}catch(err){notice(err.message,true);}};
 $('mark-ready').onclick=async()=>{try{if(!state.selected.size)throw Error('Select at least one job.');for(const id of state.selected)await api('eligibility',{job_id:id,decision:'ready',reason:'Explicit operator approval'});notice('Selected eligibility recorded.');await refresh();}catch(e){notice(e.message,true);}};
@@ -215,8 +233,9 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{
  const chosenModel=$('main-model-picker')?.value||'gpt-5.6-luna';
  const chosenEffort=$('main-effort-picker')?.value||'low';
  const chosenSubMode=$('main-submission-mode')?.value||'review';
+ const chosenBrowserMode=$('main-browser-mode')?.value||'headed';
  const opMode=chosenSubMode==='submit'?'pilot':'development';
- await api('configure',{changes:{reasoning_provider:'openai-codex',reasoning_model:chosenModel,reasoning_effort:chosenEffort,submission_mode:chosenSubMode,mode:opMode,browser_mode:'headed'},expected_version:state.settingsVersion});
+ await api('configure',{changes:{reasoning_provider:'openai-codex',reasoning_model:chosenModel,reasoning_effort:chosenEffort,submission_mode:chosenSubMode,mode:opMode,browser_mode:chosenBrowserMode},expected_version:state.settingsVersion});
  for(const id of state.selected){await api('eligibility',{job_id:id,decision:'ready',reason:'Operator approved start application'});}
  const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:[...state.selected],identity_id:candidateId,browser_profile:browserProfile});
  state.run=r.id;state.attempt=null;tab('run');notice('Application run started; waiting for worker acceptance.');await refresh();

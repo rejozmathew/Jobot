@@ -22,7 +22,7 @@ class SimplifyBoundary:
         if not isinstance(raw,dict) or raw.get('status') not in STATES or not isinstance(raw.get('url'),str):
             raise ValueError('Unrecognized Simplify observation')
         controls={}
-        for kind in ('autofill','continue'):
+        for kind in ('autofill','continue','start'):
             item=(raw.get('controls') or {}).get(kind) or {}
             controls[kind]={'ref':item.get('ref') if isinstance(item.get('ref'),str) else None,'enabled':item.get('enabled') is True}
         result={key:raw[key] for key in ('url','fingerprint','page_ref','page_signature') if key in raw and isinstance(raw[key],str)}
@@ -38,6 +38,8 @@ class SimplifyBoundary:
         if status in ('unsupported','missing','login_required'):return {'action':'fallback','reason':status}
         if status=='ready' and not already_attempted and controls.get('autofill',{}).get('enabled'):
             return {'action':'autofill','reason':'autofill_ready'}
+        if status=='ready' and not already_attempted and controls.get('start',{}).get('enabled'):
+            return {'action':'start','reason':'start_ready'}
         if status=='complete' and controls.get('continue',{}).get('enabled'):
             return {'action':'continue','reason':'prefer_extension_continue'}
         return {'action':'fallback','reason':'already_attempted' if already_attempted else 'controls_unavailable'}
@@ -59,7 +61,7 @@ class SimplifyBoundary:
             'observation':observed}
 
     async def perform(self,operation):
-        if operation not in ('autofill','continue'):raise ValueError('Unsupported Simplify operation')
+        if operation not in ('autofill','continue','start'):raise ValueError('Unsupported Simplify operation')
         self.deadline=self.clock()+self.budget
         before=await self.observe();current=before
         page_key=before.get('page_signature') or before['url']
@@ -68,7 +70,7 @@ class SimplifyBoundary:
         try:
             if before['status']=='unknown':
                 return self._result(before,False,'unknown','quiescence_unverified')
-            if operation=='autofill' and page_key in self.attempted and before['status'] in ('ready','complete','needs_review'):
+            if operation in ('autofill','start') and page_key in self.attempted and before['status'] in ('ready','complete','needs_review'):
                 return self._result(before,False,'idle','already_attempted')
             if not active:
                 control=before['controls'][operation]
@@ -82,15 +84,17 @@ class SimplifyBoundary:
                 if not isinstance(result,dict) or result.get('status') not in ('clicked','ok'):
                     return self._result(before,False,'unknown','stale_or_unconfirmed_control')
                 clicked=True
-                if operation=='autofill':self.attempted.add(page_key)
+                if operation in ('autofill','start'):self.attempted.add(page_key)
             while self.clock()<self.deadline:
                 current=await self.observe();changed=self._changed(before,current)
                 if operation=='autofill' and current['status'] in ('complete','needs_review'):
                     return self._result(current,changed,'idle','observed_change' if changed else 'no_observable_progress')
-                if operation=='continue' and self._page_changed(before,current) and current['status'] not in ('active','unknown'):
+                if operation in ('continue','start') and self._page_changed(before,current) and current['status'] not in ('active','unknown'):
                     return self._result(current,True,'idle','page_changed_rediscover_controls')
                 await self.sleep(self.poll)
-            return self._result(current,self._changed(before,current),'unknown','autofill_budget_timeout')
+            page_or_field_changed = self._page_changed(before,current) if operation in ('continue','start') else self._changed(before,current)
+            return self._result(current,page_or_field_changed,'unknown','autofill_budget_timeout')
         except (asyncio.TimeoutError,ValueError,RuntimeError):
-            return self._result(current,self._changed(before,current),'unknown' if clicked or active else 'idle','observation_unavailable')
+            page_or_field_changed = self._page_changed(before,current) if operation in ('continue','start') else self._changed(before,current)
+            return self._result(current,page_or_field_changed,'unknown' if clicked or active else 'idle','observation_unavailable')
         finally:self.deadline=None

@@ -3,7 +3,7 @@ from datetime import datetime,timedelta,timezone
 import json
 from .managed_shared import ProtocolError
 from .managed_redaction import safe_payload
-from .managed_views import public_attempt,attempt_timing_state
+from .managed_views import public_attempt,attempt_timing_state,resolve_failure_reason
 
 
 def instant(value):
@@ -34,6 +34,8 @@ class ReportServices:
             if worker_id is not None and a['worker_id']!=worker_id:raise ProtocolError('attempt_forbidden')
             a=attempt_timing_state(db,a,now)
             rows=[dict(r) for r in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY observed_at,recorded_at,id',(attempt_id,))]
+            failure_reason = resolve_failure_reason(db, a, events=rows)
+            a['failure_reason'] = failure_reason
         start=instant(a['started_at']);end=instant(a['completed_at']) if a['completed_at'] else now
         wall=max(0,(end-start).total_seconds());spans=[];categories={'tool':[],'model':[]};timeline=[];issues=[]
         uncertainty=bool(a.get('uncertain_duration')) or end<start or a['outcome'] in ('interrupted','submission_unknown');phase_points=[(start,'unattributed')]
@@ -159,7 +161,7 @@ class ReportServices:
         simplify_summary={'runs_count':len(simplify_runs),'total_duration_seconds':simplify_total,
             'fallback_reasons':simplify_fallbacks,'runs':simplify_runs}
 
-        return {'attempt':public_attempt(a,now),'timeline':timeline,'phases':phases,'issues':issues,
+        return {'attempt':public_attempt(a,now),'failure_reason':failure_reason,'timeline':timeline,'phases':phases,'issues':issues,
             'timing':{'wall_seconds':wall,'observed_union_seconds':covered,'unattributed_seconds':max(0,wall-covered),
                 'category_seconds':{k:union_seconds(v) if v else None for k,v in categories.items()},
                 'reported_tokens':{k:sum(v) if v else None for k,v in token_values.items()},

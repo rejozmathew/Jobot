@@ -16,21 +16,16 @@
   <div class="header-actions">
     <span id="mode" class="badge">Not connected</span>
     <button id="refresh" hidden>Refresh</button>
-    <button id="logout" hidden>Sign out</button>
+
   </div>
 </header>
 
 <p id="notice" role="status" aria-live="polite"></p>
 
 <section id="login-panel" class="card narrow">
-  <h2>Operator Access</h2>
-  <p>Enter local operator credential for this instance. Passwords and verification codes do not belong here.</p>
-  <form id="login-form">
-    <label>Operator credential
-      <input id="operator-token" type="password" autocomplete="off" required>
-    </label>
-    <button class="primary" type="submit">Connect</button>
-  </form>
+  <h2>Connecting to JobBot</h2>
+  <p>The local dashboard connects automatically. No sign-in is needed.</p>
+  <button id="reconnect" class="primary" type="button">Reconnect</button>
 </section>
 
 <main id="console" hidden>
@@ -83,6 +78,12 @@
           <select id="main-submission-mode">
             <option value="review">Review only</option>
             <option value="submit">Submit when complete</option>
+          </select>
+        </label>
+        <label>Browser Mode
+          <select id="main-browser-mode">
+            <option value="headed" selected>Headed</option>
+            <option value="headless">Headless</option>
           </select>
         </label>
       </div>

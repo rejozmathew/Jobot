@@ -27,7 +27,15 @@ class OperatorSessions:
 
 def install_ui(app,service,operator_token,sessions):
     @app.get('/')
-    def index():return FileResponse(STATIC/'jobbot.html',media_type='text/html',headers={'Cache-Control':'no-store'})
+    def index(request:Request):
+        response=FileResponse(STATIC/'jobbot.html',media_type='text/html',headers={'Cache-Control':'no-store'})
+        # This app is loopback-only. Opening its local page connects the UI;
+        # the person using it never needs to find or paste a service credential.
+        if not sessions.valid(request.cookies.get(COOKIE)):
+            value=sessions.issue()
+            if value is None:return JSONResponse({'error':'session_limit'},status_code=429)
+            response.set_cookie(COOKIE,value,httponly=True,samesite='strict',secure=request.url.scheme=='https',max_age=1800,path='/')
+        return response
 
     @app.get('/static/{name}')
     def static(name):

@@ -10,20 +10,20 @@
   scope.controls=new Map();
   scope.fieldValues=scope.fieldValues||new Map();
   scope.valueEpoch=scope.valueEpoch||0;
-  const candidates={autofill:[],continue:[]};
+  const candidates={autofill:[],continue:[],start:[]};
   for(const root of roots) {
     const btns = (typeof root.querySelectorAll === 'function') ? root.querySelectorAll('button,[role="button"]') : [];
     for(const button of btns) {
       if(!visible(button))continue;
       const label=(button.innerText || button.getAttribute('aria-label') || '').trim().toLowerCase();
-      const kind=/^autofill this page$/.test(label)?'autofill':/^continue application$/.test(label)?'continue':null;
+      const kind=/^autofill this page$/.test(label)?'autofill':/^continue application$/.test(label)?'continue':/^start application$/.test(label)?'start':null;
       if(!kind)continue;
       const enabled=!button.disabled && button.getAttribute('aria-disabled')!=='true';
       candidates[kind].push({button,enabled,root});
     }
   }
-  const controls={autofill:{ref:null,enabled:false},continue:{ref:null,enabled:false}};
-  for(const kind of ['autofill','continue']) {
+  const controls={autofill:{ref:null,enabled:false},continue:{ref:null,enabled:false},start:{ref:null,enabled:false}};
+  for(const kind of ['autofill','continue','start']) {
     const actionable = candidates[kind].filter(c=>c.enabled);
     if(actionable.length === 1) {
       const chosen = actionable[0];
@@ -100,7 +100,7 @@
     else if(hasComplete) status='complete';
     else if(hasLogin) status='login_required';
     else if(hasUnsupported) status='unsupported';
-    else if(controls.autofill.enabled) status='ready';
+    else if(controls.autofill.enabled || controls.start.enabled) status='ready';
     else status='unknown';
     if(declared && ['ready','active','complete','needs_review','unsupported','login_required'].includes(declared)) status=declared;
   }

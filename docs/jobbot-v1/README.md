@@ -1,5 +1,13 @@
 # JobBot modernization — Windows Hermes implementation handoff
 
+## Current status: paused for independent review (2026-09-07)
+
+Start with [the current review handoff](REVIEW_HANDOFF_2026-09-07.md). It records all accumulated changes since `e711112`, two failed Huron attempts, the latest 440-pass offline gate, and the still-unresolved credential-field failure. **This is not a working Workday release.** The user paused further implementation and application runs; the historical kickoff below is not an instruction to resume them.
+
+Review snapshot: `review/jobbot-huron-auth-checkpoint`. Private runtime data and credentials remain outside Git. The remaining text preserves the original implementation brief and its historical evidence links.
+
+## Original implementation brief
+
 Prepared: 2026-09-06.
 
 Implementation checkpoint: the original specification below is preserved. Current evidence is in [STAGE3_EVIDENCE.md](STAGE3_EVIDENCE.md), [STAGE4_EVIDENCE.md](STAGE4_EVIDENCE.md) and the [34-ID acceptance ledger](ACCEPTANCE_LEDGER.md). Follow [WINDOWS_RUNBOOK.md](WINDOWS_RUNBOOK.md) for gated activation/rollback; [LATER_UBUNTU_ROLLOUT.md](LATER_UBUNTU_ROLLOUT.md) remains a plan only. The reviewed Windows engineering candidate is **not fully accepted for live applications**.

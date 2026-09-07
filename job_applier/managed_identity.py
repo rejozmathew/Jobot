@@ -36,3 +36,100 @@ RELATED = """WITH RECURSIVE related(id) AS (
 
 def linked_jobs(db, job_id):
     return [r[0] for r in db.execute(RELATED+'SELECT id FROM related',(job_id,))]
+
+
+import re
+
+_ALLOWED_WORKDAY_CHILD_ROUTES = (
+    "",
+    "/apply",
+    "/apply/applyManually",
+    "/apply/autofillWithResume",
+    "/apply/useMyLastApplication",
+    "/apply/success",
+    "/confirmation",
+)
+
+_LOCALE_RE = re.compile(r"^[a-zA-Z]{2}(?:-[a-zA-Z0-9]{2,4})?$")
+
+
+def is_workday_application_scope(job_url: str, candidate_url: str) -> bool:
+    try:
+        raw_cand = str(candidate_url).strip()
+        raw_cand_lower = raw_cand.lower()
+        if any(seq in raw_cand_lower for seq in ('%2f', '%2e', '%5c')):
+            return False
+
+        job_p = urlsplit(str(job_url).strip())
+        cand_p = urlsplit(raw_cand)
+
+        # HTTPS only on exact same host
+        if job_p.scheme.lower() != 'https' or cand_p.scheme.lower() != 'https':
+            return False
+        if job_p.netloc.lower() != cand_p.netloc.lower():
+            return False
+        if cand_p.username or cand_p.password:
+            return False
+
+        # Reject dot path tricks in candidate path
+        if '..' in cand_p.path or '/.' in cand_p.path:
+            return False
+
+        # Reject sensitive path segments
+        if any(s in cand_p.path.lower() for s in ('reset-password', 'password-reset', 'verify-email', 'oauth/', 'signin/callback')):
+            return False
+
+        # Reject sensitive query parameters
+        cand_query = parse_qsl(cand_p.query, keep_blank_values=True)
+        if any(k.lower() in ('access_token', 'refresh_token', 'otp', 'password', 'reset_token', 'authorization_code') for k, v in cand_query):
+            return False
+
+        # Parse segments
+        job_segs = [s for s in job_p.path.strip('/').split('/') if s]
+        cand_segs = [s for s in cand_p.path.strip('/').split('/') if s]
+        if any(s in ('.', '..') for s in job_segs + cand_segs):
+            return False
+
+        # Strip optional locale segment
+        if job_segs and _LOCALE_RE.match(job_segs[0]):
+            job_segs = job_segs[1:]
+        if cand_segs and _LOCALE_RE.match(cand_segs[0]):
+            cand_segs = cand_segs[1:]
+
+        if len(cand_segs) < len(job_segs):
+            return False
+        if cand_segs[:len(job_segs)] != job_segs:
+            return False
+
+        # Check remaining child route
+        child_parts = cand_segs[len(job_segs):]
+        child_route = "/" + "/".join(child_parts) if child_parts else ""
+        return child_route in _ALLOWED_WORKDAY_CHILD_ROUTES
+    except Exception:
+        return False
+
+
+def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
+    if is_workday_application_scope(job_url, candidate_url):
+        return True
+    try:
+        job_p = urlsplit(str(job_url).strip())
+        cand_p = urlsplit(str(candidate_url).strip())
+        if job_p.scheme.lower() != cand_p.scheme.lower() or job_p.scheme.lower() not in ('https', 'http'):
+            return False
+        job_host = job_p.netloc.lower()
+        cand_host = cand_p.netloc.lower()
+        if job_host == 'boards.greenhouse.io': job_host = 'job-boards.greenhouse.io'
+        if cand_host == 'boards.greenhouse.io': cand_host = 'job-boards.greenhouse.io'
+        if job_host != cand_host:
+            return False
+        if any(seq in str(candidate_url).lower() for seq in ('%2f', '%2e', '%5c', '..')):
+            return False
+        cand_query = parse_qsl(cand_p.query, keep_blank_values=True)
+        if any(k.lower() in ('access_token', 'refresh_token', 'otp', 'password', 'reset_token', 'authorization_code') for k, v in cand_query):
+            return False
+        expected_path = job_p.path.rstrip('/')
+        actual_path = cand_p.path.rstrip('/')
+        return actual_path in (expected_path, expected_path + '/apply', expected_path + '/confirmation')
+    except Exception:
+        return False

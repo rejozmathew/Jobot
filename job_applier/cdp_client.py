@@ -233,9 +233,9 @@ class CDPPage:
         # function object (opaque → null). Detect and wrap so it's always called.
         # IIFEs like `(function(){...})()` do NOT match (they run as-is).
         is_callable = re.match(
-            r"^\s*(\(\s*[\w,\s]*\)\s*=>|function\b)", expression
+            r"^\s*(?:async\s+)?(\(\s*[\w,\s]*\)\s*=>|function\b)", expression
         ) is not None
-        if is_callable and arg is not None and isinstance(arg, (dict, list)):
+        if is_callable and arg is not None:
             expression = (
                 f"((__p) => {{ const __f = {expression};"
                 f" return (typeof __f === 'function') ? __f(__p) : __f; }})"
@@ -327,6 +327,10 @@ def inspect_browser_mode(cdp_url: str) -> str:
         ua_str = (info.get("User-Agent") or "").lower()
         if "headless" in b_str or "headless" in ua_str:
             return "headless"
+        if info.get("browser_mode") in ("headed", "headless"):
+            return info["browser_mode"]
+        if "headed" in b_str or "headful" in b_str or "headed" in ua_str:
+            return "headed"
         # A normal/overridden UA is not proof of a visible window.
         return "unknown"
     except Exception:
@@ -359,6 +363,8 @@ class CDPBrowser:
         observed_mode = inspect_browser_mode(cdp_url)
         if expected_mode == "headed" and observed_mode == "headless":
             raise ValueError("headless browser cannot satisfy headed request")
+        if expected_mode == "headless" and observed_mode == "headed":
+            raise ValueError("browser_mode_mismatch: headed browser cannot satisfy headless request")
         if target_id is not None:
             import re
             if not isinstance(target_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", target_id):

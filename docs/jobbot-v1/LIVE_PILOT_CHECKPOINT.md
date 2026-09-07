@@ -1,5 +1,7 @@
 # Native Windows pilot and cleanup checkpoint
 
+> **Historical baseline (`e711112`), not current live acceptance.** Subsequent Huron attempts failed, including a credential-field failure after a 440-pass offline suite. Work is now paused for independent review. Read [REVIEW_HANDOFF_2026-09-07.md](REVIEW_HANDOFF_2026-09-07.md) for the accumulated changes, actual outcomes, and unresolved decisions. The baseline success below must not be represented as proof of the new Workday flow.
+
 ## What is proven
 
 - One explicitly authorized Greenhouse application was submitted by the native `gpt-5.6-luna` / Low worker through the existing `openai-codex` subscription. The employer confirmation and managed Applied ledger were independently read. Private identity, resume, employer receipt, screenshots and history remain outside Git.
