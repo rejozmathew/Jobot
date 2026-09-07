@@ -7,9 +7,10 @@ from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+from .managed_shared import legacy_writer
 
 from .database import (
-    get_db_manager, get_session,
+    DatabaseManager, get_db_manager,
     Job, ApplicationStep, Screenshot,
     JobStatus, ScreenshotType, StepResult
 )
@@ -91,7 +92,7 @@ class JobQueueDB:
 
     def __init__(self, db_path: Optional[str] = None):
         """Initialize with optional custom database path."""
-        self.db_manager = get_db_manager(db_path)
+        self.db_manager = DatabaseManager(db_path) if db_path else get_db_manager()
 
     def _get_next_seq_id(self, session) -> int:
         """Get the next sequential ID for a job."""
@@ -101,7 +102,7 @@ class JobQueueDB:
 
     def list_all(self) -> List[QueuedJob]:
         """Get all jobs in the queue."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             jobs = session.query(Job).order_by(Job.created_at.desc()).all()
             return [QueuedJob.from_db(job) for job in jobs]
@@ -110,7 +111,7 @@ class JobQueueDB:
 
     def list_by_status(self, status: JobStatus) -> List[QueuedJob]:
         """Get jobs with a specific status."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             jobs = session.query(Job).filter(Job.status == status.value).all()
             return [QueuedJob.from_db(job) for job in jobs]
@@ -119,7 +120,7 @@ class JobQueueDB:
 
     def get(self, job_id: str) -> Optional[QueuedJob]:
         """Get a specific job by ID."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             job = session.query(Job).filter(Job.id == job_id).first()
             return QueuedJob.from_db(job) if job else None
@@ -128,7 +129,7 @@ class JobQueueDB:
 
     def get_by_seq_id(self, seq_id: int) -> Optional[QueuedJob]:
         """Get a specific job by sequential ID."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             job = session.query(Job).filter(Job.seq_id == seq_id).first()
             return QueuedJob.from_db(job) if job else None
@@ -137,7 +138,11 @@ class JobQueueDB:
 
     def add(self, request: AddJobRequest) -> QueuedJob:
         """Add a new job to the queue."""
-        session = get_session()
+        if self.db_manager.is_managed:
+            from .managed import Service
+            row = Service(self.db_manager.db_path.resolve()).intake(url=request.url, source_type='legacy_cli', source_id=request.url, company=request.company, title=request.title)
+            return self.get(row['id'])
+        session = self.db_manager.get_session()
         try:
             seq_id = self._get_next_seq_id(session)
             job = Job(
@@ -161,7 +166,9 @@ class JobQueueDB:
 
     def add_urls(self, urls: List[str]) -> List[QueuedJob]:
         """Add multiple URLs to the queue."""
-        session = get_session()
+        if self.db_manager.is_managed:
+            return [self.add(AddJobRequest(url=url)) for url in urls if url.strip()]
+        session = self.db_manager.get_session()
         try:
             jobs = []
             next_seq_id = self._get_next_seq_id(session)
@@ -190,9 +197,10 @@ class JobQueueDB:
         finally:
             session.close()
 
+    @legacy_writer
     def claim_next(self) -> Optional[QueuedJob]:
         """Claim the next queued job for processing (highest priority first)."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             # Find highest priority queued job
             job = (
@@ -216,6 +224,7 @@ class JobQueueDB:
         finally:
             session.close()
 
+    @legacy_writer
     def update_status(
         self,
         job_id: str,
@@ -226,7 +235,7 @@ class JobQueueDB:
         screenshot_path: Optional[str] = None,
     ) -> Optional[QueuedJob]:
         """Update job status and metadata."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             job = session.query(Job).filter(Job.id == job_id).first()
             if not job:
@@ -260,9 +269,10 @@ class JobQueueDB:
         finally:
             session.close()
 
+    @legacy_writer
     def delete(self, job_id: str) -> bool:
         """Remove a job from the queue."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             job = session.query(Job).filter(Job.id == job_id).first()
             if not job:
@@ -284,7 +294,7 @@ class JobQueueDB:
 
     def get_stats(self) -> dict:
         """Get queue statistics."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             total = session.query(Job).count()
             queued = session.query(Job).filter(Job.status == JobStatus.QUEUED.value).count()
@@ -309,8 +319,10 @@ class JobQueueDB:
             session.close()
 
     def cleanup_stuck_jobs(self) -> int:
-        """Reset jobs stuck in 'running' state to 'failed' on startup."""
-        session = get_session()
+        """Legacy cleanup only; managed attempts require explicit reconciliation."""
+        if self.db_manager.is_managed:
+            return 0
+        session = self.db_manager.get_session()
         try:
             stuck_jobs = session.query(Job).filter(Job.status == JobStatus.RUNNING.value).all()
             count = 0
@@ -330,6 +342,7 @@ class JobQueueDB:
     # Step Management
     # =========================================================================
 
+    @legacy_writer
     def add_step(
         self, 
         job_id: str, 
@@ -347,7 +360,7 @@ class JobQueueDB:
         evaluation: Optional[str] = None,
     ) -> ApplicationStep:
         """Add a step to the database."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             step = ApplicationStep(
                 job_id=job_id,
@@ -372,6 +385,7 @@ class JobQueueDB:
         finally:
             session.close()
 
+    @legacy_writer
     def update_step(
         self, 
         step_id: int, 
@@ -380,7 +394,7 @@ class JobQueueDB:
         duration_ms: Optional[int] = None
     ) -> None:
         """Update the result of an existing step."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             step = session.query(ApplicationStep).filter(ApplicationStep.id == step_id).first()
             if step:
@@ -395,7 +409,7 @@ class JobQueueDB:
 
     def get_steps(self, job_id: str) -> List[dict]:
         """Get all steps for a job."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             steps = (
                 session.query(ApplicationStep)
@@ -407,9 +421,10 @@ class JobQueueDB:
         finally:
             session.close()
 
+    @legacy_writer
     def clear_steps(self, job_id: str) -> None:
         """Delete all steps for a given job to prepare for retry."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             session.query(ApplicationStep).filter(ApplicationStep.job_id == job_id).delete()
             session.commit()
@@ -418,9 +433,10 @@ class JobQueueDB:
         finally:
             session.close()
 
+    @legacy_writer
     def increment_step_retry(self, job_id: str, step_number: int) -> int:
         """Increment retry count for a step, return new count."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             step = (
                 session.query(ApplicationStep)
@@ -440,6 +456,7 @@ class JobQueueDB:
     # Screenshot Methods
     # =========================================================================
 
+    @legacy_writer
     def add_screenshot(
         self,
         job_id: str,
@@ -450,7 +467,7 @@ class JobQueueDB:
         page_title: Optional[str] = None,
     ) -> Screenshot:
         """Add a screenshot record."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             screenshot = Screenshot(
                 job_id=job_id,
@@ -470,7 +487,7 @@ class JobQueueDB:
 
     def get_screenshots(self, job_id: str) -> List[dict]:
         """Get all screenshots for a job."""
-        session = get_session()
+        session = self.db_manager.get_session()
         try:
             screenshots = (
                 session.query(Screenshot)

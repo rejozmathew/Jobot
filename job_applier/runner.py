@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 
 from .db_queue import JobQueue, QueuedJob
 from .database import JobStatus
-from .agent import JobApplyAgent
 
 load_dotenv()
 
@@ -34,6 +33,7 @@ class JobRunner:
         self.queue = JobQueue(
             db_path=db_path or os.getenv("JOB_APPLIER_DB_PATH")
         )
+        self.queue.db_manager.require_legacy()
         self.profile_path = profile_path or os.getenv("JOB_APPLIER_PROFILE_PATH", "./profile.json")
         self.artifacts_dir = artifacts_dir or os.getenv("JOB_APPLIER_ARTIFACTS_DIR", "./artifacts")
         self.max_steps = max_steps or int(os.getenv("JOB_APPLIER_MAX_STEPS", "30"))
@@ -78,7 +78,9 @@ class JobRunner:
             self._current_task.cancel()
 
     def _create_agent(self) -> JobApplyAgent:
-        """Create a new agent instance with step tracking."""
+        """Create the opt-in legacy agent only when execution needs it."""
+        from .agent import JobApplyAgent
+
         return JobApplyAgent(
             profile_path=self.profile_path,
             artifacts_dir=self.artifacts_dir,

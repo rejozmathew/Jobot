@@ -318,6 +318,16 @@ class DatabaseManager:
         # Create tables
         self.init_db()
 
+    @property
+    def is_managed(self) -> bool:
+        with self.engine.connect() as connection:
+            return connection.exec_driver_sql("SELECT 1 FROM sqlite_master WHERE type='table' AND name='instance'").first() is not None
+
+    def require_legacy(self) -> None:
+        if self.is_managed:
+            from .managed_shared import ProtocolError
+            raise ProtocolError('managed_worker_required')
+
     def init_db(self) -> None:
         """Create all tables if they don't exist."""
         Base.metadata.create_all(bind=self.engine)

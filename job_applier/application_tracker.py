@@ -63,6 +63,9 @@ def infer_platform(url: str) -> str:
     return "generic"
 
 
+from .managed_shared import legacy_writer
+
+
 class ApplicationTracker:
     """Use the existing job database as the application system of record."""
 
@@ -87,6 +90,7 @@ class ApplicationTracker:
                 return job
         return None
 
+    @legacy_writer
     def start_attempt(
         self,
         *,
@@ -204,6 +208,7 @@ class ApplicationTracker:
         finally:
             session.close()
 
+    @legacy_writer
     def set_company_account(
         self,
         *,
@@ -276,6 +281,7 @@ class ApplicationTracker:
         phase.ended_at = now
         phase.duration_seconds = round(max(0.0, (now - phase.started_at).total_seconds()), 1)
 
+    @legacy_writer
     def transition_phase(self, attempt_id: int, phase: str, *, note: str = "") -> dict:
         now = self.now_fn()
         session = self.db.get_session()
@@ -296,6 +302,7 @@ class ApplicationTracker:
         finally:
             session.close()
 
+    @legacy_writer
     def record_hiccup(
         self,
         attempt_id: int,
@@ -348,6 +355,7 @@ class ApplicationTracker:
         slowest = max(breakdown, key=breakdown.get) if breakdown else None
         return breakdown, slowest
 
+    @legacy_writer
     def finish_attempt(
         self,
         attempt_id: int,

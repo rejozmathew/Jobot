@@ -1,0 +1,332 @@
+"""Agent-neutral application services over the existing SQLite models.
+
+Every writer uses an independent connection and an IMMEDIATE transaction.
+No browser, Hermes object, environment-derived DB or secret is imported here.
+"""
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+import hashlib
+import json
+import uuid
+
+from .managed_migrations import connect, migrate
+
+
+from .managed_shared import ProtocolError, uid, dumps
+from .managed_events import EventServices
+from .managed_accounts import AccountServices
+from .managed_continuity import ContinuityServices
+from .managed_redaction import safe_text, reject_secrets
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+from .managed_identity import canonical_url, job_key, RELATED
+
+
+class Service(EventServices, AccountServices, ContinuityServices):
+    def __init__(self, db_path, *, instance_id=None, now_fn=utc_now):
+        p=Path(db_path)
+        if not p.is_absolute(): raise ProtocolError('absolute_db_path_required')
+        if not p.is_file(): raise ProtocolError('instance_not_initialized')
+        self.db_path=p.resolve()
+        self.now=now_fn
+        with self.tx() as db:
+            try: row=db.execute('SELECT * FROM instance').fetchone()
+            except Exception as exc: raise ProtocolError('instance_not_initialized') from exc
+            if row is None or (instance_id and row['id']!=instance_id): raise ProtocolError('instance_mismatch')
+            self.instance_id=row['id']
+            self.settings=json.loads(row['settings_json'])
+
+    @classmethod
+    def create(cls, db_path, *, instance_id, settings=None):
+        reject_secrets(settings or {})
+        p=Path(db_path)
+        if not p.is_absolute(): raise ProtocolError('absolute_db_path_required')
+        p.parent.mkdir(parents=True,exist_ok=True)
+        # Exclusive creation, never overwrite an old DB or sidecar.
+        if any(Path(str(p)+suffix).exists() for suffix in ('-wal','-shm','-journal')): raise FileExistsError(p)
+        with p.open('xb'): pass
+        from .database import DatabaseManager
+        manager=DatabaseManager(str(p)); manager.close()
+        migrate(p)
+        effective={'mode':'development','submission_mode':'review','worker':'external','autofill':'simplify','screenshots':False,'timezone':'UTC'}
+        effective.update(settings or {})
+        if effective['mode']=='development' and effective['submission_mode']!='review': raise ProtocolError('development_submission_disabled')
+        with connect(p) as db:
+            db.execute('INSERT INTO instance VALUES (?,?,?)',(instance_id,dumps(effective),utc_now()))
+        return cls(p,instance_id=instance_id)
+
+    @contextmanager
+    def tx(self):
+        db=connect(self.db_path)
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def health(self):
+        return {'instance_id':self.instance_id,'db_path':str(self.db_path),'submission_mode':self.settings['submission_mode'],'settings':self.settings}
+
+    def job(self, job_id):
+        with self.tx() as db:
+            r=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
+            if not r: raise ProtocolError('job_not_found')
+            return dict(r)
+
+    def sources(self, job_id):
+        with self.tx() as db:
+            return [dict(r) for r in db.execute('SELECT * FROM job_sources WHERE job_id=?',(job_id,))]
+
+    def intake(self, *, url, source_type='manual', source_id=None, company=None, title=None, namespace=None, requisition_id=None, identity_evidence=None, **metadata):
+        reject_secrets(metadata)
+        reject_secrets([company,title,namespace,requisition_id,identity_evidence,source_type])
+        canonical=canonical_url(url)
+        if isinstance(source_id,str) and source_id.startswith(('https://','http://')):
+            # An intake URL can legitimately use 'token' as a requisition identifier.
+            canonical_url(source_id)
+            reject_secrets(urlsplit(source_id).fragment)
+        else:
+            reject_secrets(source_id)
+        if namespace and requisition_id and not identity_evidence: raise ProtocolError('identity_evidence_required')
+        key=job_key(canonical,namespace,requisition_id)
+        url_key=job_key(canonical)
+        now=self.now()
+        with self.tx() as db:
+            row=db.execute('SELECT j.* FROM jobs j JOIN job_identity_keys k ON k.job_id=j.id WHERE k.identity_key IN (?,?) ORDER BY (j.url=?) DESC,j.created_at,j.id LIMIT 1',(key,url_key,canonical)).fetchone()
+            if not row:
+                job_id=uid()
+                seq=db.execute('SELECT COALESCE(MAX(seq_id),0)+1 FROM jobs').fetchone()[0]
+                db.execute('INSERT INTO jobs(id,seq_id,url,title,company,status,priority,notes,error,created_at,updated_at,identity_key,namespace,requisition_id,eligibility,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(job_id,seq,canonical,title,company,'queued',0,'','',now,now,key,namespace,requisition_id,'held',dumps(metadata)))
+            else:
+                job_id=row['id']
+                if namespace and requisition_id:
+                    if row['namespace'] and (row['namespace']!=namespace or str(row['requisition_id'])!=str(requisition_id)):raise ProtocolError('identity_conflict')
+                    db.execute('UPDATE jobs SET namespace=?,requisition_id=? WHERE id=?',(namespace,str(requisition_id),job_id))
+            for alias_key in {key,url_key}:
+                db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(alias_key,job_id,safe_text(identity_evidence or 'normalized_url')))
+            db.execute('INSERT OR IGNORE INTO job_sources VALUES (?,?,?,?,?,?)',(uid(),job_id,source_type,source_id or canonical,urlunsplit(urlsplit(url.strip())._replace(fragment='')),now))
+            return dict(db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone())
+
+    @staticmethod
+    def _get(db, table, key):
+        # table comes only from static method declarations in this module.
+        row=db.execute(f'SELECT * FROM {table} WHERE id=?',(key,)).fetchone()
+        if row is None: raise ProtocolError('not_found')
+        return row
+
+    def identity(self, *, identity_id, person_key, email, profile, state='active'):
+        if state not in ('active','legacy','disabled') or not person_key or '@' not in email:
+            raise ProtocolError('invalid_identity')
+        reject_secrets(profile)
+        encoded=dumps(profile)
+        with self.tx() as db:
+            previous=db.execute('SELECT * FROM candidates WHERE id=?',(identity_id,)).fetchone()
+            if previous and (previous['email']!=email or previous['person_key']!=person_key):
+                raise ProtocolError('identity_immutable')
+            db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,profile_json=excluded.profile_json,profile_hash=excluded.profile_hash', (identity_id,person_key,email,state,encoded,hashlib.sha256(encoded.encode()).hexdigest()))
+            return dict(self._get(db,'candidates',identity_id))
+
+    def eligibility(self, job_id, decision, *, reason):
+        if decision not in ('ready','held','excluded') or not reason: raise ProtocolError('invalid_eligibility')
+        with self.tx() as db:
+            job=self._get(db,'jobs',job_id)
+            if job['status'] in ('running','applied','submission_unknown'): raise ProtocolError('protected_job')
+            db.execute('UPDATE jobs SET eligibility=?,intervention_reason=? WHERE id=?',(decision,safe_text(reason),job_id))
+            return dict(self._get(db,'jobs',job_id))
+
+    def _assert_not_suppressed(self, db, job_id):
+        prior=db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id LEFT JOIN submission_ledger l ON l.job_id=r.id WHERE l.job_id IS NOT NULL OR j.status IN ('applied','already_applied') LIMIT 1",(job_id,)).fetchone()
+        if prior:raise ProtocolError('already_applied')
+
+    def _assert_no_owner(self, db, job_id):
+        lease=db.execute(RELATED+"SELECT l.* FROM related r JOIN application_attempts a ON a.job_id=r.id JOIN browser_leases l ON l.attempt_id=a.id WHERE l.state!='released' LIMIT 1",(job_id,)).fetchone()
+        if lease:
+            if lease['state']=='quarantined' or datetime.fromisoformat(lease['expires_at'])<=datetime.fromisoformat(self.now()):raise ProtocolError('reconciliation_required')
+            raise ProtocolError('owned_elsewhere')
+        if db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id WHERE j.status IN ('submission_unknown','running')",(job_id,)).fetchone():raise ProtocolError('reconciliation_required')
+
+    def _eligible(self, db, job_id):
+        job=self._get(db,'jobs',job_id)
+        self._assert_not_suppressed(db,job_id)
+        self._assert_no_owner(db,job_id)
+        if job['status']=='interrupted': raise ProtocolError('reconciliation_required')
+        if job['eligibility']!='ready': raise ProtocolError('not_ready')
+        return job
+
+    def request_run(self, *, request_id, job_ids, identity_id, browser_profile):
+        if not request_id or not job_ids or len(job_ids)!=len(set(job_ids)) or not browser_profile:
+            raise ProtocolError('invalid_run')
+        request_key=dumps([job_ids,identity_id,browser_profile])
+        now=self.now()
+        with self.tx() as db:
+            old=db.execute('SELECT * FROM runs WHERE request_id=?',(request_id,)).fetchone()
+            if old:
+                if old['request_key']!=request_key: raise ProtocolError('idempotency_conflict')
+                return dict(old)
+            candidate=self._get(db,'candidates',identity_id)
+            if candidate['state']!='active': raise ProtocolError('identity_inactive')
+            for key in job_ids: self._eligible(db,key)
+            run_id=uid()
+            db.execute('INSERT INTO runs(id,request_id,request_key,identity_id,browser_profile,state,requested_at,settings_json) VALUES (?,?,?,?,?,?,?,?)',(run_id,request_id,request_key,identity_id,browser_profile,'awaiting_worker',now,dumps(self.settings)))
+            for position,key in enumerate(job_ids):
+                db.execute('INSERT INTO run_jobs(run_id,job_id,position) VALUES (?,?,?)',(run_id,key,position))
+            return dict(self._get(db,'runs',run_id))
+
+    def accept_run(self, run_id, *, worker_id, session_id, capabilities):
+        reject_secrets(capabilities)
+        with self.tx() as db:
+            run=self._get(db,'runs',run_id)
+            required=('skill_version','provider','model','telemetry')
+            if capabilities.get('protocol')!=1 or not all(capabilities.get(k) for k in required) or capabilities.get('browser_profile')!=run['browser_profile']:
+                raise ProtocolError('unsupported_capability')
+            if run['state']!='awaiting_worker':
+                if run['worker_id']==worker_id and run['session_id']==session_id: return dict(run)
+                raise ProtocolError('owned_elsewhere')
+            if not worker_id or not session_id: raise ProtocolError('worker_identity_required')
+            db.execute("UPDATE runs SET state='accepted',accepted_at=?,worker_id=?,session_id=?,capabilities_json=? WHERE id=?",(self.now(),worker_id,session_id,dumps(capabilities),run_id))
+            db.execute('INSERT INTO run_sessions(run_id,worker_id,session_id,started_at) VALUES (?,?,?,?)',(run_id,worker_id,session_id,self.now()))
+            return dict(self._get(db,'runs',run_id))
+
+    def _expiry(self):
+        from datetime import timedelta
+        return (datetime.fromisoformat(self.now())+timedelta(seconds=self.settings.get('lease_seconds',60))).isoformat()
+
+    def claim(self, run_id, *, worker_id):
+        now=self.now()
+        with self.tx() as db:
+            run=self._get(db,'runs',run_id)
+            if run['state']=='awaiting_worker': raise ProtocolError('awaiting_worker')
+            if run['worker_id']!=worker_id: raise ProtocolError('owned_elsewhere')
+            if run['control']!='running': raise ProtocolError(run['control'])
+            if run['state']=='completed': return None
+            if run['state'] not in ('accepted','active'): raise ProtocolError('run_not_active')
+            lease=db.execute('SELECT * FROM browser_leases WHERE profile=?',(run['browser_profile'],)).fetchone()
+            if lease and lease['state']!='released':
+                if lease['state']=='quarantined' or lease['expires_at']<=now: raise ProtocolError('reconciliation_required')
+                raise ProtocolError('owned_elsewhere')
+            pending=db.execute("SELECT job_id FROM run_jobs WHERE run_id=? AND state='pending' ORDER BY position LIMIT 1",(run_id,)).fetchone()
+            if not pending:
+                db.execute("UPDATE runs SET state='completed',ended_at=? WHERE id=?",(now,run_id))
+                return None
+            job=self._eligible(db,pending['job_id'])
+            if db.execute('SELECT 1 FROM application_attempts WHERE job_id=? AND completed_at IS NULL',(job['id'],)).fetchone():
+                raise ProtocolError('owned_elsewhere')
+            candidate=self._get(db,'candidates',run['identity_id'])
+            if candidate['state']!='active': raise ProtocolError('identity_inactive')
+            fence=(lease['generation'] if lease else 0)+1
+            args=(job['id'],'unknown','external',now,run_id,run['identity_id'],worker_id,run['session_id'],run['browser_profile'],fence,now,now,run['settings_json'],candidate['profile_json'],run['capabilities_json'])
+            cursor=db.execute('INSERT INTO application_attempts(job_id,platform,workflow,started_at,run_id,identity_id,worker_id,session_id,browser_profile,fence,heartbeat_at,progress_at,settings_json,profile_json,versions_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',args)
+            attempt_id=cursor.lastrowid
+            db.execute("INSERT INTO browser_leases VALUES (?,?,?,?,?,?) ON CONFLICT(profile) DO UPDATE SET attempt_id=excluded.attempt_id,worker_id=excluded.worker_id,generation=excluded.generation,expires_at=excluded.expires_at,state=excluded.state",(run['browser_profile'],attempt_id,worker_id,fence,self._expiry(),'active'))
+            db.execute("UPDATE jobs SET status='running',started_at=?,updated_at=? WHERE id=?",(now,now,job['id']))
+            db.execute("UPDATE run_jobs SET state='active' WHERE run_id=? AND job_id=?",(run_id,job['id']))
+            db.execute("UPDATE runs SET state='active',started_at=COALESCE(started_at,?) WHERE id=?",(now,run_id))
+            return dict(self._get(db,'application_attempts',attempt_id))
+
+    def attempt(self, attempt_id):
+        with self.tx() as db: return dict(self._get(db,'application_attempts',attempt_id))
+
+    def _owner(self, db, attempt_id, worker_id, fence, *, completed=False):
+        a=self._get(db,'application_attempts',attempt_id)
+        if a['worker_id']!=worker_id or a['fence']!=fence: raise ProtocolError('stale_owner')
+        if completed and a['completed_at']: return a
+        if a['completed_at']: raise ProtocolError('attempt_completed')
+        lease=db.execute('SELECT * FROM browser_leases WHERE profile=?',(a['browser_profile'],)).fetchone()
+        if not lease or lease['generation']!=fence or lease['attempt_id']!=attempt_id: raise ProtocolError('stale_owner')
+        if lease['state']!='active' or lease['expires_at']<=self.now(): raise ProtocolError('reconciliation_required')
+        return a
+
+    def heartbeat(self, attempt_id, *, worker_id, fence):
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence)
+            db.execute('UPDATE application_attempts SET heartbeat_at=? WHERE id=?',(self.now(),attempt_id))
+            db.execute('UPDATE browser_leases SET expires_at=? WHERE profile=?',(self._expiry(),a['browser_profile']))
+            run=self._get(db,'runs',a['run_id'])
+            return {'control':run['control'],'heartbeat_at':self.now(),'last_progress_at':a['progress_at']}
+
+    def submission_intent(self, attempt_id, *, worker_id, fence, evidence, fixture=False):
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence)
+            if self._get(db,'runs',a['run_id'])['control']!='running':raise ProtocolError('control_pending')
+            settings=json.loads(a['settings_json'])
+            # fixture is allowed only in an explicitly synthetic development instance.
+            if not (fixture and settings['mode']=='development') and settings['submission_mode']!='submit':
+                raise ProtocolError('submission_not_authorized')
+            if a['submit_intent_at']: raise ProtocolError('reconciliation_required')
+            if not evidence: raise ProtocolError('evidence_required')
+            db.execute('UPDATE application_attempts SET submit_intent_at=? WHERE id=?',(self.now(),attempt_id))
+            return dict(self._get(db,'application_attempts',attempt_id))
+
+    def _complete(self, db, a, outcome, evidence, *, quiescent, finish_key, reconciled=False):
+        now=self.now()
+        duration=max(0,(datetime.fromisoformat(now)-datetime.fromisoformat(a['started_at']).replace(tzinfo=timezone.utc)).total_seconds())
+        db.execute('UPDATE application_attempts SET outcome=?,evidence=?,completed_at=?,duration_seconds=?,finish_key=?,uncertain_duration=? WHERE id=?',(outcome,evidence,now,duration,finish_key,int(reconciled),a['id']))
+        db.execute('UPDATE jobs SET status=?,completed_at=?,updated_at=? WHERE id=?',(outcome,now,now,a['job_id']))
+        if outcome in ('applied','already_applied'):
+            person=self._get(db,'candidates',a['identity_id'])['person_key']
+            db.execute('INSERT OR IGNORE INTO submission_ledger VALUES (?,?,?,?)',(a['job_id'],person,evidence,now))
+        db.execute('UPDATE run_jobs SET state=? WHERE run_id=? AND job_id=?',(outcome,a['run_id'],a['job_id']))
+        # A late reconciliation may NEVER release a newer owner's browser.
+        state='released' if quiescent and outcome!='submission_unknown' else 'quarantined'
+        db.execute('UPDATE browser_leases SET state=? WHERE profile=? AND generation=? AND attempt_id=?',(state,a['browser_profile'],a['fence'],a['id']))
+        return dict(self._get(db,'application_attempts',a['id']))
+
+    def finish(self, attempt_id, *, worker_id, fence, outcome, evidence='', quiescent=False):
+        if outcome not in ('applied','already_applied','ready_for_review','blocked','skipped','failed','interrupted','submission_unknown'):
+            raise ProtocolError('invalid_outcome')
+        evidence=safe_text(evidence)
+        key=hashlib.sha256(dumps([outcome,evidence,quiescent]).encode()).hexdigest()
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence,completed=True)
+            if a['completed_at']:
+                if a['finish_key']==key: return dict(a)
+                raise ProtocolError('conflicting_finish')
+            if quiescent and not self._is_quiescent(db,a): raise ProtocolError('writers_not_quiescent')
+            if outcome in ('applied','already_applied') and not evidence: raise ProtocolError('evidence_required')
+            if outcome=='applied' and not a['submit_intent_at']: raise ProtocolError('submission_intent_required')
+            if a['submit_intent_at'] and outcome not in ('applied','already_applied'): outcome='submission_unknown'
+            return self._complete(db,a,outcome,evidence,quiescent=quiescent,finish_key=key)
+
+    def reconcile(self, attempt_id, *, outcome, evidence, browser_quiescent):
+        evidence=safe_text(evidence)
+        if outcome not in ('applied','already_applied','interrupted','failed','blocked') or not evidence or not browser_quiescent:
+            raise ProtocolError('reconciliation_evidence_required')
+        with self.tx() as db:
+            a=self._get(db,'application_attempts',attempt_id)
+            if db.execute('SELECT 1 FROM application_attempts WHERE job_id=? AND id>?',(a['job_id'],a['id'])).fetchone():
+                raise ProtocolError('newer_attempt_exists')
+            if a['outcome'] in ('applied','already_applied'):
+                if outcome!=a['outcome']:raise ProtocolError('already_applied')
+                # Browser acknowledgement is distinct from immutable success/history.
+                changed=db.execute("UPDATE browser_leases SET state='released' WHERE profile=? AND generation=? AND attempt_id=? AND state='quarantined'",(a['browser_profile'],a['fence'],a['id'])).rowcount
+                if changed:
+                    now=self.now()
+                    payload=dumps({'operation':'browser_reconciled','status':'quiescent','evidence':evidence})
+                    audit_key=hashlib.sha256(dumps([a['id'],'operator',now,payload]).encode()).hexdigest()
+                    db.execute('INSERT INTO managed_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',(uid(),a['id'],a['run_id'],None,'operator','control',now,now,None,1,payload,audit_key))
+                return dict(a)
+            key=hashlib.sha256(dumps(['reconciled',outcome,evidence]).encode()).hexdigest()
+            if a['completed_at'] and a['finish_key']==key:return dict(a)
+            result=self._complete(db,a,outcome,evidence,quiescent=True,finish_key=key,reconciled=True)
+            return result
+
+    def retry(self, job_id):
+        with self.tx() as db:
+            job=self._get(db,'jobs',job_id)
+            self._assert_not_suppressed(db,job_id)
+            self._assert_no_owner(db,job_id)
+            if job['status'] in ('submission_unknown','running'):raise ProtocolError('reconciliation_required')
+            if job['status'] not in ('failed','blocked','interrupted','ready_for_review','needs_review'):raise ProtocolError('not_retryable')
+            if db.execute("SELECT 1 FROM browser_leases l JOIN application_attempts a ON a.id=l.attempt_id WHERE a.job_id=? AND l.state!='released'",(job_id,)).fetchone():raise ProtocolError('reconciliation_required')
+            db.execute("UPDATE jobs SET status='queued',updated_at=? WHERE id=?",(self.now(),job_id))
+            return dict(self._get(db,'jobs',job_id))
