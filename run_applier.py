@@ -28,6 +28,11 @@ import sys
 import webbrowser
 from pathlib import Path
 
+# Managed entrypoint resolves its explicit config before any legacy .env/DB imports.
+if __name__ == '__main__' and len(sys.argv) > 1 and sys.argv[1] == 'managed':
+    from job_applier.managed_cli import main as managed_main
+    raise SystemExit(managed_main(sys.argv[2:]))
+
 from dotenv import load_dotenv
 
 
