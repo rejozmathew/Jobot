@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "status": "reviewed_windows_engineering_candidate_live_acceptance_pending",
+  "source_commit": "c0cdf6a8b91871260a09aef077de12103aeeec70",
+  "source_tree": "ce58ffd6f59478ae1615926edc518e9d1763931f",
+  "branch": "jobbot-v1-windows",
+  "hash_format": "SHA-256 of canonical Git blob bytes (not platform-converted working-tree line endings)",
+  "deployment_authorized": false,
+  "push_authorized": false,
+  "real_application_submission_performed": false,
+  "test_results": {
+    "passed": 361,
+    "failed": 0,
+    "errors": 0,
+    "excluded": 0,
+    "skipped": 0,
+    "suite_seconds": "82.263"
+  },
+  "review": {
+    "stage3_and_archive": "passed with all S3-R1..R5 closed",
+    "delayed_field_scope_amendment": "passed",
+    "security_blockers": 0,
+    "logic_blockers": 0
+  },
+  "native_integration": {
+    "passed": true,
+    "fresh_instance_after_final_code_change": true,
+    "real_installed_hermes_dispatch": true,
+    "real_brave": true,
+    "fixture_form_attempts": 2,
+    "worker_sessions": 1,
+    "model_inference_used": false,
+    "official_simplify_used": false,
+    "submissions": 0
+  },
+  "operator_ui": {
+    "passed": true,
+    "real_browser": true,
+    "synthetic_worker_transitions": true,
+    "submissions": 0
+  },
+  "open_acceptance_gates": [
+    "Integrated subscription Astra reasoning with managed browser on an authorized role",
+    "Official Simplify/ATS semantic forms and mixed real-tab cleanup",
+    "Dedicated live mailbox identity and verification correlation",
+    "Actual helper execution/reuse across applications",
+    "Authorized real external upload and review-only pilot"
+  ],
+  "acceptance_ledger": "docs/jobbot-v1/ACCEPTANCE_LEDGER.md",
+  "runbook": "docs/jobbot-v1/WINDOWS_RUNBOOK.md",
+  "later_ubuntu_plan": "docs/jobbot-v1/LATER_UBUNTU_ROLLOUT.md",
+  "changed_source_files": [
+    {
+      "path": "job_applier/hermes_plugin.py",
+      "git_blob_sha256": "411288f8a4e232a232f89033e1009d77deeb0b5830e17542afbcedf09a8898ae"
+    },
+    {
+      "path": "job_applier/managed.py",
+      "git_blob_sha256": "c3c388dc7a29ccaf118b217664953dbfc1ba7af4423f6540b0811fa47bdc2b44"
+    },
+    {
+      "path": "job_applier/managed_accounts.py",
+      "git_blob_sha256": "866842311506ce7ca864f144a5a85c9c6443c0fddb8a40d1561c99cbe45b8f42"
+    },
+    {
+      "path": "job_applier/managed_api.py",
+      "git_blob_sha256": "6a2c05e5e5a4ffad4e79a146844c2fea17bca3350e67615530ffd35850ad2007"
+    },
+    {
+      "path": "job_applier/managed_archive.py",
+      "git_blob_sha256": "4fa6fa9d912210021f894e64a36ff60098ace93572c75e72a29b0d8c069cd2c1"
+    },
+    {
+      "path": "job_applier/managed_context.py",
+      "git_blob_sha256": "47c525aae861f09b5bc11e98f26cdb86428cfb6bd45de05f17da17db394afb3b"
+    },
+    {
+      "path": "job_applier/managed_continuity.py",
+      "git_blob_sha256": "e0939e19b8ccb57c1315be7016b6c79bbf8df962d1fc55cf4b2f24ed8a7d8437"
+    },
+    {
+      "path": "job_applier/managed_documents.py",
+      "git_blob_sha256": "a23eb32fe568beefa263c7642aebd44f200f4d51318edf183e26d8ae4e0a83ea"
+    },
+    {
+      "path": "job_applier/managed_events.py",
+      "git_blob_sha256": "c1e5699152330a04609787f186d8706b9a2607db1f1b86095b472f3cddda0ea7"
+    },
+    {
+      "path": "job_applier/managed_learning.py",
+      "git_blob_sha256": "3a723c3eaa77f5d6d442c8bc48ed28a3306970418188c1979569e4a3dc99f8e1"
+    },
+    {
+      "path": "job_applier/managed_migrations.py",
+      "git_blob_sha256": "605e4456346099d0c5219a3dc9179d8448894c1e44f5f001653a7ea5ac9d3564"
+    },
+    {
+      "path": "job_applier/managed_reports.py",
+      "git_blob_sha256": "ad6aa41e9fd10722cda9a4aebdc7a9bf72915f6d7fc69449cf426cd517462620"
+    },
+    {
+      "path": "job_applier/managed_runtime.py",
+      "git_blob_sha256": "e1285d19c74053c0394215f1d38a6165e2964bb3380cd564e21cbc79878c9c09"
+    },
+    {
+      "path": "job_applier/managed_settings.py",
+      "git_blob_sha256": "54e9c4b24f644e1f03bae411174173fd162b82292e3729324e157a3cdc289641"
+    },
+    {
+      "path": "job_applier/managed_ui.py",
+      "git_blob_sha256": "c20e4e33e6b23e44823f3f55e50d96535a69e54482cf2a37a2ba499c8ba6043e"
+    },
+    {
+      "path": "job_applier/managed_versions.py",
+      "git_blob_sha256": "b0289e6ed6403912a0482c86cbb9f6924a79d015ebb4aa32f58e71b2c4f68da1"
+    },
+    {
+      "path": "job_applier/managed_views.py",
+      "git_blob_sha256": "0f1078c5f27a4a6adda8849721479bb7d106faf96be8203b11575dc3054cc546"
+    },
+    {
+      "path": "job_applier/static/jobbot.css",
+      "git_blob_sha256": "aa1f258ac85f342c40d73dfdf4626d88d492cb474817cdd799f30ba0e2d510fc"
+    },
+    {
+      "path": "job_applier/static/jobbot.html",
+      "git_blob_sha256": "6148727d50805a12e93055437d0ef8958ac399a6d7eb22dbe4a7c18ac88dd8f2"
+    },
+    {
+      "path": "job_applier/static/jobbot.js",
+      "git_blob_sha256": "eb2ecda7fde5f5ba8ff13a9bc403fd2044d1e9d392430a5ec6443adbedff248a"
+    },
+    {
+      "path": "requirements-jobbot-lock.txt",
+      "git_blob_sha256": "821ab42481203d07087b3773c7a22361449e8967ee4e8ef2876818c46d35dcfd"
+    },
+    {
+      "path": "skills/productivity/job-apply/SKILL.md",
+      "git_blob_sha256": "d9c99b958b0a15619729b2c5d7ce4bc675de5a9b1310a14e0f926f43fe3d9621"
+    },
+    {
+      "path": "tests/jobbot_v1/test_document_timing_gaps.py",
+      "git_blob_sha256": "272ed4454495b9f339a9a14de4bbed0e714ddc6e024d90dc6fb4b208abaa56bb"
+    },
+    {
+      "path": "tests/jobbot_v1/test_documents_assessments.py",
+      "git_blob_sha256": "9bb159b563cf4a8c906eb582400a9c313b3bad5b65fea2a0a972c7ed5df8c977"
+    },
+    {
+      "path": "tests/jobbot_v1/test_field_context_ordering.py",
+      "git_blob_sha256": "fe3a61960b485b82665c443bc8b569d4281c8cf7c175c587dcb746b5d80b2834"
+    },
+    {
+      "path": "tests/jobbot_v1/test_history_archive.py",
+      "git_blob_sha256": "27f684cc6e65c8d32e3bc56da0f680a1980e996ab1a23417c8f8740858e5899a"
+    },
+    {
+      "path": "tests/jobbot_v1/test_learning_catalogue.py",
+      "git_blob_sha256": "ccd6df8f65050dad12c68da5cb9745cec9cf11883464e46f99cedd01bcae7d5d"
+    },
+    {
+      "path": "tests/jobbot_v1/test_operator_context_versions.py",
+      "git_blob_sha256": "46ae92613d6dbdf5190713597789776d4b74e8a07dfadb5cbdedcdc9518e9ce7"
+    },
+    {
+      "path": "tests/jobbot_v1/test_operator_ui.py",
+      "git_blob_sha256": "aab90681c4586efab494883dbff7283cf3e1fda8358881804b77faa0edfce4d6"
+    },
+    {
+      "path": "tests/jobbot_v1/test_owned_account_events.py",
+      "git_blob_sha256": "b4457d97111477c13c7d10add343996538e5ccd692b0f3fb45709ac4e079a546"
+    },
+    {
+      "path": "tests/jobbot_v1/test_owned_mail_protocol.py",
+      "git_blob_sha256": "534c76b1f9468bfbefa3fbefc5ec36b5e1659d262b2247af312dae98c582f6f4"
+    },
+    {
+      "path": "tests/jobbot_v1/test_resource_protocol.py",
+      "git_blob_sha256": "54aeed723445cecfc51e57c9aa4e86f091f36535550353119dbbf286d0958059"
+    },
+    {
+      "path": "tests/jobbot_v1/test_runtime_budgets_targets.py",
+      "git_blob_sha256": "625755f95a946ae1100d4a5b5cfe58e11785766d0ae9d22b3ed98807e32fe525"
+    },
+    {
+      "path": "tests/jobbot_v1/test_settings_effects.py",
+      "git_blob_sha256": "f5c55b1a8dcb9a14b25d7260f0e35d8b814cc41d32559e43853d1dc99184899a"
+    },
+    {
+      "path": "tests/jobbot_v1/test_settings_views.py",
+      "git_blob_sha256": "0f7bd10368663fddc1e43c41bd99d820cd134d75db00e8aa2ab16d004fe240a6"
+    },
+    {
+      "path": "tests/jobbot_v1/test_stage3_review_closeout.py",
+      "git_blob_sha256": "04e5e06cc363bfb9ba9f92874db66a318ac347ed7b392cb1d9f4a14727debe00"
+    },
+    {
+      "path": "tests/jobbot_v1/test_strategy_policy.py",
+      "git_blob_sha256": "e4e85a56be5f4a36d6e982c97f5c87a1110bab55f08b53545b8d1b75f1b0fef5"
+    },
+    {
+      "path": "tests/jobbot_v1/test_timing_reports.py",
+      "git_blob_sha256": "c9a9e7ebbd5d5808dcd1aef29dba188686785821b2ec2ec485720979aac50419"
+    },
+    {
+      "path": "tests/jobbot_v1/test_worker_context_gaps.py",
+      "git_blob_sha256": "9c6c6eb29d069c6e1401ea7edcb68bf0ac8ca01d329958ba26ddb8abfef47bf3"
+    }
+  ]
+}

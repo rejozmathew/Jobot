@@ -2,6 +2,8 @@
 
 Prepared: 2026-09-06.
 
+Implementation checkpoint: the original specification below is preserved. Current evidence is in [STAGE3_EVIDENCE.md](STAGE3_EVIDENCE.md), [STAGE4_EVIDENCE.md](STAGE4_EVIDENCE.md) and the [34-ID acceptance ledger](ACCEPTANCE_LEDGER.md). Follow [WINDOWS_RUNBOOK.md](WINDOWS_RUNBOOK.md) for gated activation/rollback; [LATER_UBUNTU_ROLLOUT.md](LATER_UBUNTU_ROLLOUT.md) remains a plan only. The reviewed Windows engineering candidate is **not fully accepted for live applications**.
+
 This is a specification and instruction package. It does not contain an implemented application, and it is not a report of passed application tests.
 
 ## Final decision

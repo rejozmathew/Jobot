@@ -1,4 +1,4 @@
-# Agent-neutral worker protocol v1 (Stage 1 draft)
+# Agent-neutral worker protocol v1
 
 This is an implementation contract, not evidence of live portal success. `Service` remains the single transaction boundary over existing jobs, attempts and company account tables. No internal agent loop or alternative autofill framework is introduced.
 
@@ -26,6 +26,15 @@ Accounts are scoped by explicit candidate identity plus portal namespace, not em
 
 Mail correlation operates on request metadata: exact recipient, sender, purpose, namespace and bounded time window. It returns a message identifier, not an OTP/body. Multiple matches are ambiguous. This local matcher does not prove connector identity, sender authenticity, mailbox scope or successful live code extraction; those remain authorized integration tests.
 
+Account context, worker account events and mail requests share one job-bound resolver: verified namespace/requisition evidence preserves tenant paths; otherwise an exact operator-verified alias may resolve the job host. Unverified metadata never grants a tenant. New worker account mutations and mail requests are fenced within the same transaction. Completed attempts permit only exact cached account-request replay; novel late observations require operator reconciliation and cannot overwrite a newer account record.
+
+## Semantic field timing and targets
+`event` type `field_context` carries stable `page`, `field`, `category` identifiers, never raw field values. The native `milestone` operation forwards that semantic event. Every `action_start` captures the context; `action_end` associates automatically measured duration with it. Field limits are cumulative across tools for the same context; unknown measurements block rather than count as zero. Empty context or verified navigation/field completion clears context. Without semantic context, responses expose `coarse_only` and retain attempt/no-progress limits. Merely changing context is not verified progress.
+
+Target binding uses the full canonical job identity (including identity-bearing query parameters), stored as a separate identity key from the safe display URL. A hostname/account alias alone does not prove requisition ownership. Alternate origins require an explicit verified job URL identity; only the same-origin conventional `/apply` child with unchanged identity query is implicit. Unknown redirects are reconciliation work, not an excuse to select the nearest matching tab.
+
+Reports and operator views derive uncertainty from unfinished/unmeasured actions and expired, quarantined or mismatching ownership. `completed_at` remains null after a crash; displayed wall time is not a claim of continuous execution.
+
 ## Durability and data safety
 - SQLite `BEGIN IMMEDIATE`, independent connections, versioned additive migrations, durable browser generation and immutable event rows.
 - Existing history is not an execution queue to reset. Applied suppression is global to a requisition, independent of active email.
@@ -33,4 +42,4 @@ Mail correlation operates on request metadata: exact recipient, sender, purpose,
 - Raw model thoughts, tool args/results, mail, passwords, OTPs and cookies do not belong in ordinary event storage. Allowlisted semantic payloads are sanitized before DB or spool writes.
 
 ## Implementation status
-Core local services, ownership, telemetry, controls and account metadata have passing synthetic tests. Authenticated HTTP/client/CLI/data tooling are the next slice. Installed Hermes integration, actual Simplify and live mail remain pending; see the requirement map and stage evidence ledger.
+Core services, authenticated HTTP/client/CLI, native Hermes adapter/plugin and operator/resource services are implemented. See the current stage evidence and acceptance ledger for independently reviewed source and actual execution results. Local/native fixture success is not official Simplify, live employer, or live mailbox acceptance.

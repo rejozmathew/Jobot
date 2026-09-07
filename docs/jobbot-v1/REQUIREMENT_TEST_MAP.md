@@ -1,6 +1,6 @@
 # Requirement-to-test map
 
-Source: ACCEPTANCE_AND_DATA.md. Exact tests/commands/results will replace planned entries as slices pass. No pending case is counted as verified.
+Source: ACCEPTANCE_AND_DATA.md. This is the historical planning map. **For final current per-ID evidence and unresolved acceptance gates, use [ACCEPTANCE_LEDGER.md](ACCEPTANCE_LEDGER.md)**, which accounts for all 34 core/protocol IDs. The planned/partial statuses below are preserved as historical planning evidence, not the final verification result. No pending case is counted as verified.
 
 | ID | Required scenario | Required result | Planned test group | Status |
 |---|---|---|---|---|
