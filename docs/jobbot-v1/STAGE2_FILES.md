@@ -1,0 +1,45 @@
+# Stage 2 changed files
+
+Exact code/skill/test paths included in this stage. Active user application/discovery skills are not deployed from this tree.
+
+- `integrations/hermes_jobbot/__init__.py` — Worker integration, shared service compatibility, or handoff implementation:   init  .
+- `integrations/hermes_jobbot/plugin.yaml` — Native plugin manifest using inspected installed interfaces.
+- `job_applier/__init__.py` — Worker integration, shared service compatibility, or handoff implementation:   init  .
+- `job_applier/browser_helpers/simplify_click.js` — Bounded in-page Simplify control or observation helper; no raw values returned.
+- `job_applier/browser_helpers/simplify_observe.js` — Bounded in-page Simplify control or observation helper; no raw values returned.
+- `job_applier/cdp_client.py` — Worker integration, shared service compatibility, or handoff implementation: cdp client.
+- `job_applier/hermes_adapter.py` — Worker integration, shared service compatibility, or handoff implementation: hermes adapter.
+- `job_applier/hermes_model_events.py` — Worker integration, shared service compatibility, or handoff implementation: hermes model events.
+- `job_applier/hermes_plugin.py` — Worker integration, shared service compatibility, or handoff implementation: hermes plugin.
+- `job_applier/managed_client.py` — Worker integration, shared service compatibility, or handoff implementation: managed client.
+- `job_applier/managed_events.py` — Worker integration, shared service compatibility, or handoff implementation: managed events.
+- `job_applier/managed_migrations.py` — Worker integration, shared service compatibility, or handoff implementation: managed migrations.
+- `job_applier/managed_redaction.py` — Worker integration, shared service compatibility, or handoff implementation: managed redaction.
+- `job_applier/simplify_boundary.py` — Worker integration, shared service compatibility, or handoff implementation: simplify boundary.
+- `skills/job-posting-harvest/SKILL.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/job-posting-harvest/references/ats-map-2026-08.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/job-posting-harvest/references/discovery-and-handoff.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/job-posting-harvest/scripts/ats_probe.py` — Worker integration, shared service compatibility, or handoff implementation: ats probe.
+- `skills/job-posting-harvest/scripts/intake_results.py` — Worker integration, shared service compatibility, or handoff implementation: intake results.
+- `skills/productivity/job-application-submit/SKILL.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/productivity/job-apply/SKILL.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/productivity/job-apply/references/accounts-and-mail.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/productivity/job-apply/references/cdp-recipes.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/productivity/job-apply/references/greenhouse.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/productivity/job-apply/references/simplify.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `skills/productivity/job-apply/references/workday.md` — Staged canonical guidance or retained, sanitized portal knowledge.
+- `tests/jobbot_v1/fixtures/simplify/disabled_standin.html` — Synthetic regression or fixture coverage for disabled standin.
+- `tests/jobbot_v1/fixtures/simplify/missing_panel_form.html` — Synthetic regression or fixture coverage for missing panel form.
+- `tests/jobbot_v1/fixtures/simplify/supported_standin.html` — Synthetic regression or fixture coverage for supported standin.
+- `tests/jobbot_v1/test_adapter_control_retry.py` — Synthetic regression or fixture coverage for test adapter control retry.
+- `tests/jobbot_v1/test_adapter_model_hooks.py` — Synthetic regression or fixture coverage for test adapter model hooks.
+- `tests/jobbot_v1/test_harvest_handoff.py` — Synthetic regression or fixture coverage for test harvest handoff.
+- `tests/jobbot_v1/test_hermes_adapter.py` — Synthetic regression or fixture coverage for test hermes adapter.
+- `tests/jobbot_v1/test_native_plugin.py` — Synthetic regression or fixture coverage for test native plugin.
+- `tests/jobbot_v1/test_owned_cdp.py` — Synthetic regression or fixture coverage for test owned cdp.
+- `tests/jobbot_v1/test_plugin_configured.py` — Synthetic regression or fixture coverage for test plugin configured.
+- `tests/jobbot_v1/test_simplify_boundary.py` — Synthetic regression or fixture coverage for test simplify boundary.
+- `tests/jobbot_v1/test_spa_step_identity.py` — Synthetic regression or fixture coverage for test spa step identity.
+- `tests/jobbot_v1/test_stage2_adapter_review.py` — Synthetic regression or fixture coverage for test stage2 adapter review.
+- `tests/jobbot_v1/test_stage2_boundary_review.py` — Synthetic regression or fixture coverage for test stage2 boundary review.
+- `tests/jobbot_v1/test_staged_skills.py` — Synthetic regression or fixture coverage for test staged skills.
