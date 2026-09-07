@@ -24,8 +24,8 @@ Private resume reference: `artifacts/jobbot-v1-private/RUNTIME_HANDOFF.md` (veri
 7. Existing FastAPI + plain HTML/JS stack retained. Minimal operational UI from DB, no routine screenshot/reasoning dump. Settings, helpers/lessons, external document/assessment metadata are actual storage features.
 
 ## Stages and checkpoints
-### 0 — Inspect/preserve/isolate (in progress)
-Finish source seam inspection, requirement map and baseline checkpoint commit. No live work.
+### 0 — Inspect/preserve/isolate (completed)
+Baseline, private handoff, provider verification, separate worktree and requirement map captured; checkpoint commit e26aecd. No live work.
 ### 1 — Core services
 Vertical test-first slices: migrations/config+identity/intake; run acceptance+atomic claims; fencing/idempotence/unknown outcomes; accounts; events/timing/controls; safe data tools; compatibility/API/client and fake worker. Run focused and full offline tests. Independent review before stage commit.
 ### 2 — Adapter and skills
@@ -39,4 +39,10 @@ Run every matrix case and record evidence. Explicit isolated Windows server/brow
 The requirement map is the checklist, not a green aggregate alone. Each stage report lists exact changed files, commands and outcomes, gaps and next action. A release candidate is not live acceptance. Do not call Windows/Ubuntu ready while required evidence is pending.
 
 ## Current checkpoint
-Stage 0. No product source changed yet. Next: finish map, commit preserved specification/plan, then Stage 1 RED test. Resume from this file after context change; inspect actual checkout rather than guessing previous writes.
+Stage 1 complete for the scope in IMPLEMENTATION_PROMPTS.md lines 29–35. Reviewed source commits: `8432bd7e2db1774fd61242f3ac7c11e6eeaf575e` (core/data/legacy guards) and `503e43c88d9cf41a52cec8a130ebf958d7fc8b86` (HTTP/CLI/fake worker). Both verified in a clean detached verification worktree: first **94 passed, 1 warning, 27.45s**, then **120 passed, 2 warnings, 28.20s**. Compilation and clean status verified there. No push/deployment. The original checkout remains at the approved commit with only its supplied untracked docs.
+
+Final targeted independent review explicitly passed S1/L8/L9 with empty security/logic lists. Fully visible verdict fields and completion status are preserved in ignored `FINAL_REVIEW_RECEIPT.json`; the source log's long narrative suffix is truncated and is NOT reconstructed. Final reviewed 18-file source hashes were checked again before and after a separate real localhost CLI/API smoke. It passed one-session/two-job assertions, 2 events per attempt, zero submissions, released lease, completed run. Final code-manifest SHA256: `cd4f860e4f25da5288e4bbc97f81f4ccd1ce445b0b6764993912f322cc7bc1ff`. Server stopped, port closed, temporary auth removed. Synthetic DB/evidence retained privately. No browser, Simplify, mailbox or inference involved.
+
+**Next: Stage 2.** Antigravity test-only task `proc_a255b1802012` completed: `tests/jobbot_v1/test_hermes_adapter.py`, five expected RED cases because the adapter module does not exist. Primary must read/review it, rerun RED, then implement the adapter/client/hooks against the installed interfaces documented in HERMES_INTERFACE.md. Do not restart or replan. Test work remains exclusively agy Gemini 3.8 Flash Medium/High with primary review/local reruns; implementation and final integration remain primary-owned. No adapter implementation, staged canonical skills or UI yet.
+
+Later whole-product acceptance (including scoped archive/maintenance D3) stays in the requirement map; Stage 1 completion is not release acceptance. No application/discovery skill, agent config, candidate profile, real history, browser data or cron modification. A general review-skill safety note was changed; see STAGE1_FILES.md.
