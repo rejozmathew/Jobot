@@ -10,7 +10,7 @@ from .managed_client import Client
 from .managed_shared import ProtocolError, uid
 
 HOOKS=('pre_tool_call','post_tool_call','pre_api_request','post_api_request','api_request_error')
-OPERATIONS=('status','accept','next','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy')
+OPERATIONS=('status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy')
 SCHEMA={'name':'jobbot','description':'Pull one reserved job, report verified milestones, and respect app-owned controls. Never starts a model or legacy agent.',
     'parameters':{'type':'object','properties':{'operation':{'type':'string','enum':list(OPERATIONS)},'parameters':{'type':'object'}},'required':['operation'],'additionalProperties':False}}
 
@@ -109,7 +109,15 @@ class PluginController:
             adapter=self._adapter(sid,cfg)
             if op=='accept':
                 result=adapter.accept(params['run_id']);self._start_pulse()
-            elif op=='next':result=adapter.claim()
+            elif op=='next':
+                result=adapter.claim()
+                if result:result=dict(result,context=adapter.client.call('application_context',attempt_id=result['id'],worker_id=adapter.worker_id))
+            elif op=='report':
+                aid=params.get('attempt_id') or (adapter._state().get('attempt') or {}).get('attempt_id')
+                result=adapter.client.call('attempt_report',attempt_id=aid,worker_id=adapter.worker_id)
+            elif op=='ack_control' and not adapter._state().get('attempt'):
+                if set(params)!={'quiescent'}:raise ProtocolError('invalid_payload')
+                result=adapter.client.call('ack_run_control',run_id=adapter._state()['run_id'],worker_id=adapter.worker_id,quiescent=params['quiescent'])
             elif op=='resume':
                 result=adapter.client.call('resume_run',run_id=params['run_id'],worker_id=adapter.worker_id,
                     session_id=adapter.session_id,capabilities=adapter.capabilities)
@@ -122,7 +130,17 @@ class PluginController:
                 context=adapter._state().get('attempt')
                 if not context:raise ProtocolError('no_claimed_attempt')
                 if adapter.flush():raise ProtocolError('telemetry_delivery_pending')
-                if op=='milestone':
+                if op=='context':
+                    if set(params)-{'platform','namespace'}:raise ProtocolError('invalid_payload')
+                    result=adapter.client.call('application_context',attempt_id=context['attempt_id'],worker_id=adapter.worker_id,**params)
+                elif op=='observe':
+                    if set(params)-{'condition','action','scope','expected_result'}:raise ProtocolError('invalid_payload')
+                    result=adapter.client.call('observe_owned_lesson',**context,**params)
+                elif op in ('mail_request','mail_match'):
+                    allowed=('namespace','purpose','requested_at','expected_sender') if op=='mail_request' else ('request_id','messages')
+                    if set(params)-set(allowed):raise ProtocolError('invalid_payload')
+                    result=adapter.client.call('request_mail_for_attempt' if op=='mail_request' else 'match_mail_for_attempt',**context,**params)
+                elif op=='milestone':
                     result=adapter.client.call('event',**context,event_id=params.get('event_id') or uid(),
                         event_type=params['event_type'],observed_at=params['observed_at'],
                         payload=params.get('payload',{}),duration_seconds=None,action_id=None)
@@ -131,7 +149,10 @@ class PluginController:
                     result=adapter.client.call('account_strategy',identity_id=attempt['identity_id'],namespace=params['namespace'])
                 else:
                     permitted={'finish':('outcome','evidence','quiescent'), 'heartbeat':(),
-                        'writer_state':('state',),'ack_control':('quiescent',), 'submission_intent':('fixture','evidence')}[op]
+                        'writer_state':('state',),'ack_control':('quiescent',), 'submission_intent':('fixture','evidence'),
+                        'record_account_event':('namespace','state','credential_ref','request_id','evidence'),
+                        'report_upload':('asset_id','status','evidence'),'extend_budget':('seconds','reason'),
+                        'bind_target':('target_id','url'),'target_state':('target_id','state','evidence')}[op]
                     if any(k not in permitted for k in params):raise ProtocolError('invalid_payload')
                     if op=='submission_intent' and not params.get('evidence'):raise ProtocolError('invalid_payload')
                     result=adapter.client.call(op,**context,**params)

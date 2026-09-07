@@ -102,7 +102,55 @@ def migration_8(db):
     db.execute('CREATE UNIQUE INDEX one_browser_writer ON managed_actions(attempt_id) WHERE ended_at IS NULL AND writes_browser=1')
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8)]
+def migration_9(db):
+    db.execute('CREATE TABLE settings_revisions (version INTEGER PRIMARY KEY,values_json TEXT NOT NULL,values_hash TEXT NOT NULL,created_at TEXT NOT NULL)')
+
+
+def migration_10(db):
+    statements=[
+        'CREATE TABLE lessons (id TEXT PRIMARY KEY,kind TEXT NOT NULL,condition TEXT NOT NULL,action TEXT NOT NULL,scope_json TEXT NOT NULL,expected_result TEXT NOT NULL,attempt_ids_json TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL)',
+        'CREATE TABLE lesson_history (id INTEGER PRIMARY KEY,lesson_id TEXT NOT NULL REFERENCES lessons(id),attempt_id INTEGER REFERENCES application_attempts(id),success INTEGER,status TEXT,reason TEXT NOT NULL,created_at TEXT NOT NULL)',
+        'CREATE TABLE helper_versions (helper_id TEXT NOT NULL,version TEXT NOT NULL,capability TEXT NOT NULL,path TEXT NOT NULL,sha256 TEXT NOT NULL,scope_json TEXT NOT NULL,preconditions_json TEXT NOT NULL,limitations_json TEXT NOT NULL,tests_json TEXT NOT NULL,status TEXT NOT NULL,evidence TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(helper_id,version))',
+        'CREATE TABLE helper_history (id TEXT PRIMARY KEY,helper_id TEXT NOT NULL,version TEXT NOT NULL,status TEXT NOT NULL,evidence TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(helper_id,version) REFERENCES helper_versions(helper_id,version))',
+        'CREATE TABLE document_assets (id TEXT PRIMARY KEY,identity_id TEXT NOT NULL REFERENCES candidates(id),kind TEXT NOT NULL,version TEXT NOT NULL,storage_ref TEXT NOT NULL,sha256 TEXT NOT NULL,provenance_json TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(identity_id,kind,version))',
+        'CREATE TABLE document_selections (id TEXT PRIMARY KEY,asset_id TEXT NOT NULL REFERENCES document_assets(id),job_id TEXT NOT NULL REFERENCES jobs(id),attempt_id INTEGER REFERENCES application_attempts(id),status TEXT NOT NULL,created_at TEXT NOT NULL)',
+        'CREATE TABLE document_uploads (id TEXT PRIMARY KEY,asset_id TEXT NOT NULL REFERENCES document_assets(id),attempt_id INTEGER NOT NULL REFERENCES application_attempts(id),status TEXT NOT NULL,evidence TEXT NOT NULL,created_at TEXT NOT NULL)',
+        'CREATE TABLE match_assessments (id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES jobs(id),jd_hash TEXT NOT NULL,resume_hash TEXT NOT NULL,profile_hash TEXT NOT NULL,evaluator TEXT NOT NULL,model TEXT NOT NULL,rubric TEXT NOT NULL,score REAL,scale_min REAL NOT NULL,scale_max REAL NOT NULL,recommendation TEXT NOT NULL,reasons_json TEXT NOT NULL,evaluated_at TEXT NOT NULL,recorded_at TEXT NOT NULL)',
+    ]
+    for statement in statements:db.execute(statement)
+    for table in ('lesson_history','helper_history','document_uploads','match_assessments'):
+        for action in ('UPDATE','DELETE'):
+            db.execute(f"CREATE TRIGGER immutable_{table}_{action.lower()} BEFORE {action} ON {table} BEGIN SELECT RAISE(ABORT,'immutable history'); END")
+
+
+def migration_11(db):
+    db.execute('CREATE TABLE account_namespace_aliases (alias TEXT PRIMARY KEY,canonical TEXT NOT NULL,evidence TEXT NOT NULL,created_at TEXT NOT NULL)')
+    add_columns(db,'company_portal_accounts',{'last_confirmed_at':'DATETIME'})
+    db.execute('CREATE TABLE budget_extensions (id TEXT PRIMARY KEY,attempt_id INTEGER NOT NULL REFERENCES application_attempts(id),seconds REAL NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL)')
+    db.execute('CREATE TABLE owned_targets (id TEXT PRIMARY KEY,attempt_id INTEGER NOT NULL REFERENCES application_attempts(id),profile TEXT NOT NULL,target_id TEXT NOT NULL,url TEXT NOT NULL,state TEXT NOT NULL,evidence TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(attempt_id,target_id))')
+    db.execute('CREATE TABLE target_history (id TEXT PRIMARY KEY,target_record_id TEXT NOT NULL REFERENCES owned_targets(id),state TEXT NOT NULL,evidence TEXT NOT NULL,created_at TEXT NOT NULL)')
+    for table in ('account_namespace_aliases','budget_extensions','target_history'):
+        for action in ('UPDATE','DELETE'):
+            db.execute(f"CREATE TRIGGER immutable_{table}_{action.lower()} BEFORE {action} ON {table} BEGIN SELECT RAISE(ABORT,'immutable history'); END")
+
+
+def migration_12(db):
+    db.execute('CREATE TABLE attempt_mail_requests (request_id TEXT PRIMARY KEY REFERENCES mail_requests(id),attempt_id INTEGER NOT NULL REFERENCES application_attempts(id))')
+
+
+def migration_13(db):
+    db.execute('CREATE TABLE job_archives (job_id TEXT PRIMARY KEY REFERENCES jobs(id),archived_at TEXT NOT NULL,preview_hash TEXT NOT NULL,backup_path TEXT NOT NULL,backup_sha256 TEXT NOT NULL)')
+    for action in ('UPDATE','DELETE'):
+        db.execute(f"CREATE TRIGGER immutable_job_archives_{action.lower()} BEFORE {action} ON job_archives BEGIN SELECT RAISE(ABORT,'immutable archive'); END")
+
+
+def migration_14(db):
+    add_columns(db,'account_requests',{'attempt_id':'INTEGER REFERENCES application_attempts(id)'})
+    add_columns(db,'managed_actions',{'semantic_context_json':"TEXT NOT NULL DEFAULT '{}'"})
+    add_columns(db,'owned_targets',{'identity_key':'TEXT'})
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14)]
 
 
 def migrate(path):

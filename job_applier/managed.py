@@ -18,6 +18,15 @@ from .managed_shared import ProtocolError, uid, dumps
 from .managed_events import EventServices
 from .managed_accounts import AccountServices
 from .managed_continuity import ContinuityServices
+from .managed_settings import SettingsServices
+from .managed_views import ViewServices
+from .managed_learning import LearningServices
+from .managed_documents import DocumentServices
+from .managed_reports import ReportServices
+from .managed_runtime import RuntimeServices
+from .managed_context import ContextServices
+from .managed_archive import ArchiveServices
+from .managed_versions import code_evidence
 from .managed_redaction import safe_text, reject_secrets
 
 
@@ -28,7 +37,7 @@ def utc_now():
 from .managed_identity import canonical_url, job_key, RELATED
 
 
-class Service(EventServices, AccountServices, ContinuityServices):
+class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices):
     def __init__(self, db_path, *, instance_id=None, now_fn=utc_now):
         p=Path(db_path)
         if not p.is_absolute(): raise ProtocolError('absolute_db_path_required')
@@ -75,13 +84,16 @@ class Service(EventServices, AccountServices, ContinuityServices):
             db.close()
 
     def health(self):
-        return {'instance_id':self.instance_id,'db_path':str(self.db_path),'submission_mode':self.settings['submission_mode'],'settings':self.settings}
+        with self.tx() as db:
+            settings=json.loads(db.execute('SELECT settings_json FROM instance WHERE id=?',(self.instance_id,)).fetchone()[0])
+            schema=db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
+        return {'instance_id':self.instance_id,'db_path':str(self.db_path),'submission_mode':settings['submission_mode'],'settings':settings,'schema_version':schema,**code_evidence()}
 
     def job(self, job_id):
         with self.tx() as db:
             r=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
             if not r: raise ProtocolError('job_not_found')
-            return dict(r)
+            return dict(r,assessment=self._assessment(db,job_id))
 
     def sources(self, job_id):
         with self.tx() as db:
@@ -155,9 +167,16 @@ class Service(EventServices, AccountServices, ContinuityServices):
             raise ProtocolError('owned_elsewhere')
         if db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id WHERE j.status IN ('submission_unknown','running')",(job_id,)).fetchone():raise ProtocolError('reconciliation_required')
 
-    def _eligible(self, db, job_id):
+    def _eligible(self, db, job_id, settings=None):
         job=self._get(db,'jobs',job_id)
+        policy=settings or self.settings
+        if (job['company'] or '').casefold().strip() in {x.casefold().strip() for x in policy.get('excluded_companies',[])}:
+            raise ProtocolError('company_excluded')
+        country=json.loads(job['metadata_json'] or '{}').get('country')
+        if country and policy.get('market_countries') and country not in policy['market_countries']:
+            raise ProtocolError('market_incompatible')
         self._assert_not_suppressed(db,job_id)
+        if db.execute('SELECT 1 FROM job_archives WHERE job_id=?',(job_id,)).fetchone():raise ProtocolError('job_archived')
         self._assert_no_owner(db,job_id)
         if job['status']=='interrupted': raise ProtocolError('reconciliation_required')
         if job['eligibility']!='ready': raise ProtocolError('not_ready')
@@ -175,9 +194,10 @@ class Service(EventServices, AccountServices, ContinuityServices):
                 return dict(old)
             candidate=self._get(db,'candidates',identity_id)
             if candidate['state']!='active': raise ProtocolError('identity_inactive')
-            for key in job_ids: self._eligible(db,key)
+            settings=self._settings_record(db)['values']
+            for key in job_ids: self._eligible(db,key,settings)
             run_id=uid()
-            db.execute('INSERT INTO runs(id,request_id,request_key,identity_id,browser_profile,state,requested_at,settings_json) VALUES (?,?,?,?,?,?,?,?)',(run_id,request_id,request_key,identity_id,browser_profile,'awaiting_worker',now,dumps(self.settings)))
+            db.execute('INSERT INTO runs(id,request_id,request_key,identity_id,browser_profile,state,requested_at,settings_json) VALUES (?,?,?,?,?,?,?,?)',(run_id,request_id,request_key,identity_id,browser_profile,'awaiting_worker',now,dumps(settings)))
             for position,key in enumerate(job_ids):
                 db.execute('INSERT INTO run_jobs(run_id,job_id,position) VALUES (?,?,?)',(run_id,key,position))
             return dict(self._get(db,'runs',run_id))
@@ -186,6 +206,7 @@ class Service(EventServices, AccountServices, ContinuityServices):
         reject_secrets(capabilities)
         with self.tx() as db:
             run=self._get(db,'runs',run_id)
+            self._reasoning_matches(run,capabilities)
             required=('skill_version','provider','model','telemetry')
             if capabilities.get('protocol')!=1 or not all(capabilities.get(k) for k in required) or capabilities.get('browser_profile')!=run['browser_profile']:
                 raise ProtocolError('unsupported_capability')
@@ -197,9 +218,9 @@ class Service(EventServices, AccountServices, ContinuityServices):
             db.execute('INSERT INTO run_sessions(run_id,worker_id,session_id,started_at) VALUES (?,?,?,?)',(run_id,worker_id,session_id,self.now()))
             return dict(self._get(db,'runs',run_id))
 
-    def _expiry(self):
+    def _expiry(self, settings=None):
         from datetime import timedelta
-        return (datetime.fromisoformat(self.now())+timedelta(seconds=self.settings.get('lease_seconds',60))).isoformat()
+        return (datetime.fromisoformat(self.now())+timedelta(seconds=(settings if settings is not None else self.settings).get('lease_seconds',60))).isoformat()
 
     def claim(self, run_id, *, worker_id):
         now=self.now()
@@ -218,7 +239,8 @@ class Service(EventServices, AccountServices, ContinuityServices):
             if not pending:
                 db.execute("UPDATE runs SET state='completed',ended_at=? WHERE id=?",(now,run_id))
                 return None
-            job=self._eligible(db,pending['job_id'])
+            snapshot=json.loads(run['settings_json'])
+            job=self._eligible(db,pending['job_id'],snapshot)
             if db.execute('SELECT 1 FROM application_attempts WHERE job_id=? AND completed_at IS NULL',(job['id'],)).fetchone():
                 raise ProtocolError('owned_elsewhere')
             candidate=self._get(db,'candidates',run['identity_id'])
@@ -227,11 +249,13 @@ class Service(EventServices, AccountServices, ContinuityServices):
             args=(job['id'],'unknown','external',now,run_id,run['identity_id'],worker_id,run['session_id'],run['browser_profile'],fence,now,now,run['settings_json'],candidate['profile_json'],run['capabilities_json'])
             cursor=db.execute('INSERT INTO application_attempts(job_id,platform,workflow,started_at,run_id,identity_id,worker_id,session_id,browser_profile,fence,heartbeat_at,progress_at,settings_json,profile_json,versions_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',args)
             attempt_id=cursor.lastrowid
-            db.execute("INSERT INTO browser_leases VALUES (?,?,?,?,?,?) ON CONFLICT(profile) DO UPDATE SET attempt_id=excluded.attempt_id,worker_id=excluded.worker_id,generation=excluded.generation,expires_at=excluded.expires_at,state=excluded.state",(run['browser_profile'],attempt_id,worker_id,fence,self._expiry(),'active'))
+            db.execute("INSERT INTO browser_leases VALUES (?,?,?,?,?,?) ON CONFLICT(profile) DO UPDATE SET attempt_id=excluded.attempt_id,worker_id=excluded.worker_id,generation=excluded.generation,expires_at=excluded.expires_at,state=excluded.state",(run['browser_profile'],attempt_id,worker_id,fence,self._expiry(snapshot),'active'))
             db.execute("UPDATE jobs SET status='running',started_at=?,updated_at=? WHERE id=?",(now,now,job['id']))
             db.execute("UPDATE run_jobs SET state='active' WHERE run_id=? AND job_id=?",(run_id,job['id']))
             db.execute("UPDATE runs SET state='active',started_at=COALESCE(started_at,?) WHERE id=?",(now,run_id))
-            return dict(self._get(db,'application_attempts',attempt_id))
+            result=dict(self._get(db,'application_attempts',attempt_id))
+            result['settings_hash']=hashlib.sha256(result['settings_json'].encode()).hexdigest()
+            return result
 
     def attempt(self, attempt_id):
         with self.tx() as db: return dict(self._get(db,'application_attempts',attempt_id))
@@ -250,13 +274,14 @@ class Service(EventServices, AccountServices, ContinuityServices):
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
             db.execute('UPDATE application_attempts SET heartbeat_at=? WHERE id=?',(self.now(),attempt_id))
-            db.execute('UPDATE browser_leases SET expires_at=? WHERE profile=?',(self._expiry(),a['browser_profile']))
+            db.execute('UPDATE browser_leases SET expires_at=? WHERE profile=?',(self._expiry(json.loads(a['settings_json'])),a['browser_profile']))
             run=self._get(db,'runs',a['run_id'])
             return {'control':run['control'],'heartbeat_at':self.now(),'last_progress_at':a['progress_at']}
 
     def submission_intent(self, attempt_id, *, worker_id, fence, evidence, fixture=False):
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
+            if not self._documents_status(db,a['job_id'],a['identity_id'],attempt_id)['ready']:raise ProtocolError('required_document_missing')
             if self._get(db,'runs',a['run_id'])['control']!='running':raise ProtocolError('control_pending')
             settings=json.loads(a['settings_json'])
             # fixture is allowed only in an explicitly synthetic development instance.

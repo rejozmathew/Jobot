@@ -26,6 +26,7 @@ class ContinuityServices:
         reject_secrets(capabilities)
         with self.tx() as db:
             run=self._get(db,'runs',run_id)
+            self._reasoning_matches(run,capabilities)
             if run['worker_id']!=worker_id:raise ProtocolError('owned_elsewhere')
             if run['state'] not in ('accepted','active') or run['control'] in ('stopped','stop_requested'):raise ProtocolError('run_not_resumable')
             if capabilities.get('protocol')!=1 or not all(capabilities.get(k) for k in ('skill_version','provider','model','telemetry')) or capabilities.get('browser_profile')!=run['browser_profile']:raise ProtocolError('unsupported_capability')

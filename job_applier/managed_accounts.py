@@ -3,8 +3,10 @@ import hashlib
 import json
 import re
 from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 from .managed_shared import ProtocolError, dumps, uid
 from .managed_redaction import safe_text
+from .managed_identity import job_key
 
 
 def valid_namespace(value):
@@ -23,58 +25,135 @@ def stamp(value):
 
 
 class AccountServices:
+    @staticmethod
+    def _namespace(db,value):
+        valid_namespace(value);seen=set()
+        while True:
+            if value in seen or len(seen)>20:raise ProtocolError('namespace_alias_cycle')
+            seen.add(value);row=db.execute('SELECT canonical FROM account_namespace_aliases WHERE alias=?',(value,)).fetchone()
+            if not row:return value
+            value=row[0]
+
+    def namespace_alias(self,*,alias,canonical,verification_evidence):
+        valid_namespace(alias);valid_namespace(canonical)
+        if not isinstance(verification_evidence,str) or not verification_evidence.strip():raise ProtocolError('namespace_verification_required')
+        with self.tx() as db:
+            if self._namespace(db,canonical)==alias:raise ProtocolError('namespace_alias_cycle')
+            old=db.execute('SELECT * FROM account_namespace_aliases WHERE alias=?',(alias,)).fetchone()
+            if old:
+                if old['canonical']!=canonical:raise ProtocolError('namespace_alias_conflict')
+                return dict(old)
+            db.execute('INSERT INTO account_namespace_aliases VALUES (?,?,?,?)',(alias,canonical,safe_text(verification_evidence),self.now()))
+            return dict(db.execute('SELECT * FROM account_namespace_aliases WHERE alias=?',(alias,)).fetchone())
+
+    def _account_for_namespace(self,db,namespace,identity_id):
+        rows=[r for r in db.execute('SELECT * FROM company_portal_accounts WHERE identity_id=? AND namespace IS NOT NULL',(identity_id,)) if self._namespace(db,r['namespace'])==namespace]
+        if len(rows)>1:raise ProtocolError('account_namespace_reconciliation_required')
+        return rows[0] if rows else None
+
+    def _job_account_namespace(self,db,job,requested=None):
+        # Only verified job identity or an operator-verified alias confers scope.
+        # Free-form account_namespace metadata is a request, never its own proof.
+        expected=urlsplit(job['url']).hostname
+        if job['namespace'] and job['requisition_id']:
+            key=job_key(job['url'],job['namespace'],job['requisition_id'])
+            if db.execute('SELECT 1 FROM job_identity_keys WHERE job_id=? AND identity_key=?',(job['id'],key)).fetchone():
+                expected=valid_namespace(job['namespace'])
+        expected=self._namespace(db,expected)
+        actual=self._namespace(db,requested) if requested is not None else expected
+        return actual if actual==expected else None
+
+    def record_account_event(self,*,attempt_id,worker_id,fence,namespace,state,credential_ref,request_id,evidence):
+        valid_namespace(namespace)
+        if not isinstance(evidence,str) or not evidence.strip():raise ProtocolError('account_evidence_required')
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence,completed=True)
+            actual=self._job_account_namespace(db,self._get(db,'jobs',a['job_id']),namespace)
+            if actual is None:raise ProtocolError('account_namespace_not_verified_for_job')
+            # Ownership check, replay check and mutation share the same writer lock.
+            return self._account_update(db,namespace=actual,identity_id=a['identity_id'],state=state,
+                credential_ref=credential_ref,request_id=request_id,evidence=evidence,
+                attempt_id=attempt_id,allow_mutation=not bool(a['completed_at']))
+
     def account_update(self, *, namespace, identity_id, state, credential_ref, request_id, evidence=''):
         valid_namespace(namespace)
-        if state not in ('creation_pending','confirmed','reconciliation_required','disabled'):raise ProtocolError('invalid_account_state')
+        with self.tx() as db:
+            return self._account_update(db,namespace=self._namespace(db,namespace),identity_id=identity_id,
+                state=state,credential_ref=credential_ref,request_id=request_id,evidence=evidence)
+
+    def _account_update(self,db,*,namespace,identity_id,state,credential_ref,request_id,evidence,attempt_id=None,allow_mutation=True):
+        if state not in ('creation_pending','created_unverified','confirmed','verified','recovery_required','reconciliation_required','locked','disabled'):raise ProtocolError('invalid_account_state')
         if not request_id or not re.fullmatch(r'(?:vault|keyring|credential):[A-Za-z0-9._/-]+',credential_ref or ''):raise ProtocolError('credential_reference_required')
         evidence=safe_text(evidence)
-        if state=='confirmed' and not evidence:raise ProtocolError('evidence_required')
+        if state in ('confirmed','verified') and not evidence:raise ProtocolError('evidence_required')
         key=hashlib.sha256(dumps([namespace,identity_id,state,credential_ref,evidence]).encode()).hexdigest()
-        with self.tx() as db:
-            candidate=self._get(db,'candidates',identity_id)
-            prior=db.execute('SELECT * FROM account_requests WHERE id=?',(request_id,)).fetchone()
-            if prior:
-                if prior['request_hash']!=key:raise ProtocolError('idempotency_conflict')
-                return json.loads(prior['response_json'])
-            old=db.execute('SELECT * FROM company_portal_accounts WHERE namespace=? AND identity_id=?',(namespace,identity_id)).fetchone()
-            if old:
-                if state=='creation_pending':raise ProtocolError('reconciliation_required')
-                db.execute('UPDATE company_portal_accounts SET status=?,credential_ref=?,notes=?,updated_at=? WHERE id=?',(state,credential_ref,evidence,self.now(),old['id']))
-                account_id=old['id']
-            else:
-                # Never silently attach an unclassified legacy account to a new identity.
-                legacy=db.execute('SELECT 1 FROM company_portal_accounts WHERE portal_key=? AND email=?',(namespace,candidate['email'])).fetchone()
-                if legacy:raise ProtocolError('legacy_account_reconciliation_required')
-                cursor=db.execute('INSERT INTO company_portal_accounts(company_key,company_name,platform,portal_key,email,status,notes,created_at,updated_at,identity_id,namespace,credential_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                    (namespace,namespace,'unknown',namespace,candidate['email'],state,evidence,self.now(),self.now(),identity_id,namespace,credential_ref))
-                account_id=cursor.lastrowid
-            row=dict(self._get(db,'company_portal_accounts',account_id))
-            response={k:row[k] for k in ('id','namespace','identity_id','credential_ref')}
-            response['state']=row['status']
-            db.execute('INSERT INTO account_requests VALUES (?,?,?,?,?)',(request_id,account_id,key,dumps(response),self.now()))
-            return response
+        candidate=self._get(db,'candidates',identity_id)
+        prior=db.execute('SELECT * FROM account_requests WHERE id=?',(request_id,)).fetchone()
+        if prior:
+            if prior['request_hash']!=key or prior['attempt_id']!=attempt_id:raise ProtocolError('idempotency_conflict')
+            return json.loads(prior['response_json'])
+        if not allow_mutation:raise ProtocolError('account_observation_requires_reconciliation')
+        old=self._account_for_namespace(db,namespace,identity_id)
+        if old:
+            if state=='creation_pending':raise ProtocolError('reconciliation_required')
+            db.execute('UPDATE company_portal_accounts SET status=?,credential_ref=?,notes=?,updated_at=? WHERE id=?',(state,credential_ref,evidence,self.now(),old['id']))
+            account_id=old['id']
+        else:
+            # Never silently attach an unclassified legacy account to a new identity.
+            legacy=db.execute('SELECT 1 FROM company_portal_accounts WHERE portal_key=? AND email=?',(namespace,candidate['email'])).fetchone()
+            if legacy:raise ProtocolError('legacy_account_reconciliation_required')
+            cursor=db.execute('INSERT INTO company_portal_accounts(company_key,company_name,platform,portal_key,email,status,notes,created_at,updated_at,identity_id,namespace,credential_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                (namespace,namespace,'unknown',namespace,candidate['email'],state,evidence,self.now(),self.now(),identity_id,namespace,credential_ref))
+            account_id=cursor.lastrowid
+        row=dict(self._get(db,'company_portal_accounts',account_id))
+        if state in ('confirmed','verified'):db.execute('UPDATE company_portal_accounts SET last_confirmed_at=? WHERE id=?',(self.now(),account_id))
+        response={k:row[k] for k in ('id','namespace','identity_id','credential_ref')}
+        response['state']=row['status']
+        db.execute('INSERT INTO account_requests(id,account_id,request_hash,response_json,created_at,attempt_id) VALUES (?,?,?,?,?,?)',(request_id,account_id,key,dumps(response),self.now(),attempt_id))
+        return response
 
     def account_strategy(self, *, namespace, identity_id):
         valid_namespace(namespace)
         with self.tx() as db:
+            namespace=self._namespace(db,namespace)
             candidate=self._get(db,'candidates',identity_id)
             if candidate['state']!='active':return {'action':'operator_required','reason':'identity_inactive'}
-            row=db.execute('SELECT * FROM company_portal_accounts WHERE namespace=? AND identity_id=?',(namespace,identity_id)).fetchone()
+            row=self._account_for_namespace(db,namespace,identity_id)
             if not row:return {'action':'unknown','namespace':namespace,'identity_id':identity_id}
-            action={'confirmed':'sign_in','creation_pending':'reconcile','reconciliation_required':'reconcile','disabled':'operator_required'}.get(row['status'],'operator_required')
+            action={'confirmed':'sign_in','verified':'sign_in','created_unverified':'verify','creation_pending':'reconcile','recovery_required':'reconcile','reconciliation_required':'reconcile','locked':'operator_required','disabled':'operator_required'}.get(row['status'],'operator_required')
             return {'action':action,'namespace':namespace,'identity_id':identity_id,'account_id':row['id'],'credential_ref':row['credential_ref']}
 
     def mail_request(self, *, identity_id, namespace, purpose, requested_at, expected_sender):
+        with self.tx() as db:
+            return self._mail_request(db,identity_id=identity_id,namespace=namespace,purpose=purpose,requested_at=requested_at,expected_sender=expected_sender)
+
+    def _mail_request(self,db,*,identity_id,namespace,purpose,requested_at,expected_sender):
         valid_namespace(namespace)
         if purpose not in ('email_verification','application_confirmation','password_reset'):raise ProtocolError('invalid_mail_purpose')
         if not isinstance(expected_sender,str) or '@' not in expected_sender:raise ProtocolError('expected_sender_required')
         start=stamp(requested_at)
+        self._get(db,'candidates',identity_id)
+        request_id=uid()
+        db.execute('INSERT INTO mail_requests VALUES (?,?,?,?,?,?,?)',
+            (request_id,identity_id,namespace,purpose,start.isoformat(),(start+timedelta(minutes=10)).isoformat(),expected_sender))
+        return dict(self._get(db,'mail_requests',request_id))
+
+    def request_mail_for_attempt(self,*,attempt_id,worker_id,fence,namespace,purpose,requested_at,expected_sender):
+        valid_namespace(namespace)
         with self.tx() as db:
-            self._get(db,'candidates',identity_id)
-            request_id=uid()
-            db.execute('INSERT INTO mail_requests VALUES (?,?,?,?,?,?,?)',
-                (request_id,identity_id,namespace,purpose,start.isoformat(),(start+timedelta(minutes=10)).isoformat(),expected_sender))
-            return dict(self._get(db,'mail_requests',request_id))
+            a=self._owner(db,attempt_id,worker_id,fence)
+            canonical=self._job_account_namespace(db,self._get(db,'jobs',a['job_id']),namespace)
+            if canonical is None:raise ProtocolError('mail_namespace_not_verified')
+            request=self._mail_request(db,identity_id=a['identity_id'],namespace=canonical,purpose=purpose,requested_at=requested_at,expected_sender=expected_sender)
+            db.execute('INSERT INTO attempt_mail_requests VALUES (?,?)',(request['id'],attempt_id))
+            return dict(request,attempt_id=attempt_id)
+
+    def match_mail_for_attempt(self,*,attempt_id,worker_id,fence,request_id,messages):
+        with self.tx() as db:
+            self._owner(db,attempt_id,worker_id,fence,completed=True)
+            binding=db.execute('SELECT attempt_id FROM attempt_mail_requests WHERE request_id=?',(request_id,)).fetchone()
+            if not binding or binding[0]!=attempt_id:raise ProtocolError('mail_request_not_owned')
+        return self.match_mail(request_id,messages=messages)
 
     def match_mail(self, request_id, *, messages):
         with self.tx() as db:

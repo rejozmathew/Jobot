@@ -8,7 +8,7 @@ from .managed_shared import ProtocolError, dumps
 from .managed_redaction import safe_payload, safe_text
 
 EVENT_TYPES = frozenset({'tool_started','tool_finished','model_finished','navigation_verified',
-    'field_verified','phase_changed','account_verified','checkpoint','recovery','control','outcome'})
+    'field_verified','field_context','phase_changed','account_verified','checkpoint','recovery','control','outcome'})
 PROGRESS_TYPES = frozenset({'navigation_verified','field_verified','account_verified'})
 
 
@@ -28,6 +28,9 @@ class EventServices:
         if duration_seconds is not None and (not isinstance(duration_seconds,(int,float)) or not math.isfinite(duration_seconds) or duration_seconds<0):
             raise ProtocolError('invalid_duration')
         payload=safe_payload(payload)
+        if event_type=='field_context' and payload:
+            import re
+            if any(not isinstance(payload.get(k),str) or not re.fullmatch(r'[A-Za-z0-9_.:/-]{1,120}',payload[k]) for k in ('page','field','category')):raise ProtocolError('invalid_semantic_context')
         key=hashlib.sha256(dumps([a['id'],worker_id,fence,action_id,event_type,observed_at,duration_seconds,payload]).encode()).hexdigest()
         old=db.execute('SELECT * FROM managed_events WHERE id=?',(event_id,)).fetchone()
         if old:
@@ -62,6 +65,8 @@ class EventServices:
         if type(writes_browser) is not bool:raise ProtocolError('invalid_writer_flag')
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
+            if writes_browser:self._budget_check(db,a)
+            semantic=self._strategy_check(db,a,tool_name) if writes_browser else self._field_context(db,a)
             run=self._get(db,'runs',a['run_id'])
             if run['control']!='running': raise ProtocolError(run['control'])
             old=db.execute('SELECT * FROM managed_actions WHERE id=?',(action_id,)).fetchone()
@@ -71,10 +76,10 @@ class EventServices:
                 return dict(old)
             if writes_browser and (a['writer_state']!='idle' or db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1',(attempt_id,)).fetchone()):
                 raise ProtocolError('browser_writer_busy')
-            db.execute('INSERT INTO managed_actions(id,attempt_id,tool_name,started_at,writes_browser) VALUES (?,?,?,?,?)',(action_id,attempt_id,safe_text(tool_name),self.now(),int(writes_browser)))
+            db.execute('INSERT INTO managed_actions(id,attempt_id,tool_name,started_at,writes_browser,semantic_context_json) VALUES (?,?,?,?,?,?)',(action_id,attempt_id,safe_text(tool_name),self.now(),int(writes_browser),dumps(semantic)))
             if not hasattr(self,'_action_clocks'):self._action_clocks={}
             self._action_clocks[action_id]=time.monotonic()
-            return dict(db.execute('SELECT * FROM managed_actions WHERE id=?',(action_id,)).fetchone())
+            return dict(db.execute('SELECT * FROM managed_actions WHERE id=?',(action_id,)).fetchone(),field_budget_status='measured_context' if semantic else 'coarse_only')
 
     def action_end(self, attempt_id, *, worker_id, fence, action_id, status, duration_seconds=None, observed_at=None):
         if status not in ('success','failed','aborted'):raise ProtocolError('invalid_action_status')
@@ -98,7 +103,7 @@ class EventServices:
             db.execute('UPDATE managed_actions SET ended_at=?,status=?,duration_seconds=?,uncertainty=? WHERE id=?',(completed_at,status,duration,int(duration is None),action_id))
             self._append_event(db,a,worker_id=worker_id,fence=fence,event_id='action-end:'+action_id,
                 action_id=action_id,event_type='tool_finished',observed_at=completed_at,
-                duration_seconds=duration,payload={'tool_name':action['tool_name'],'status':status})
+                duration_seconds=duration,payload={**json.loads(action['semantic_context_json']),'tool_name':action['tool_name'],'status':status})
             return dict(self._get(db,'managed_actions',action_id))
 
     def writer_state(self, attempt_id, *, worker_id, fence, state):
@@ -154,11 +159,12 @@ class EventServices:
             return dict(self._get(db,'runs',run_id))
 
     def attempt_status(self, attempt_id):
-        a=self.attempt(attempt_id)
         now=self.now()
+        from .managed_views import attempt_timing_state
+        with self.tx() as db:a=attempt_timing_state(db,self._get(db,'application_attempts',attempt_id),datetime.fromisoformat(now))
         settings=json.loads(a['settings_json'])
         elapsed=seconds(a['completed_at'] or now,a['started_at'])
         # Explicit clock uncertainty beats a fabricated negative/exact duration.
         return {**a,'elapsed_seconds':max(0,elapsed),'uncertain_duration':bool(a['uncertain_duration'] or elapsed<0),
             'stalled':not a['completed_at'] and seconds(now,a['progress_at'])>settings.get('no_progress_seconds',45),
-            'alive':not a['completed_at'] and seconds(now,a['heartbeat_at'])<settings.get('lease_seconds',60)}
+            'alive':not a['completed_at'] and 'ownership_lost_or_expired' not in a['timing_uncertainty_reasons'] and seconds(now,a['heartbeat_at'])<settings.get('lease_seconds',60)}

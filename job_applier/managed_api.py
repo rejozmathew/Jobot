@@ -6,10 +6,13 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from .managed_shared import ProtocolError
+from .managed_ui import OperatorSessions,COOKIE,install_ui
 
-READS=frozenset({'job','attempt_status','events','account_strategy'})
-OPERATOR=frozenset({'identity','intake','eligibility','request_run','control','reconcile','retry','account_update','mail_request','match_mail'})|READS
+READS=frozenset({'job','attempt_status','events','attempt_report','application_context','account_strategy','lessons_for_context','helpers_for_context','documents_status'})
+OPERATOR=frozenset({'identity','intake','eligibility','request_run','control','reconcile','retry','account_update','mail_request','match_mail','view','settings_view','configure'})|READS
+OPERATOR=OPERATOR|frozenset({'lesson_observe','lesson_set_status','lesson_record_outcome','helper_register','helper_activate','register_asset','select_asset','register_assessment','namespace_alias','preview_archive','archive'})
 WORKER=frozenset({'accept_run','claim','heartbeat','event','action_start','action_end','writer_state','submission_intent','finish','ack_control','ack_run_control','checkpoint','resume_run'})|READS
+WORKER=WORKER|frozenset({'observe_owned_lesson','report_upload','record_account_event','extend_budget','bind_target','target_state','request_mail_for_attempt','match_mail_for_attempt'})
 
 
 def create_app(service, *, operator_token, worker_tokens):
@@ -20,6 +23,8 @@ def create_app(service, *, operator_token, worker_tokens):
     app=FastAPI(title='JobBot v1',docs_url=None,redoc_url=None,openapi_url=None)
     operations={name:getattr(service,name) for name in OPERATOR|WORKER}
     app.state.service=service
+    sessions=OperatorSessions()
+    install_ui(app,service,operator_token,sessions)
 
     @app.middleware('http')
     async def authorize(request, call_next):
@@ -28,16 +33,26 @@ def create_app(service, *, operator_token, worker_tokens):
         origin=request.headers.get('origin')
         if origin and origin!=str(request.base_url).rstrip('/'):
             return JSONResponse({'error':'untrusted_origin'},status_code=403)
+        public=(request.method=='GET' and request.url.path in ('/','/static/jobbot.js','/static/jobbot.css')) or (request.method=='POST' and request.url.path=='/login')
+        if public:
+            response=await call_next(request)
+            response.headers['X-Content-Type-Options']='nosniff'
+            response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'"
+            return response
         auth=request.headers.get('authorization','')
         provided=auth[7:] if auth.startswith('Bearer ') else ''
         request.state.role=None;request.state.worker_id=None
-        if hmac.compare_digest(provided,operator_token):request.state.role='operator'
+        if hmac.compare_digest(provided.encode(),operator_token.encode()):request.state.role='operator'
         for token,worker in worker_tokens.items():
-            if hmac.compare_digest(provided,token):request.state.role='worker';request.state.worker_id=worker
+            if hmac.compare_digest(provided.encode(),token.encode()):request.state.role='worker';request.state.worker_id=worker
+        if not auth and sessions.valid(request.cookies.get(COOKIE)):request.state.role='operator'
         if request.state.role is None:return JSONResponse({'error':'unauthorized'},status_code=401)
-        if request.headers.get('x-jobbot-instance')!=service.instance_id:
+        if request.url.path!='/session' and request.headers.get('x-jobbot-instance')!=service.instance_id:
             return JSONResponse({'error':'instance_mismatch'},status_code=409)
-        return await call_next(request)
+        response=await call_next(request)
+        response.headers['Cache-Control']='no-store'
+        response.headers['X-Content-Type-Options']='nosniff'
+        return response
 
     @app.get('/v1/health')
     def health():return service.health()
@@ -70,10 +85,12 @@ def create_app(service, *, operator_token, worker_tokens):
                     return JSONResponse({'error':'worker_identity_required'},status_code=403)
                 if 'attempt_id' in payload and service.attempt(payload['attempt_id'])['worker_id']!=worker_id:
                     return JSONResponse({'error':'attempt_forbidden'},status_code=403)
-                if operation in ('job','account_strategy'):
+                if operation in ('job','account_strategy','documents_status'):
                     with service.tx() as db:
                         if operation=='job':
                             allowed=db.execute('SELECT 1 FROM runs r JOIN run_jobs j ON r.id=j.run_id WHERE r.worker_id=? AND j.job_id=?',(worker_id,payload.get('job_id'))).fetchone()
+                        elif operation=='documents_status':
+                            allowed=db.execute('SELECT 1 FROM runs r JOIN run_jobs j ON r.id=j.run_id WHERE r.worker_id=? AND j.job_id=? AND r.identity_id=?',(worker_id,payload.get('job_id'),payload.get('identity_id'))).fetchone()
                         else:
                             allowed=db.execute('SELECT 1 FROM runs WHERE worker_id=? AND identity_id=?',(worker_id,payload.get('identity_id'))).fetchone()
                         if not allowed:return JSONResponse({'error':'context_forbidden'},status_code=403)

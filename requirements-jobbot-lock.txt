@@ -1,5 +1,4 @@
-# Tested Windows managed-worker dependencies (Python 3.11).
-# Legacy internal browser-use agent intentionally not required.
+# Reproducible isolated managed-worker development runtime.
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
@@ -25,5 +24,6 @@ sqlalchemy==2.0.46
 starlette==0.50.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
+tzdata==2026.3
 uvicorn==0.40.0
 websockets==15.0.1
