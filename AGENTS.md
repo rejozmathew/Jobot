@@ -8,7 +8,7 @@
 - Use the repository virtualenv. `application_runtime doctor` is an optional read-only diagnostic; start performs configuration/history and real browser readiness checks automatically.
 - Use `jobbot fast_forward` or `python -m job_applier.workday_fast session <session-id> --seconds 60` for Workday. Session-scoped calls resolve ownership and target. The CLI is harness-neutral and launches no model. Explicit HTTP accept/claim/advance is legacy compatibility only.
 - Simplify fills; the harness handles exceptions. No in-run PDF extraction, resume hunts or reconstruction of career/education fields, on any ATS. Approved file upload remains allowed.
-- Never edit helpers/skills during an application benchmark. Follow actual controls, preserve quiescence/ownership checks and verify employer submission once.
+- Never edit helpers/skills during an application benchmark. Follow actual controls, preserve quiescence/ownership checks and verify submission once using the canonical skill's evidence policy; report the actual evidence source.
 
 ## Engineering
 

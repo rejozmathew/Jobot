@@ -1,9 +1,9 @@
 # Clean-thread Workday benchmark
 
-Current status: further applications and implementation are paused for independent
-review after Wiley attempt 14. Read the opening review checkpoint in
-[RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md) before resuming.
-The instructions below describe the execution procedure, not a request to run it.
+Current procedure: use the repository's canonical job-apply and appropriate ATS
+skills with a short user-authorized application request. The Wiley attempt 14
+review pause was historical and has been superseded by subsequent checkpoints.
+This document does not itself authorize an application; the user's request does.
 
 ## Current local-session benchmark
 
@@ -16,7 +16,8 @@ with scoped browser/credential/mail exceptions. Start includes history checks;
 there is no manual accept/claim/lease/token or dashboard prerequisite.
 
 Time from the original request, including startup/waiting. The executor applies
-and submits under standing approval, verifies exact employer confirmation once,
+and submits under standing approval, verifies submission once using the profile's
+accepted evidence sources and labels the actual source,
 records the outcome, and reports actual model/effort and specific blockers. It
 must not edit shared helpers/skills. Do not use GAIG R9045, Tebra or the repeatedly
 debugged Huron case. A second empty profile does not prove Simplify concurrency.

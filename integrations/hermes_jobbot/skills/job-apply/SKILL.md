@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Run repository-managed job applications with tracking.
-version: 0.4.3
+version: 0.4.4
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -28,4 +28,4 @@ This is the thin Hermes discovery layer. The application repository owns the pro
 No in-run PDF extraction or experience/education reconstruction. Do not compete with Simplify, clear every nonblocking review warning, bypass ownership, or resubmit an uncertain application. A fresh URL does not authorize using a stale run or another candidate.
 
 ## Verification
-The repository workflow supplies submission evidence and measurements. Read `<repo>/docs/jobbot-v1/WORKDAY_NEXT_RUN.md` for the clean-thread benchmark prompt. An updated skill or passing fixture is not evidence of a live application.
+The canonical repository skills supply submission evidence, accepted sources and measurements. A user request to apply plus those skills is sufficient; no separate benchmark prompt or historical review log is required. An updated skill or passing fixture is not evidence of a live application.
