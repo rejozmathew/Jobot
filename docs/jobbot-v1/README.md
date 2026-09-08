@@ -1,6 +1,18 @@
 # JobBot modernization — Windows Hermes implementation handoff
 
-## Current status: paused for independent review (2026-09-07)
+## Current review checkpoint — live runtime unresolved
+
+Start with [REVIEW_HANDOFF.md](REVIEW_HANDOFF.md) for the combined source snapshot, verified authentication fix, subsequent browser/service outage, reported expired attempt, and bounded independent-review questions. This checkpoint is not a working-live-application release. Older verification documents below describe their own engineering stages, not current service availability.
+
+## Ordinary Hermes connection
+
+[HERMES_CONNECTION.md](HERMES_CONNECTION.md) documents the verified environment-free internal-auth connection, CLI entry, role boundaries, file-level ownership, limitations and later refactor plan. It does not require a dashboard worker conversation.
+
+## Current Workday fast-path engineering
+
+The later authorized Simplify-first improvements are documented in [APPLICATION_RUNTIME.md](APPLICATION_RUNTIME.md): repository-owned skills, shared versus Workday helper responsibilities, explicit managed data ownership and harness-neutral execution. Use [WORKDAY_NEXT_RUN.md](WORKDAY_NEXT_RUN.md) for the separate clean-thread live benchmark. Offline verification does not establish live performance or universal Workday support.
+
+## Historical paused checkpoint (2026-09-07)
 
 Start with [the current review handoff](REVIEW_HANDOFF_2026-09-07.md). It records all accumulated changes since `e711112`, two failed Huron attempts, the latest 440-pass offline gate, and the still-unresolved credential-field failure. **This is not a working Workday release.** The user paused further implementation and application runs; the historical kickoff below is not an instruction to resume them.
 

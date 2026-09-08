@@ -10,20 +10,29 @@
   scope.controls=new Map();
   scope.fieldValues=scope.fieldValues||new Map();
   scope.valueEpoch=scope.valueEpoch||0;
-  const candidates={autofill:[],continue:[],start:[]};
+  const CONTROL_KINDS=['autofill','continue','start','create_account_autofill','create_account','sign_in','submit'];
+  const candidates={};
+  const controls={};
+  for(const k of CONTROL_KINDS){candidates[k]=[];controls[k]={ref:null,enabled:false};}
   for(const root of roots) {
     const btns = (typeof root.querySelectorAll === 'function') ? root.querySelectorAll('button,[role="button"]') : [];
     for(const button of btns) {
       if(!visible(button))continue;
-      const label=(button.innerText || button.getAttribute('aria-label') || '').trim().toLowerCase();
-      const kind=/^autofill this page$/.test(label)?'autofill':/^continue application$/.test(label)?'continue':/^start application$/.test(label)?'start':null;
+      const label=(button.innerText || button.textContent || button.getAttribute('aria-label') || '').trim().toLowerCase();
+      let kind=null;
+      if(/^autofill this page$/.test(label)) kind='autofill';
+      else if(/^continue application$/.test(label)) kind='continue';
+      else if(/^start application$/.test(label)) kind='start';
+      else if(/^create account (&|and) autofill$/.test(label)) kind='create_account_autofill';
+      else if(/^create account$/.test(label)) kind='create_account';
+      else if(/^sign in( (&|and) autofill)?$/.test(label)) kind='sign_in';
+      else if(/^submit application$/.test(label)) kind='submit';
       if(!kind)continue;
       const enabled=!button.disabled && button.getAttribute('aria-disabled')!=='true';
       candidates[kind].push({button,enabled,root});
     }
   }
-  const controls={autofill:{ref:null,enabled:false},continue:{ref:null,enabled:false},start:{ref:null,enabled:false}};
-  for(const kind of ['autofill','continue','start']) {
+  for(const kind of CONTROL_KINDS) {
     const actionable = candidates[kind].filter(c=>c.enabled);
     if(actionable.length === 1) {
       const chosen = actionable[0];
@@ -64,15 +73,16 @@
   }));
   const headings=[...document.querySelectorAll('h1,h2,h3')].filter(visible).slice(0,5).map(el=>(el.textContent||'').slice(0,120));
   const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value))))).map(x=>x.toString(16).padStart(2,'0')).join('');
-  const marker=document.querySelector('[aria-current="step"]');
+  const marker=document.querySelector('[aria-current="step"]') || document.querySelector('[data-automation-id="progressBarActiveStep"]') || document.querySelector('[data-automation-id="activeStep"]');
   const stepHeadings=[...document.querySelectorAll('h1,h2,h3')].filter(visible).filter(el=>
     el.getAttribute('role')!=='alert' && !el.getAttribute('aria-live') &&
-    !(typeof el.closest==='function' && el.closest('[role="alert"],[aria-live],.validation-error,.field-error'))
-  ).slice(0,5).map(el=>(el.textContent||'').slice(0,160));
+    !(typeof el.closest==='function' && el.closest('[role="alert"],[aria-live],.validation-error,.field-error,.toast,.alert'))
+  ).map(el=>(el.textContent||'').trim()).filter(t=>t.length>0 && !/^(application|apply|job application)$/i.test(t)).slice(0,5).map(t=>t.slice(0,160));
   // Logical step identity excludes values, presence, required/invalid flags and
   // validation headings, but distinguishes same-URL SPA headings/form structure.
+  const hasRecognizedStep = Boolean(marker || stepHeadings.length > 0);
   const page_signature=await digest([publicUrl,marker?(marker.textContent||'').slice(0,160):stepHeadings,
-    marker?[]:fields.map(({key,type})=>({key,type}))]);
+    hasRecognizedStep?[]:fields.map(({key,type})=>({key,type}))]);
   const fingerprint=await digest([page_signature,headings,fields,scope.valueEpoch]);
   const fixture=document.body && document.body.textContent && document.body.textContent.includes('Synthetic fixture; not official Simplify support');
   let declared=null;
@@ -82,28 +92,67 @@
       if(d) { declared=d; break; }
     }
   }
+  const getRenderedText = (root) => {
+    if(!root) return '';
+    if(typeof root.querySelectorAll === 'function') {
+      const all = root.querySelectorAll('*');
+      if(all && all.length > 0) {
+        const parts = [];
+        for(const el of all) {
+          if(visible(el)) {
+            const t = (el.innerText !== undefined ? el.innerText : el.textContent) || '';
+            if(t) parts.push(t);
+          }
+        }
+        if(parts.length > 0) return parts.join(' ');
+      }
+    }
+    return (root.innerText !== undefined ? root.innerText : root.textContent) || '';
+  };
   let status='missing';
+  let reviewCount=null;
   if(roots.length > 0) {
     let hasActive=false, hasReview=false, hasComplete=false, hasLogin=false, hasUnsupported=false;
     for(const r of roots) {
       const busy = (typeof r.querySelector==='function') ? r.querySelector('[aria-busy="true"]') : null;
-      const text = r.textContent || '';
-      if(busy || /autofilling|filling your application|autofill in progress/i.test(text)) hasActive=true;
-      if(/need(?:s)? review/i.test(text)) hasReview=true;
-      if(/autofill complete|application autofilled/i.test(text)) hasComplete=true;
+      const text = getRenderedText(r);
+      if(busy || /autofilling|filling your application|autofill in progress|stop account step|creating (?:your )?account/i.test(text)) hasActive=true;
+      const mInput = text.match(/(\d+)\s+fields?\s+need(?:s)?\s+(?:your\s+input|review)/i);
+      const mReviewParen = text.match(/need(?:s)?\s+(?:to\s+)?review\s*\((\d+)\)/i);
+      const mReviews = text.match(/(\d+)\s+reviews?/i);
+      if(mInput) {
+        reviewCount = parseInt(mInput[1], 10);
+      } else if(mReviewParen) {
+        reviewCount = parseInt(mReviewParen[1], 10);
+      } else if(mReviews) {
+        reviewCount = parseInt(mReviews[1], 10);
+      }
+      if(reviewCount !== null) {
+        if(reviewCount > 0) hasReview = true;
+        else if(reviewCount === 0) hasComplete = true;
+      } else if(/need(?:s)?\s+(?:to\s+)?review/i.test(text)) {
+        hasReview = true;
+      }
+      if(/autofill complete|application autofilled|application submitted/i.test(text)) hasComplete=true;
       if(/sign in to simplify|log in to simplify/i.test(text)) hasLogin=true;
       if(/not supported|autofill unavailable/i.test(text)) hasUnsupported=true;
     }
-    // Fail-closed semantics: active visible writer in any relevant panel beats ready
+    const hasAccountControls = Boolean(
+      controls.create_account_autofill.enabled || controls.create_account.enabled || controls.sign_in.enabled ||
+      candidates.create_account_autofill.length > 0 || candidates.create_account.length > 0 || candidates.sign_in.length > 0
+    );
+    // Precedence: active visible writer beats account step; stop account step beats review/complete/ready
     if(hasActive) status='active';
+    else if(hasLogin || hasAccountControls) status='login_required';
     else if(hasReview) status='needs_review';
     else if(hasComplete) status='complete';
-    else if(hasLogin) status='login_required';
     else if(hasUnsupported) status='unsupported';
+    else if(controls.continue.enabled || controls.submit.enabled) status='complete';
     else if(controls.autofill.enabled || controls.start.enabled) status='ready';
     else status='unknown';
     if(declared && ['ready','active','complete','needs_review','unsupported','login_required'].includes(declared)) status=declared;
   }
   return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,
+    review_count:reviewCount,writer_safe:status!=='active'&&status!=='unknown',
     source:fixture?'fixture':'observed_dom',field_summary:{visible:fields.length,required:fields.filter(x=>x.required).length,invalid:fields.filter(x=>x.invalid).length}};
 })()

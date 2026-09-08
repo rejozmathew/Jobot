@@ -846,7 +846,7 @@ class ApplicationTool:
             return json.dumps({'error':code,'instruction':'Do not guess or repeat submission. Inspect current state.'})
 
 
-def run_request(config, request):
+def _legacy_restricted_request(config, request):
     settings=request.get('settings') or json.loads(request.get('settings_json','{}'))
     provider,model,effort=select_runtime(settings)
     from hermes_cli.runtime_provider import resolve_runtime_provider
@@ -915,11 +915,24 @@ After mandatory fields and exact resume are verified call submit. Only an employ
     return receipt
 
 
+def run_request(config, request):
+    """Use the installed Hermes session and native tools; JobBot supplies context."""
+    from .native_hermes_session import run_session
+    return run_session(config, request)
+
+
 def main():
+    # Native browser subprocess output includes Unicode on Windows. UTF-8 mode
+    # must be active at interpreter startup, not just on stdout.
+    if os.name=='nt' and not sys.flags.utf8_mode:
+        os.environ['PYTHONUTF8']='1'
+        os.execv(sys.executable,[sys.executable,'-X','utf8','-m','job_applier.managed_hermes_worker',*sys.argv[1:]])
     parser=argparse.ArgumentParser();parser.add_argument('--config',required=True);parser.add_argument('--hermes-root',required=True)
     parser.add_argument('--wait-seconds',type=int,default=900);args=parser.parse_args()
     root=Path(args.hermes_root).resolve();sys.path.insert(0,str(root))
     config=json.loads(Path(args.config).read_text())
+    if config.get('hermes_home'):
+        os.environ['HERMES_HOME']=str(Path(config['hermes_home']).resolve())
     with Client(config['base_url'],config['instance_id'],os.environ[config['worker_token_env']]) as client:
         deadline=time.monotonic()+args.wait_seconds
         print(json.dumps({'worker':'waiting','browser_profile':config['browser_profile'],'instance':config['instance_id']}),flush=True)

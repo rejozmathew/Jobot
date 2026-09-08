@@ -5,7 +5,7 @@ import re
 from urllib.parse import urlsplit,urlunsplit
 from .managed_shared import ProtocolError,uid
 from .managed_redaction import safe_text
-from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope
+from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope,is_workday_candidate_home
 
 
 class RuntimeServices:
@@ -123,7 +123,7 @@ class RuntimeServices:
                 self._owner(db,attempt_id,worker_id,fence)
                 related=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone() if identity else None
                 if identity!=target['identity_key'] and not related:
-                    if not is_same_application_scope(job['url'], url) and not is_same_application_scope(target['url'], url):
+                    if not is_same_application_scope(job['url'], url) and not is_same_application_scope(target['url'], url) and not is_workday_candidate_home(job['url'], url):
                         raise ProtocolError('target_job_mismatch')
         async def read_bound_browser():
             import asyncio
@@ -135,6 +135,16 @@ class RuntimeServices:
                 verify_url(await page.evaluate('location.href'))
                 boundary=SimplifyBoundary(page,budget_seconds=5)
                 before=await boundary.observe()
+                # Only a native exact-requisition confirmation can settle a submit
+                # after the extension disappears. This is read-only and server-owned.
+                from .workday_fast import WORKDAY_OBSERVE
+                async def native_confirmation():
+                    live_url=await page.evaluate('location.href')
+                    if not a['submit_intent_at'] or not is_workday_candidate_home(job['url'],live_url):
+                        return False
+                    result=await page.evaluate_function(WORKDAY_OBSERVE,{'requisition':job['requisition_id'] or job['url'].rstrip('/').rsplit('_',1)[-1]})
+                    return isinstance(result,dict) and result.get('submitted') is True
+                confirmed_before=await native_confirmation() if not before.get('panel') else False
                 await asyncio.sleep(0.15)
                 after=await boundary.observe()
                 verify_url(after['url'])
@@ -142,13 +152,14 @@ class RuntimeServices:
                 if settings.get('mode')=='pilot' and after.get('source')=='fixture':
                     raise ProtocolError('official_extension_observation_required')
                 stable=all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
-                return after,stable,browser.observed_mode
+                confirmed=confirmed_before and not after.get('panel') and await native_confirmation()
+                return after,stable,browser.observed_mode,confirmed
             finally:
                 await browser.close()
         self.action_start(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,tool_name='browser_observe',writes_browser=False)
         try:
             import asyncio
-            obs,stable,observed_mode=asyncio.run(read_bound_browser())
+            obs,stable,observed_mode,native_confirmed=asyncio.run(read_bound_browser())
             from .managed_context import platform_for_url
             obs_url=obs.get('url') or target['url']
             detected_platform=platform_for_url(obs_url)
@@ -163,8 +174,14 @@ class RuntimeServices:
                 if status=='active':
                     new_writer='active'
                     quiescent=False
+                elif stable and native_confirmed and a['submit_intent_at'] and not other_actions:
+                    new_writer='idle'
+                    quiescent=True
                 elif has_active_autofill:
-                    if stable and obs.get('panel') and status in ('complete','needs_review','ready'):
+                    known_account_ready=(status=='login_required' and any(
+                        (obs.get('controls') or {}).get(k,{}).get('enabled')
+                        for k in ('create_account_autofill','create_account','sign_in')))
+                    if stable and obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready):
                         new_writer='idle'
                         quiescent=True
                     else:

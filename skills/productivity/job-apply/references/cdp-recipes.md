@@ -2,6 +2,8 @@
 
 Use the configured browser endpoint and captured target ID, never a machine-local default. Managed connections use the existing `CDPBrowser.connect(cdp_url, target_id=<owned-id>)`. Missing/closed targets fail explicitly; they must not select a different first or blank tab. Await `browser.get_current_page()`.
 
+Import `CDPBrowser` from `job_applier.cdp_client` using the supplied repository working directory. This existing helper connects without an incompatible WebSocket Origin header. If a generic websocket-client fallback reports HTTP 403 origin rejection, use this helper; do not loosen the browser's origin policy or restart it.
+
 Inspect current helper signatures before use:
 - `page.evaluate` must return primitives/JSON-safe values, not DOM nodes. Use dictionary arguments. IIFEs execute themselves; bare callables need the installed wrapper's verified argument handling.
 - Text insertion acts on the focused element. Focus and clear the intended input before typing.

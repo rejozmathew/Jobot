@@ -133,3 +133,20 @@ def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
         return actual_path in (expected_path, expected_path + '/apply', expected_path + '/confirmation')
     except Exception:
         return False
+
+
+def is_workday_candidate_home(job_url, candidate_url):
+    """Exact tenant career-site confirmation read surface; never authorizes writes."""
+    try:
+        job=urlsplit(canonical_url(job_url)); candidate=urlsplit(canonical_url(candidate_url))
+        if job.scheme!='https' or candidate.scheme!='https' or job.netloc!=candidate.netloc:
+            return False
+        if not (job.hostname or '').endswith('.myworkdayjobs.com') or candidate.query:
+            return False
+        parts=job.path.strip('/').split('/')
+        other=candidate.path.strip('/').split('/')
+        if parts and _LOCALE_RE.fullmatch(parts[0]):parts=parts[1:]
+        if other and _LOCALE_RE.fullmatch(other[0]):other=other[1:]
+        return bool(parts) and other==[parts[0],'candidateHome']
+    except (ValueError,ProtocolError):
+        return False

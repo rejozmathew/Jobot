@@ -255,6 +255,33 @@ class CDPPage:
             raise RuntimeError(f"evaluate error: {text[:500]}")
         return res.get("result", {}).get("value")
 
+    async def evaluate_function(self, function_declaration: str, arg: Any = None, timeout: float = 30.0) -> Any:
+        # Bind to the current document's global object, not a guessed context ID.
+        root = await self._session.call("Runtime.evaluate", {"expression": "globalThis", "returnByValue": False}, timeout=timeout)
+        object_id = root.get("result", {}).get("objectId")
+        if not object_id:
+            raise RuntimeError("evaluate error: execution_context_unavailable")
+        params: dict[str, Any] = {
+            "objectId": object_id,
+            "functionDeclaration": function_declaration,
+            "returnByValue": True,
+            "awaitPromise": True,
+        }
+        if arg is not None:
+            params["arguments"] = [{"value": arg}]
+        try:
+            res = await self._session.call("Runtime.callFunctionOn", params, timeout=timeout)
+        finally:
+            try:
+                await self._session.call("Runtime.releaseObject", {"objectId": object_id}, timeout=timeout)
+            except Exception:
+                pass  # Navigation may already have destroyed this context.
+        if "exceptionDetails" in res:
+            det = res["exceptionDetails"]
+            text = (det.get("exception") or {}).get("description") or det.get("text", "JS exception")
+            raise RuntimeError(f"evaluate error: {text[:500]}")
+        return res.get("result", {}).get("value")
+
     async def goto(self, url: str, timeout: float = 30.0) -> None:
         await self._session.call("Page.navigate", {"url": url}, timeout=timeout)
         self.url = url

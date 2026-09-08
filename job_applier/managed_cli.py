@@ -17,10 +17,35 @@ def load_config(path):
     return config
 
 
-def credential(name):
+def credential(name, config=None):
+    """Resolve one named secret: launcher environment or explicit private JSON reference.
+
+    Never search for stores, export tokens, or borrow another role's credential.
+    Configuration contains only a file path/key; secret contents are never reported.
+    """
+    if not isinstance(name,str) or not name:raise ProtocolError('credential_unavailable')
     token=os.environ.get(name,'')
-    if not token:raise ProtocolError('credential_unavailable')
+    if token:return token
+    try:
+        reference=(config or {}).get('credential_files',{}).get(name)
+        if not isinstance(reference,dict):raise ValueError()
+        path=Path(reference['path']);key=reference['key']
+        if not path.is_absolute() or not isinstance(key,str) or not key or path.stat().st_size>1048576:
+            raise ValueError()
+        data=json.loads(path.read_text(encoding='utf-8'))
+        token=data[key]
+        if not isinstance(token,str) or not token.strip():raise ValueError()
+    except (OSError,ValueError,KeyError,TypeError,AttributeError):
+        raise ProtocolError('credential_unavailable') from None
     return token
+
+
+def credential_available(name, config=None):
+    try:
+        credential(name,config)
+        return True
+    except ProtocolError:
+        return False
 
 
 def main(argv=None):
@@ -54,14 +79,14 @@ def main(argv=None):
         else:
             from .managed_client import Client
             config=load_config(args.config)
-            token=credential(getattr(args,'token_env',None) or config['operator_token_env'])
+            token=credential(getattr(args,'token_env',None) or config['operator_token_env'],config)
             service=Service(config['db_path'],instance_id=config['instance_id'])
             if args.command=='serve':
                 import uvicorn
                 from .managed_api import create_app
                 # Reuse client's strict URL validation; it performs no network call.
                 with Client(config['base_url'],config['instance_id'],token):pass
-                workers=json.loads(credential(config['worker_tokens_env']))
+                workers=json.loads(credential(config['worker_tokens_env'],config))
                 app=create_app(service,operator_token=token,worker_tokens=workers)
                 parsed=urlsplit(config['base_url'])
                 uvicorn.run(app,host=parsed.hostname,port=parsed.port or 8000,access_log=False)
