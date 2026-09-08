@@ -1,6 +1,7 @@
-// Only a unique native action returned by workday_observe, on the same step/URL.
+// Shared native pointer validation. Workday refs and generic form refs resolve
+// through their existing inventories; all clicks use fresh viewport hit tests.
 (args) => {
- const scope=window.__jobbotWorkdayScope;
+ const scope=args.ref?.startsWith('form:')?window.__jobbotFormScope:window.__jobbotWorkdayScope;
  let selectorElement;
  if(args.selector){
   if(args.expected_url!==location.href)return {clicked:false,reason:'stale_page'};
@@ -8,7 +9,7 @@
   if(matches.length!==1)return {clicked:false,reason:'ambiguous_or_stale_control'};
   selectorElement=matches[0];
  }else{
-  if(!scope||scope.url!==location.href||scope.step!==args.step)return {clicked:false,reason:'stale_page'};
+  if(!scope||scope.url!==location.href||(args.step&&scope.step!==args.step))return {clicked:false,reason:'stale_page'};
   if(args.page_signature&&scope.page_signature!==args.page_signature)return {clicked:false,reason:'stale_screen',execution:'not_executed'};
  }
  const fields=args.fields||[];
@@ -47,9 +48,17 @@
  if(args.prepare_pointer){
   const left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
   if(right<=left||bottom<=top)return {clicked:false,reason:'outside_viewport'};
-  const x=(left+right)/2,y=(top+bottom)/2,hit=document.elementFromPoint(x,y);
-  if(!hit||!(hit===el||el.contains(hit)))return {clicked:false,reason:'control_obscured'};
-  return {pointer_ready:true,x,y};
+  // Small bounded interior search also handles a panel covering only the center.
+  const points=[[.5,.5],[.2,.5],[.8,.5],[.5,.2],[.5,.8]];
+  let covering=null;
+  for(const [fx,fy] of points){
+   const x=left+(right-left)*fx,y=top+(bottom-top)*fy,hit=document.elementFromPoint(x,y);
+   if(hit&&(hit===el||el.contains(hit)))return {pointer_ready:true,x,y};
+   if(!covering&&hit)covering={tag:hit.tagName,role:hit.getAttribute('role'),
+     simplify:!!hit.closest('.simplify-jobs-shadow-root,[id*="simplify"]')};
+  }
+  return {clicked:false,reason:'control_obscured',execution:'not_executed',
+    bounds:{left:r.left,top:r.top,width:r.width,height:r.height},viewport:{width:innerWidth,height:innerHeight},covering};
  }
  el.click();return {clicked:true,execution:'clicked'};
 }

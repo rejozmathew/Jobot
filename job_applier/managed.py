@@ -389,9 +389,11 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
 
     def _complete(self, db, a, outcome, evidence, *, quiescent, finish_key, reconciled=False):
         now=self.now()
-        duration=max(0,(datetime.fromisoformat(now)-datetime.fromisoformat(a['started_at']).replace(tzinfo=timezone.utc)).total_seconds())
-        db.execute('UPDATE application_attempts SET outcome=?,evidence=?,completed_at=?,duration_seconds=?,finish_key=?,uncertain_duration=? WHERE id=?',(outcome,evidence,now,duration,finish_key,int(reconciled),a['id']))
-        db.execute('UPDATE jobs SET status=?,completed_at=?,updated_at=? WHERE id=?',(outcome,now,now,a['job_id']))
+        completed=a['completed_at'] if reconciled and a['completed_at'] else now
+        duration=max(0,(datetime.fromisoformat(completed)-datetime.fromisoformat(a['started_at']).replace(tzinfo=timezone.utc)).total_seconds())
+        uncertain=a['uncertain_duration'] if reconciled and a['completed_at'] else int(reconciled)
+        db.execute('UPDATE application_attempts SET outcome=?,evidence=?,completed_at=?,duration_seconds=?,finish_key=?,uncertain_duration=? WHERE id=?',(outcome,evidence,completed,duration,finish_key,uncertain,a['id']))
+        db.execute('UPDATE jobs SET status=?,completed_at=?,updated_at=? WHERE id=?',(outcome,completed,now,a['job_id']))
         if outcome in ('applied','already_applied'):
             person=self._get(db,'candidates',a['identity_id'])['person_key']
             db.execute('INSERT OR IGNORE INTO submission_ledger VALUES (?,?,?,?)',(a['job_id'],person,evidence,now))
@@ -420,7 +422,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             if a['submit_intent_at'] and outcome not in ('applied','already_applied'): outcome='submission_unknown'
             return self._complete(db,a,outcome,evidence,quiescent=quiescent,finish_key=key)
 
-    def reconcile(self, attempt_id, *, outcome, evidence, browser_quiescent):
+    def reconcile(self, attempt_id, *, outcome, evidence, browser_quiescent, source='user_reported'):
+        if source not in ('employer','simplify','user_reported'):raise ProtocolError('invalid_evidence_source')
         evidence=safe_text(evidence)
         if outcome not in ('applied','already_applied','interrupted','failed','blocked') or not evidence or not browser_quiescent:
             raise ProtocolError('reconciliation_evidence_required')
@@ -440,9 +443,14 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                     audit_key=hashlib.sha256(dumps([a['id'],'operator',now,payload]).encode()).hexdigest()
                     db.execute('INSERT INTO managed_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',(uid(),a['id'],a['run_id'],None,'operator','control',now,now,None,1,payload,audit_key))
                 return dict(a)
-            key=hashlib.sha256(dumps(['reconciled',outcome,evidence]).encode()).hexdigest()
+            key=hashlib.sha256(dumps(['reconciled',outcome,evidence,source]).encode()).hexdigest()
             if a['completed_at'] and a['finish_key']==key:return dict(a)
             result=self._complete(db,a,outcome,evidence,quiescent=True,finish_key=key,reconciled=True)
+            now=self.now()
+            payload=dumps({'operation':'submission_reconciled','status':outcome,'evidence':evidence,'source':source})
+            audit_key=hashlib.sha256(dumps([a['id'],'operator',now,payload]).encode()).hexdigest()
+            db.execute('INSERT INTO managed_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                       (uid(),a['id'],a['run_id'],None,'operator','outcome',now,now,None,0,payload,audit_key))
             return result
 
     def retry(self, job_id):

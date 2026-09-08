@@ -20,6 +20,9 @@ def choose(observed, state):
         return 'blocked'
     if observed.get('step') == 'review' and (enabled('submit') or native.get('submit', {}).get('enabled')):
         return 'blocked' if observed.get('blocking_errors') else 'submit'
+    if enabled('autofill_skills'):
+        label=controls['autofill_skills'].get('label','autofill_skills')
+        return 'blocked' if label in state.get('skills_actions',[]) else 'autofill_skills'
     if state.get('advance_failed'):
         if enabled('autofill') and state.get('fills', 0) < 2:
             return 'retry' if state.get('fills', 0) else 'autofill'
@@ -159,6 +162,10 @@ class FastRunner:
         start=self.clock(); deadline=start+seconds
         metrics=self.state.setdefault('metrics',{'polls':0,'clicks':0,'wait_seconds':0,'elapsed_seconds':0})
         try:
+            if self.state['submit_intent']:
+                from .submission import submit
+                return await submit(self.page,self.call,self.package,self.owner,self.config,self.target,
+                    lambda:None,seconds=min(seconds,15),confirmation_only=True)
             if recovery is not None:
                 from .workday_auth import recover_screen
                 recovered=await recover_screen(self,recovery)
@@ -228,6 +235,7 @@ class FastRunner:
                             'authentication_required':'Employer sign-in is required','blocked':'Inspecting required form blockers',
                             'continue':'Continuing through Simplify','native_continue':'Continuing with the employer control',
                             'start':'Starting the Simplify application flow','autofill':'Starting Simplify autofill',
+                            'autofill_skills':'Responding to the enabled Simplify skills prompt',
                             'retry':'Retrying Simplify after a failed advancement','submit':'Preparing the authorized submission'}
                     self.event('phase_changed',{'phase':step,'page':step,'activity':labels.get(action,action),
                         'source':'Workday helper','status':observed.get('status','unknown'),
@@ -249,15 +257,42 @@ class FastRunner:
                         self.state['auth_recovery_reason']=reason
                     report=self.report('authentication_required',observed,reason)
                     report['recovery']=handoff;return report
+                if action in ('blocked','continue','native_continue'):
+                    from .application_answers import apply_policy
+                    completed=self.state.setdefault('answered_policy_fields',[])
+                    planned=await apply_policy(self.page,self.package,observed,completed=completed,dry_run=True)
+                    if planned['fields']:
+                        gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
+                        if not gate.get('native_takeover_authorized',gate.get('quiescent')):
+                            return self.report('inspection_required',observed,'writer_activity_unconfirmed')
+                        aid=str(uuid.uuid4());self.owned('action_start',action_id=aid,tool_name='browser.apply_policy')
+                        repaired={}
+                        try:repaired=await apply_policy(self.page,self.package,await self.observe(),completed=completed)
+                        finally:self.owned('action_end',action_id=aid,status='success' if repaired.get('changed') else 'failed')
+                        if repaired.get('changed'):
+                            self.event('field_verified',{'page':step,'evidence':'Applied and verified configured salary/privacy preferences','source':'Candidate profile'})
+                            self.persist();self.last=None;continue
+                        return self.report('inspection_required',observed,'configured_answer_control_unconfirmed')
                 if action=='blocked':return self.report(action,observed,'required_blocker_only')
                 if action=='submit':
                     if self.settings.get('submission_mode')!='submit':
                         return self.report('ready_for_review',observed,'submission_not_authorized')
                     if not self.state.get('resume_attached'):
                         return self.report('blocked',observed,'approved_resume_not_observed')
+                    from .submission import submit
+                    async def activate():
+                        fresh=await self.observe()
+                        if choose(fresh,{})!='submit':return {'clicked':False,'execution':'not_executed','reason':'submit_control_changed'}
+                        clicked=await self.click('submit',fresh)
+                        return {'clicked':clicked,'execution':self.last_click_execution}
+                    result=await submit(self.page,self.call,self.package,self.owner,self.config,self.target,activate,seconds=min(seconds,15))
+                    self.state['submit_intent']=bool(self.call('attempt_status',attempt_id=self.owner['attempt_id']).get('submit_intent_at'))
+                    self.persist();return result
                 gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
                 if not gate.get('quiescent'):
                     await self.sleep(.5); metrics['wait_seconds']+=.5; continue
+                if action.startswith('native_') and not gate.get('native_takeover_authorized',True):
+                    return self.report('inspection_required',observed,'simplify_input_required')
                 # Server observation refreshes refs; rediscover immediately before click.
                 fresh=await self.observe()
                 if fresh.get('step')!=step or choose(fresh,dict(page_state,submit_intent=self.state['submit_intent']))!=action:
@@ -265,9 +300,6 @@ class FastRunner:
                 aid=str(uuid.uuid4()); t0=self.clock(); success=False
                 self.owned('action_start',action_id=aid,tool_name='workday_fast.'+action)
                 try:
-                    if action=='submit':
-                        self.owned('submission_intent',evidence='Workday Review step with enabled submit and approved attachment observed')
-                        self.state['submit_intent']=True; self.persist()
                     self.owned('writer_state',state='active')
                     success=await self.click(action,fresh)
                 finally:
@@ -277,6 +309,9 @@ class FastRunner:
                 metrics['clicks']+=1
                 if action in ('autofill','retry'):
                     page_state['fills']=page_state.get('fills',0)+1; page_state['advance_failed']=False
+                if action=='autofill_skills':
+                    page_state.setdefault('skills_actions',[]).append(fresh['controls']['autofill_skills'].get('label','autofill_skills'))
+                    page_state['advance_failed']=False
                 self.pending=(step,action); self.last_action=self.clock(); self.stable=0; self.persist()
                 await self.sleep(.5); metrics['wait_seconds']+=.5
             return self.report('submission_unknown' if self.state['submit_intent'] else 'waiting',reason='bounded_call_elapsed')

@@ -29,7 +29,9 @@ class ContextServices:
             import hashlib
             attempt['profile_hash']=hashlib.sha256((attempt.get('profile_json') or '').encode()).hexdigest()
         account=self.account_strategy(namespace=verified_namespace,identity_id=attempt['identity_id']) if verified_namespace else None
-        return {'attempt':attempt,'job':job,'documents':documents,
+        from .application_answers import approved_policy
+        answer_policy=approved_policy(json.loads(attempt['profile_json']).get('application_answer_policy'))
+        return {'attempt':attempt,'job':job,'documents':documents,'answer_policy':answer_policy,
             'helpers':self.helpers_for_context(selected_platform,verified_namespace),
             'lessons':self.lessons_for_context(selected_platform,verified_namespace),
             'account':account,'platform':selected_platform,'namespace':verified_namespace,

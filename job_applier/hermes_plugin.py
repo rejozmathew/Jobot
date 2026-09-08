@@ -10,7 +10,7 @@ from .managed_client import Client
 from .managed_shared import ProtocolError, uid
 
 HOOKS=('pre_tool_call','post_tool_call','pre_api_request','post_api_request','api_request_error')
-OPERATIONS=('start','attach','pause','stop','retry','browser','account_lock','status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy','browser_observe','credentials','fast_forward')
+OPERATIONS=('start','attach','pause','stop','retry','reconcile','browser','account_lock','status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy','browser_observe','credentials','fast_forward')
 SCHEMA={'name':'jobbot','description':'Start one local application from a URL, use its owned browser and shared helpers, and record verified outcomes. No model is launched.',
     'parameters':{'type':'object','properties':{'operation':{'type':'string','enum':list(OPERATIONS)},'parameters':{'type':'object'}},'required':['operation'],'additionalProperties':False}}
 

@@ -146,6 +146,15 @@ class _CDPSession:
         self._pending: dict[int, asyncio.Future] = {}
         self._id = 0
         self._reader_task: Optional[asyncio.Task] = None
+        self._listeners: dict[str, list] = {}
+
+    def subscribe(self, method: str, callback):
+        """Listen on this exact target connection; callbacks must not block."""
+        self._listeners.setdefault(method, []).append(callback)
+        def remove():
+            callbacks=self._listeners.get(method, [])
+            if callback in callbacks:callbacks.remove(callback)
+        return remove
 
     async def start(self) -> None:
         self._reader_task = asyncio.create_task(self._read_loop())
@@ -167,6 +176,10 @@ class _CDPSession:
                                 fut.set_exception(RuntimeError(msg["error"].get("message", "CDP error")))
                             else:
                                 fut.set_result(msg.get("result", {}))
+                    elif mid is None:
+                        for callback in tuple(self._listeners.get(msg.get('method'), [])):
+                            try:callback(msg.get('params', {}))
+                            except Exception:pass
                 # opcode 0x2 = ping, 0x3 = close; ignore for our purposes
         except asyncio.IncompleteReadError:
             pass
@@ -221,6 +234,25 @@ class CDPElement:
 # ---------------------------------------------------------------------------
 # Page (the thing handlers get from get_current_page)
 # ---------------------------------------------------------------------------
+async def _press_key(session, key: str, vk: int = 0) -> None:
+    """Dispatch form keys on the attached target, including simple modifier chords."""
+    if not isinstance(key,str) or not key:raise ValueError('key_required')
+    parts=key.split('+'); modifiers=0
+    for modifier in parts[:-1]:
+        bit={'Alt':1,'Control':2,'Ctrl':2,'Meta':4,'Shift':8}.get(modifier)
+        if bit is None:raise ValueError('unsupported_key_modifier')
+        modifiers|=bit
+    name={'Space':' ','Spacebar':' ','Esc':'Escape','Return':'Enter'}.get(parts[-1],parts[-1])
+    codes={'Tab':9,'Enter':13,'Escape':27,' ':32,'ArrowLeft':37,'ArrowUp':38,
+           'ArrowRight':39,'ArrowDown':40,'Home':36,'End':35,'Backspace':8,'Delete':46}
+    code=vk or codes.get(name) or (ord(name.upper()) if len(name)==1 else 0)
+    if not code:raise ValueError('unsupported_form_key')
+    params={'key':name,'windowsVirtualKeyCode':code,'modifiers':modifiers}
+    text='\r' if name=='Enter' else name if len(name)==1 and not modifiers&7 else ''
+    await session.call('Input.dispatchKeyEvent',dict(params,type='keyDown',**({'text':text} if text else {})))
+    await session.call('Input.dispatchKeyEvent',dict(params,type='keyUp'))
+
+
 class CDPPage:
     def __init__(self, session: _CDPSession, target_id: str, url: str):
         self._session = session
@@ -285,6 +317,9 @@ class CDPPage:
     async def goto(self, url: str, timeout: float = 30.0) -> None:
         await self._session.call("Page.navigate", {"url": url}, timeout=timeout)
         self.url = url
+
+    async def press_key(self, key: str, vk: int = 0) -> None:
+        await _press_key(self._session,key,vk)
 
     async def click_observed(self, validator: str, args: dict) -> dict:
         """Activate a validated owned-page control through browser input events."""
@@ -478,14 +513,7 @@ class CDPBrowser:
 
     async def press_key(self, key: str, vk: int = 0) -> None:
         """Send a keydown+keyup via CDP Input.dispatchKeyEvent."""
-        await self._session.call("Input.dispatchKeyEvent", {
-            "type": "keyDown", "key": key,
-            "windowsVirtualKeyCode": vk or None,
-        })
-        await self._session.call("Input.dispatchKeyEvent", {
-            "type": "keyUp", "key": key,
-            "windowsVirtualKeyCode": vk or None,
-        })
+        await _press_key(self._session,key,vk)
 
     async def screenshot(self, path: str, full_page: bool = False) -> str:
         """Capture the current page to a PNG file via CDP Page.captureScreenshot."""

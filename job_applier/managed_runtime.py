@@ -190,7 +190,10 @@ class RuntimeServices:
                 prior_writer=a['writer_state']
                 has_active_autofill=(prior_writer=='active' or bool(unended_writer))
 
-                if status=='active':
+                if unended_writer:
+                    new_writer='active'
+                    quiescent=False
+                elif status=='active':
                     new_writer='active'
                     quiescent=False
                 elif stable and native_confirmed and a['submit_intent_at'] and not other_actions:
@@ -204,7 +207,7 @@ class RuntimeServices:
                         new_writer='idle'
                         quiescent=True
                     else:
-                        new_writer='active'
+                        new_writer='unknown'
                         quiescent=False
                 else:
                     if stable:
@@ -227,6 +230,8 @@ class RuntimeServices:
                 'status':status,
                 'writer_state':new_writer,
                 'quiescent':quiescent,
+                'native_takeover_authorized':quiescent and not (
+                    obs.get('activity',{}).get('busy_indicator') and obs.get('activity',{}).get('waiting_for_input')),
                 'observed_browser_mode':observed_mode,
                 'platform':detected_platform,
                 'company':job['company'],

@@ -186,6 +186,9 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | workday_fast.py | Bounded Workday supervisor; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
+| browser_controls.py / browser_helpers/form_controls.js | Shared native form inventory, verified text/select/check/keyboard exceptions; Workday retains its site-specific inventory |
+| application_answers.py | Interprets allowlisted candidate profile salary/privacy preferences for the shared browser operation and Workday runner; contains no personal answer defaults |
+| submission.py / browser_helpers/submission_observe.js | Shared one-click boundary, transient native/Simplify confirmation capture, scoped redirect inspection, private evidence and truthful outcome |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | managed_credentials.py / managed_documents.py / hermes_gmail.py | Private credentials and shared screenshot masking (local and legacy callers), hash-checked selected-asset uploads, configured correlated mailbox |
@@ -193,11 +196,46 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js | Existing dashboard, parallel session/process/driver/model/progress and independent controls |
 
-Common policy is job-apply v0.4.3; Workday policy is workday-simplify v0.3.1, in
+Common policy is job-apply v0.4.4; Workday policy is workday-simplify v0.3.2, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision
 on the next application. Trace all callers before declaring older helpers unused.
+
+Optional `answer_policy_profile_path` selects a private editable JSON profile.
+Only its allowlisted `application_answer_policy` preferences are projected into
+the managed candidate at start, before the immutable attempt snapshot. Other
+candidate fields stay managed; credentials remain in `credential_profile_path`.
+Without this option, the managed profile remains the source. Supported policy:
+`salary_expectation:{use_posted_range_max,fallback_amount,currency,period}`,
+`routine_privacy_consent:boolean`, and `submission_evidence_sources` containing
+`employer`, `simplify`, `user_reported`. Fallback is not a minimum/floor. Multiple
+advertised ranges require the applicable range from the executor. No historical
+attempt answer or outcome is rewritten when preferences change.
+
+Submission capture is armed on the owned CDP target before activation. Evidence
+survives ordinary scoped redirects and is persisted in the private spool. A
+possibly dispatched submit is never replayed. Native and Simplify proof carry
+separate sources; absence of approved evidence returns uncertainty. Local hosts
+retain that page for 120 seconds of inspection, then stop the owned process tree
+and retire. Reconcile supports the native plugin and portable CLI, records a
+separate source/timestamp event, and preserves historical completion/duration.
+Headed browser startup requests and verifies maximization; no automatic refresh.
+One background host owns each occupied workspace, with independent parallel
+session cleanup. It exits after a completed session response is delivered.
+
+Enabled Simplify input prompts can override a cosmetic spinner after stable
+observation, while real unfinished helper writes remain exclusive. Native
+takeover remains separate from extension input permission. Shared form helpers
+verify values and return ambiguous menu/coverage evidence instead of guessing.
+
+Follow-up work: correlate application-confirmation email through the existing
+Hermes Gmail adapter (employer, requisition/title, recipient and attempt time;
+deduplicate old mail; never treat delayed mail as failure). Add a candidate profile
+editor exposing advertised minimum/maximum choice, fallback amount, currency,
+period and routine consent; keep preferences in editable data and snapshot the
+chosen policy for each run. Minimum-range selection is a future option; this
+checkpoint implements the approved maximum/fallback policy.
 
 ## Verification boundaries
 

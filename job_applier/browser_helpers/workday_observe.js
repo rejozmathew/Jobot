@@ -30,6 +30,8 @@
     scope.inventory.set(ref,e);
     return {...descriptions[i],ref,id:e.id||'',enabled:!e.disabled&&e.getAttribute('aria-disabled')!=='true',
       required:!!e.required||e.getAttribute('aria-required')==='true',present:!!e.value,
+      ...((['checkbox','radio'].includes(e.type)||e.getAttribute('role')==='checkbox')?
+        {checked:!!e.checked||e.getAttribute('aria-checked')==='true'}:{}),
       ...(e.tagName==='SELECT'?{options:[...e.options].map(o=>({value:o.value,label:o.text,disabled:o.disabled}))}:{})};
   });
   const controls={};

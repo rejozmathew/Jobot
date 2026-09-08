@@ -1,5 +1,43 @@
 # Runtime simplification implementation log
 
+## WEX execution checkpoint — 2026-09-08
+
+The user authorized a checkpoint in the existing checkout and asked to iterate
+with another ordinary Workday application instead of a broad suite or new browser
+fixtures. The observed WEX issues informed shared fixes: enabled Simplify skills
+input despite cosmetic activity, verified native/ARIA selection and idempotent
+checkboxes, page keyboard support, profile-backed salary/privacy answers, and
+confirmation capture before the single submit. Workday retains recognition/auth
+and routine advancement; other ATS use the same scoped browser exceptions and
+submission boundary. The fast runner now delegates final submission to that
+shared boundary; two existing runner tests were updated for this delegation.
+
+The selected ignored private profile contains the user's advertised-range maximum,
+USD 250,000 fallback (not a floor), routine privacy consent and accepted evidence
+sources. Startup projects these preferences into future attempt snapshots. No old
+WEX answer, outcome or private attempt history was rewritten. Native and Simplify
+confirmation are separately attributed; user confirmation can be reconciled with
+its own event without inflating the old application's duration. Confirmation mail
+through Hermes Gmail and a profile editor with min/max/fallback choices are recorded
+as follow-ups in APPLICATION_RUNTIME.md.
+
+The owned headed browser starts maximized without automatic refresh. Pointer
+recovery checks bounded uncovered points and returns viewport/covering metadata.
+A workspace uses its own background host and retires it after the completion
+response; separate applications retain independent process ownership. Uncertain
+submission preserves a read-only inspection opportunity for 120 seconds, then
+stops the owned browser and records uncertainty. Existing unrelated terminals
+were not closed: the old lingering terminal's launcher was not conclusively owned.
+
+Validation: Python compile and browser-helper JavaScript syntax passed. Selected
+existing advancement/Simplify/history checks passed (21, 1.09s); existing owned-CDP,
+profile-import and reconciliation checks passed (38, 1.50s). No broad managed suite,
+new browser fixture, live employer application or production-record test was run.
+Gemini via Anti-Gravity completed a bounded source review; it did not run tests
+or edit files. Speculative suggestions were not treated as verified defects.
+The next user-run Workday application is the live acceptance check for extension
+behavior, actual confirmation UI, dropdown compatibility and process cleanup.
+
 ## Credit Acceptance login redirect and native activation — 2026-09-08
 
 Attempt 23 reached Create Account after loading the casing fix. Its structured

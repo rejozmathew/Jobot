@@ -88,6 +88,21 @@ def driver_identity(driver_id=None):
     return value
 
 
+def sync_answer_policy(config,service):
+    """Project editable profile preferences into future immutable attempt snapshots."""
+    path=config.get('answer_policy_profile_path')
+    if not path:return
+    from .application_answers import approved_policy
+    profile=read_config(path)
+    policy=approved_policy(profile.get('application_answer_policy'))
+    if not policy:raise ProtocolError('approved_answer_policy_required')
+    candidate=service.candidate(config['identity_id'])
+    current=candidate['profile']
+    if current.get('application_answer_policy')==policy:return
+    service.identity(identity_id=candidate['id'],person_key=candidate['person_key'],email=candidate['email'],
+        state=candidate['state'],profile=dict(current,application_answer_policy=policy))
+
+
 def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, metadata=None,
           company=None,title=None, wait_seconds=25):
     """Record immediately; return one durable handle even if browser startup is slow."""
@@ -109,6 +124,7 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     if history_matches(config.get('legacy_history_paths',[]),job['url']):raise ProtocolError('legacy_history_suppression')
     identity_id=config.get('identity_id');resume=config.get('resume_asset_id')
     if not identity_id or not resume:raise ProtocolError('configured_candidate_and_resume_required')
+    sync_answer_policy(config,service)
     requested=request_id or hashlib.sha256(json.dumps([driver,identity_id,job['id']]).encode()).hexdigest()
     from .managed_versions import code_evidence
     evidence=code_evidence()
@@ -155,12 +171,12 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     return result
 
 
-def handle(service, session_id):
+def handle(service, session_id, *, include_context=True):
     state=service.session_status(session_id)
     result={k:state[k] for k in ('id','job_id','run_id','attempt_id','driver_id','workspace_id','target_id','state','reason',
         'transport','requested_at','connected_at','ended_at','elapsed_seconds','host_alive','driver_recently_active','last_verified_progress_at')}
     result['session_id']=result.pop('id')
-    if state['attempt_id']:
+    if state['attempt_id'] and include_context:
         package=service.application_context(state['attempt_id'])
         result['context']=package
     result['workspace']=state['workspace'];result['metadata']=state['metadata']
@@ -170,13 +186,22 @@ def handle(service, session_id):
 def session_call(config, session_id, operation, parameters=None, driver_id=None):
     from .managed import Service
     service=Service(config['db_path'],instance_id=config['instance_id'])
-    if operation=='status':return handle(service,session_id)
+    if operation=='status':return handle(service,session_id,include_context=False)
     if operation in ('context','report'):
         session=service.session(session_id)
         if not session['attempt_id']:raise ProtocolError('attempt_not_started')
         return getattr(service,'application_context' if operation=='context' else 'attempt_report')(session['attempt_id'])
-    driver=driver_identity(driver_id)
     session=service.session(session_id)
+    if operation=='reconcile':
+        params=dict(parameters or {})
+        if not session['attempt_id']:raise ProtocolError('attempt_not_started')
+        if not session['ended_at']:
+            stopped=session_call(config,session_id,'stop',driver_id=driver_id)
+            if not stopped.get('ended_at'):raise ProtocolError('local_session_stop_required')
+        result=service.reconcile(session['attempt_id'],browser_quiescent=True,**params)
+        return {'session_id':session_id,'attempt_id':result['id'],'outcome':result['outcome'],
+                'evidence':result['evidence'],'source':params.get('source','user_reported'),'completed_at':result['completed_at']}
+    driver=driver_identity(driver_id)
     if operation=='retry':
         if not session['ended_at']:raise ProtocolError('stop_session_before_retry')
         if session['attempt_id'] and service.attempt(session['attempt_id'])['submit_intent_at']:
@@ -199,9 +224,9 @@ def session_call(config, session_id, operation, parameters=None, driver_id=None)
         end=time.monotonic()+15
         while time.monotonic()<end:
             current=service.session(session_id)
-            if current['state'] in ('paused','stopped','failed','finished'):return handle(service,session_id)
+            if current['state'] in ('paused','stopped','failed','finished'):return handle(service,session_id,include_context=False)
             time.sleep(.1)
-        return {**handle(service,session_id),'control_pending':True}
+        return {**handle(service,session_id,include_context=False),'control_pending':True}
     from .workspace_host import call_host
     return call_host(config,session,operation,parameters or {},driver)
 
@@ -213,65 +238,115 @@ def error_detail(exc):
 
 
 def browser_action(config,client,ownership,package,target_id,params):
-    """Existing CDP primitives, scoped to the session. No global focus or browser engine."""
+    """Shared, session-owned form operations and one-time submission."""
     import asyncio
     from .cdp_client import CDPBrowser
-    from .managed_identity import is_same_application_scope, is_workday_candidate_home
+    from .managed_identity import is_same_application_scope, is_workday_candidate_home, is_post_submit_scope
+    from .browser_controls import FORM, POINTER, observe, inventory, form_action
     from .managed_shared import uid
     method=params.get('method')
-    if method not in ('snapshot','screenshot','evaluate','click','fill','press','navigate','upload','simplify'):
+    if method not in ('snapshot','screenshot','evaluate','click','fill','press','select','check','apply_policy','submit','navigate','upload','simplify'):
         raise ProtocolError('unsupported_browser_method')
     reads=method in ('snapshot','screenshot')
-    aid=uid();started=time.monotonic();succeeded=False
-    if not reads:client.call('browser_observe',**ownership,target_id=target_id,cdp_url=config['cdp_url'])
-    client.call('action_start',**ownership,action_id=aid,tool_name='local_browser.'+method,writes_browser=not reads)
     async def execute():
+        aid=None;started=time.monotonic();succeeded=False
         browser=await CDPBrowser.connect(config['cdp_url'],target_id=target_id,expected_mode=config.get('browser_mode','headed'))
         try:
             page=await browser.get_current_page();url=await page.evaluate('location.href')
-            if not is_same_application_scope(package['job']['url'],url) and not (reads and is_workday_candidate_home(package['job']['url'],url)):
+            pending=bool(package['attempt'].get('submit_intent_at'))
+            if not is_same_application_scope(package['job']['url'],url) and not (
+                (reads or method=='submit') and ((pending and is_post_submit_scope(package['job']['url'],url)) or is_workday_candidate_home(package['job']['url'],url))):
                 raise ProtocolError('target_job_mismatch')
+            target={k:params[k] for k in ('ref','selector') if params.get(k)}
+            submission_control=False
+            if method=='click' and target:
+                if params.get('source')=='simplify':
+                    submission_control=await page.evaluate_function(
+                        "(ref)=>window.__jobbotSimplifyScope?.controls.get(ref)?.kind==='submit'",params.get('ref'))
+                else:
+                    info=await page.evaluate_function(FORM,dict(target,method='inspect'))
+                    submission_control=info.get('submission_control') is True
+            if method=='submit' or submission_control:
+                from .submission import submit
+                if not pending and params.get('source')!='simplify':
+                    info=await page.evaluate_function(FORM,dict(target,method='inspect')) if target else {}
+                    if not info.get('submission_control'):raise ProtocolError('observed_submit_control_required')
+                async def activate():
+                    if params.get('source')=='simplify':
+                        from .simplify_boundary import OBSERVE,CLICK
+                        observed=await page.evaluate(OBSERVE)
+                        control=observed.get('controls',{}).get('submit',{})
+                        if not control.get('enabled') or (params.get('ref') and control.get('ref')!=params['ref']):
+                            return {'clicked':False,'execution':'not_executed','reason':'submit_control_unavailable'}
+                        return await page.evaluate_function(CLICK,{'ref':control['ref'],'operation':'submit',
+                            'url':observed['url'],'page_ref':observed.get('page_ref')})
+                    if not target:raise ProtocolError('observed_submit_control_required')
+                    return await page.click_observed(POINTER,dict(target,expected_url=await page.evaluate('location.href')))
+                return await submit(page,client.call,package,ownership,config,target_id,activate)
+            if pending and not reads:raise ProtocolError('submission_pending_read_only')
+            if not reads:
+                gate=await asyncio.to_thread(client.call,'browser_observe',**ownership,target_id=target_id,cdp_url=config['cdp_url'])
+                extension_action=method=='simplify' or (method=='click' and params.get('source')=='simplify')
+                if not extension_action and not gate.get('native_takeover_authorized',gate.get('quiescent')):
+                    raise ProtocolError('simplify_input_or_settlement_required')
+            aid=uid()
+            client.call('action_start',**ownership,action_id=aid,tool_name='local_browser.'+method,writes_browser=not reads)
             if method=='screenshot':
                 from .managed_credentials import capture_private_screenshot
                 folder=Path(config['spool_dir'])/'screenshots'
                 if not folder.is_absolute():raise ProtocolError('absolute_spool_required')
                 folder.mkdir(parents=True,exist_ok=True);path=folder/(aid+'.png')
                 await capture_private_screenshot(page,path)
+                succeeded=True
                 return {'image_path':str(path),'mime_type':'image/png','url':url,'target_id':target_id,
-                    'instruction':'Inspect this owned-page image with the current harness image/vision capability; snapshot supplies observed selectors.'}
+                    'instruction':'Inspect this owned-page image; snapshot supplies observed selectors.'}
             if method=='snapshot':
-                from .workday_fast import observe_page,screen_inventory
-                inventory=screen_inventory(await observe_page(page,package),package)
-                inventory['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
-                return inventory
+                if pending:
+                    result={'url':url,'target_id':target_id,'submission_pending':True,
+                            'instruction':'Confirmation observation only. Do not submit again.'}
+                else:result=inventory(await observe(page,package),package)
+                result['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
+                if pending:
+                    from .simplify_boundary import OBSERVE
+                    result['simplify']=await page.evaluate(OBSERVE)
+                succeeded=True;return result
             if method=='evaluate':
-                return await page.evaluate_function(params['script'],params['argument']) if 'argument' in params else await page.evaluate(params['script'])
+                result=await page.evaluate_function(params['script'],params['argument']) if 'argument' in params else await page.evaluate(params['script'])
+                succeeded=True;return result
             if method=='navigate':
                 if not is_same_application_scope(package['job']['url'],params['url']):raise ProtocolError('target_job_mismatch')
-                await page.goto(params['url']);return {'navigation_requested':True}
-            if method=='press':await page.press_key(params['key']);return {'pressed':True}
+                await page.goto(params['url']);succeeded=True;return {'navigation_requested':True}
+            if method=='press' and not target:
+                await page.press_key(params['key']);succeeded=True;return {'pressed':True}
+            if method in ('fill','select','check','press'):
+                result=await form_action(page,params)
+                succeeded=bool(result.get('committed') or result.get('pressed'));return result
+            if method=='apply_policy':
+                from .application_answers import apply_policy
+                result=await apply_policy(page,package,await observe(page,package),posted_range=params.get('salary_range'))
+                succeeded=not any(not field['committed'] for field in result['fields']);return result
             if method=='simplify':
                 from .simplify_boundary import SimplifyBoundary
                 client.call('writer_state',**ownership,state='active')
-                result=await SimplifyBoundary(page,budget_seconds=45).perform(params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
+                result=await SimplifyBoundary(page,budget_seconds=45,fast=True).perform(params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
                 client.call('writer_state',**ownership,state='idle' if result.get('native_takeover_authorized') else 'unknown')
-                return result
+                succeeded=result.get('execution')=='clicked';return result
             if method=='click' and params.get('ref'):
-                from .workday_fast import observe_page,WORKDAY_CLICK
                 from .simplify_boundary import CLICK
-                observed=await observe_page(page,package)
+                observed=await observe(page,package)
                 if params.get('page_signature')!=observed.get('page_signature'):return {'execution':'not_executed','reason':'stale_screen'}
                 if params.get('source')=='simplify':
                     control=next((c for c in observed.get('simplify_inventory',[]) if c['ref']==params['ref']),None)
                     if not control:return {'execution':'not_executed','reason':'stale_control'}
                     if control['operation']=='sign_in':return {'execution':'not_executed','reason':'use_scoped_simplify_sign_in_with_credential_evidence'}
-                    return await page.evaluate_function(CLICK,{'ref':control['ref'],'operation':control['operation'],'url':observed['url'],'page_ref':observed.get('page_ref')})
-                return await page.click_observed(WORKDAY_CLICK,{'ref':params['ref'],'step':observed['step'],'page_signature':observed['page_signature']})
-            selector=params['selector']
+                    result=await page.evaluate_function(CLICK,{'ref':control['ref'],'operation':control['operation'],'url':observed['url'],'page_ref':observed.get('page_ref')})
+                else:result=await page.click_observed(POINTER,{'ref':params['ref'],'step':observed['step'],'page_signature':observed['page_signature']})
+                succeeded=bool(result.get('clicked') or result.get('status')=='clicked');return result
+            selector=params.get('selector')
             if not isinstance(selector,str) or not selector:raise ProtocolError('observed_selector_required')
             if method=='click':
-                from .workday_fast import WORKDAY_CLICK
-                return await page.click_observed(WORKDAY_CLICK,{'selector':selector,'expected_url':url})
+                result=await page.click_observed(POINTER,{'selector':selector,'expected_url':url})
+                succeeded=result.get('clicked') is True;return result
             if method=='upload':
                 from .managed_documents import local_asset_path
                 asset=next((a for a in package['documents']['assets'] if a['id']==params['asset_id']),None)
@@ -281,22 +356,12 @@ def browser_action(config,client,ownership,package,target_id,params):
                 client.call('report_upload',**ownership,asset_id=asset['id'],status='upload_attempted',evidence='Approved asset supplied to an observed file control')
                 controls=await page.query_selector_all(selector)
                 await controls[0].set_input_files(str(path))
+                succeeded=True
                 return {'upload_attempted':True,'asset_id':asset['id'],'filename':path.name,'confirmation_required':True}
-            return await page.evaluate_function("""p=>{const es=document.querySelectorAll(p.selector);
-                if(es.length!==1)throw Error('ambiguous_or_stale_control');const e=es[0];
-                if(!e.getClientRects().length||e.disabled)throw Error('control_unavailable');
-                if(e.type==='password')throw Error('use_private_credentials_helper');
-                e.focus();const proto=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
-                Object.getOwnPropertyDescriptor(proto,'value').set.call(e,p.value);
-                e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));e.blur();
-                return {committed:e.value===p.value};} """,{'selector':selector,'method':method,'value':params.get('value')})
-        finally:await browser.close()
-    try:
-        result=asyncio.run(execute())
-        succeeded=bool(result.get('clicked') or result.get('execution')=='clicked') if method=='click' else True
-        return result
-    finally:
-        client.call('action_end',**ownership,action_id=aid,status='success' if succeeded else 'failed',duration_seconds=time.monotonic()-started)
+        finally:
+            if aid:client.call('action_end',**ownership,action_id=aid,status='success' if succeeded else 'failed',duration_seconds=time.monotonic()-started)
+            await browser.close()
+    return asyncio.run(execute())
 
 
 def read_config(path):
@@ -378,7 +443,7 @@ def main(argv=None):
     import argparse
     parser=argparse.ArgumentParser(description='Local JobBot session interface. No API token or dashboard required.')
     sub=parser.add_subparsers(dest='command',required=True)
-    for name in ('start','status','call','stop','pause','attach','retry','doctor','sessions'):
+    for name in ('start','status','call','stop','pause','attach','retry','reconcile','doctor','sessions'):
         p=sub.add_parser(name);p.add_argument('--config');p.add_argument('--driver-id')
         if name=='start':
             p.add_argument('url',nargs='?');p.add_argument('--job-id');p.add_argument('--request-id')
@@ -386,6 +451,10 @@ def main(argv=None):
             p.add_argument('--wait-seconds',type=float,default=25)
         elif name not in ('doctor','sessions'):p.add_argument('session_id')
         if name=='call':p.add_argument('operation');p.add_argument('--parameters',default='{}')
+        if name=='reconcile':
+            p.add_argument('--outcome',choices=('applied','already_applied','interrupted','failed','blocked'),required=True)
+            p.add_argument('--evidence',required=True)
+            p.add_argument('--source',choices=('employer','simplify','user_reported'),default='user_reported')
         if name=='doctor':p.add_argument('--url')
     args=parser.parse_args(argv)
     try:
@@ -398,6 +467,9 @@ def main(argv=None):
         elif args.command=='sessions':
             from .managed import Service
             result=Service(cfg['db_path'],instance_id=cfg['instance_id']).sessions_view()
+        elif args.command=='reconcile':
+            result=session_call(cfg,args.session_id,'reconcile',
+                {'outcome':args.outcome,'evidence':args.evidence,'source':args.source},args.driver_id)
         else:result=session_call(cfg,args.session_id,args.operation if args.command=='call' else args.command,
                                  payload(args.parameters) if args.command=='call' else {},args.driver_id)
         print(json.dumps(result,ensure_ascii=False));return 0

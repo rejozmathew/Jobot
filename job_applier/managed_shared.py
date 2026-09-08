@@ -52,6 +52,12 @@ def sanitize_legacy_profile(data):
     skipped = []
 
     for key, value in data.items():
+        if key=='application_answer_policy':
+            from .application_answers import approved_policy
+            policy=approved_policy(value)
+            if policy:sanitized[key]=policy
+            else:skipped.append(key)
+            continue
         if key in LEGACY_EXCLUDED_SECTIONS:
             skipped.append(key)
             continue

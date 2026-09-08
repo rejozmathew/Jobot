@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.4.3
+version: 0.4.4
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -94,6 +94,10 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
 3. Let official Simplify do bulk filling. Observe until it settles; never compete
    with active/unknown writers. On Workday read
    [workday-simplify](../workday-simplify/SKILL.md) and use `fast_forward`.
+   A cosmetic panel spinner can coexist with an enabled Simplify input prompt.
+   Use the observed enabled action (including `autofill_skills`, any count), then
+   wait again. A real unended write, disabled action or explicit ongoing fill
+   still blocks. Permission for extension input does not authorize native edits.
 4. Prefer enabled Continue after settling over nonblocking review warnings.
    Handle only actual required blockers and material identity/document errors.
    Use approved facts; never fabricate screening answers or reconstruct history.
@@ -115,20 +119,49 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    uses `browser simplify` with `action:sign_in` and non-secret
    `credential_evidence` establishing retained credential use. An enabled button
    alone is not that evidence, and Simplify's own login is a separate operation.
+   Shared `select` accepts an observed `ref` or `selector` and an exact `label`
+   or `value`; it supports native selects and associated ARIA menus, and verifies
+   selection. `check` accepts boolean `value` and never toggles an already correct
+   box. `fill` and `press` also accept refs; keys include Tab, Shift+Tab, Space,
+   Escape, Enter and Control+A. Unassociated or ambiguous options return evidence.
+   `apply_policy` uses the attempt's approved `application_answer_policy` for
+   salary expectations and routine privacy consent. Use the applicable advertised
+   range maximum when configured; use the configured absolute amount only when
+   no applicable range is available. An explicit observed range can be supplied
+   as `salary_range:{min,max,currency}`. Do not use the candidate's desired range
+   as the job's range. Routine privacy consent excludes marketing and job alerts.
 6. Verify the approved resume attachment using actual employer controls. Retain
    a correct verified attachment; do not reupload it unnecessarily. If needed,
    `browser upload` hash-checks only the selected asset and records the attempt.
    After observing successful attachment use `report_upload` with `asset_id`,
    `status:"upload_confirmed"`, and evidence. No in-run PDF extraction, resume
    hunts, or reconstruction of career/education fields on any ATS.
-7. Continue every page. In configured submit mode, record `submission_intent`
-   with exact employer-page evidence, submit once, and verify the employer's
-   exact requisition confirmation once. Do not add a human review checkpoint.
-   The Workday runner does these steps when supported; do not repeat them after
-   it returns applied. Simplify's success panel alone is not employer evidence.
+7. Continue every page. In configured submit mode use `browser submit` with the
+   observed native `ref` or `selector`, or `source:simplify` for its final action.
+   The shared helper arms confirmation capture, records intent and clicks once.
+   The Workday runner uses the same helper automatically. It retains native and
+   Simplify confirmation messages, source, time and a private screenshot before
+   finishing. Accepted sources come from the profile; employer is the default.
+   Simplify evidence remains labelled Simplify, never employer evidence. Do not
+   add a human review checkpoint or repeat submission after `applied`.
 8. Use `finish` with the truthful outcome, evidence and observed quiescence.
    The host isolates its browser before making the workspace available again.
    A missing post-click confirmation is `submission_unknown`; never click again.
+
+After an uncertain click the local host allows 120 seconds of owned screenshot,
+snapshot and confirmation observation, then closes its browser/process tree and
+records uncertainty. `stop` closes immediately. `reconcile` accepts `outcome`,
+`evidence`, and `source` (`employer`, `simplify`, or `user_reported`); cite the
+actual user's confirmation when using user_reported. It stops a still-owned
+session before correction and preserves the original attempt duration. Portable:
+`application_runtime reconcile <session-id> --outcome applied --source user_reported --evidence "<actual confirmation>"`.
+Reconciliation never submits or creates a retry. Cross-job URLs are not proof.
+
+Headed sessions start maximized. Obscured clicks return viewport/covering metadata
+and use only an uncovered point on the actual control. Inspect and use an observed
+panel collapse control if needed; never force through an overlay or automatically
+refresh an application. Completed workspaces retire their owned background host;
+parallel sessions retain their independent hosts and browser processes.
 
 `finish` parameters are `{"outcome":"blocked","evidence":"<observed reason>",
 "quiescent":true}` (or another supported truthful outcome). Do not add invented

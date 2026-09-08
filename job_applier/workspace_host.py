@@ -43,6 +43,10 @@ def ensure_host(config, workspace_id):
     w=workspace_record(service,workspace_id);workspace=json.loads(w['config_json'])
     with FileLock(str(lock_path(workspace))+'.startup'):
         w=workspace_record(service,workspace_id)
+        if w['state']=='offline' and w['host_identity_json'] and process_matches(json.loads(w['host_identity_json'])):
+            deadline=time.monotonic()+8
+            while process_matches(json.loads(w['host_identity_json'])) and time.monotonic()<deadline:time.sleep(.05)
+            if process_matches(json.loads(w['host_identity_json'])):raise ProtocolError('workspace_host_stopping')
         if w['host_identity_json'] and process_matches(json.loads(w['host_identity_json'])):
             if not FileLock.is_locked(lock_path(workspace)):raise ProtocolError('host_lock_missing')
             return w
@@ -52,7 +56,9 @@ def ensure_host(config, workspace_id):
         if FileLock.is_locked(lock_path(workspace)):raise ProtocolError('workspace_owned_by_another_host')
         root=Path(config['spool_dir'])/'hosts';root.mkdir(parents=True,exist_ok=True)
         host_id=uid()
-        detached_launch([sys.executable,'-m','job_applier.workspace_host','--config',config['config_path'],
+        interpreter=Path(sys.executable)
+        if os.name=='nt' and interpreter.with_name('pythonw.exe').is_file():interpreter=interpreter.with_name('pythonw.exe')
+        detached_launch([str(interpreter),'-m','job_applier.workspace_host','--config',config['config_path'],
                         '--workspace',workspace_id,'--host-id',host_id],cwd=REPOSITORY,
                         stdout_path=root/(workspace_id+'.out.log'),stderr_path=root/(workspace_id+'.err.log'))
         deadline=time.monotonic()+10
@@ -125,6 +131,7 @@ class WorkspaceHost:
         self.workspace=json.loads(workspace_record(self.service,workspace_id)['config_json'])
         self.browser=None;self.busy=threading.Lock();self.exit=threading.Event()
         self.preparing=set();self.threads=[]
+        self.inspection_deadlines={};self.retire=False;self.requests=0
 
     def active_session(self):
         with self.service.tx() as db:
@@ -144,6 +151,7 @@ class WorkspaceHost:
               '--remote-debugging-address=127.0.0.1','--remote-debugging-port='+str(urlsplit(w['cdp_url']).port),
               '--enable-automation','--no-first-run','--no-default-browser-check','about:blank']
         if w['mode']=='headless':args.insert(-1,'--headless=new')
+        else:args.insert(-1,'--start-maximized')
         root=Path(self.config['spool_dir'])/'hosts'
         self.browser=OwnedProcess.launch(args,cwd=REPOSITORY,stdout_path=root/(w['id']+'.browser.out.log'),stderr_path=root/(w['id']+'.browser.err.log'))
         self.service.host_seen(w['id'],self.host_id,self.browser.identity)
@@ -168,6 +176,14 @@ class WorkspaceHost:
         browser=await CDPBrowser.connect(endpoint,target_id=target,expected_mode=mode)
         try:
             page=await browser.get_current_page();job=self.service.job(session['job_id'])
+            window_state='headless'
+            if mode=='headed':
+                try:
+                    window=await browser_command(endpoint,'Browser.getWindowForTarget',{'targetId':target})
+                    await browser_command(endpoint,'Browser.setWindowBounds',{'windowId':window['windowId'],'bounds':{'windowState':'maximized'}})
+                    bounds=await browser_command(endpoint,'Browser.getWindowBounds',{'windowId':window['windowId']})
+                    window_state=bounds['bounds'].get('windowState','unconfirmed')
+                except Exception:window_state='maximize_requested'
             await page.goto(job['url'])
             deadline=time.monotonic()+20
             observed_url=''
@@ -177,7 +193,8 @@ class WorkspaceHost:
                 await asyncio.sleep(.2)
             else:raise ProtocolError('application_target_not_ready',observed_url)
             readiness={'profile_verified':True,'endpoint_verified':True,'target_operable':True,'browser_mode':mode,
-                       'simplify':'unverified','observed_at':self.service.now()}
+                       'simplify':'unverified','observed_at':self.service.now(),'window_state':window_state,
+                       'viewport':await page.evaluate('({width:innerWidth,height:innerHeight})')}
             if self.config.get('require_simplify',True):
                 from .simplify_boundary import SimplifyBoundary
                 boundary=SimplifyBoundary(page,budget_seconds=5)
@@ -213,9 +230,21 @@ class WorkspaceHost:
             self.browser=None
         self.service.session_stopped(session['id'],reason=reason,paused=paused,browser_stopped=True)
         self.service.host_seen(self.workspace_id,self.host_id,None)
+        self.inspection_deadlines.pop(session['id'],None)
+        if not paused:self.retire=True
+
+    def inspection_result(self,session_id,reason='confirmation_not_captured'):
+        deadline=self.inspection_deadlines.setdefault(session_id,time.monotonic()+120)
+        return {'status':'submission_unknown','reason':reason,'session_id':session_id,
+                'inspection_seconds':max(0,round(deadline-time.monotonic())),
+                'next_step':'Inspect the owned screenshot/snapshot or reconcile confirmation. Do not submit again. Stop closes immediately.'}
 
     def dispatch(self, request):
-        try:return self._dispatch(request)
+        try:
+            result=self._dispatch(request)
+            if isinstance(result,dict) and result.get('status')=='submission_unknown':
+                result.update(self.inspection_result(request['session_id'],result.get('reason','confirmation_not_captured')))
+            return result
         except Exception as exc:
             # Keep the real helper failure visible without ending the application.
             # Never attribute an invalid or foreign driver's request to this session.
@@ -230,6 +259,9 @@ class WorkspaceHost:
                             'phase':'helper_exception','activity':str(request.get('operation','Helper'))+' returned an error',
                             'error_type':detail['code'],'evidence':detail['detail'],'source':'Workspace host','status':'error',
                             'next_step':'Executor inspects the error and submission state before choosing a recovery'})
+                    if a['submit_intent_at']:
+                        result=self.inspection_result(session['id'],detail['code'])
+                        result['diagnostic']=detail;return result
             except Exception:pass  # Retain the original exception if recording also fails.
             raise
 
@@ -249,6 +281,8 @@ class WorkspaceHost:
         attempt=service.attempt(session['attempt_id'])
         own={'attempt_id':attempt['id'],'worker_id':attempt['worker_id'],'fence':attempt['fence']}
         client.call('heartbeat',**own)
+        if op=='finish' and attempt['submit_intent_at'] and params.get('outcome') not in ('applied','already_applied'):
+            return self.inspection_result(session['id'])
         cfg=dict(self.config,cdp_url=self.workspace['cdp_url'],browser_profile=self.workspace_id,browser_mode=self.workspace['mode'])
         if op in ('context','report'):
             return client.call('application_context' if op=='context' else 'attempt_report',attempt_id=attempt['id'])
@@ -261,7 +295,9 @@ class WorkspaceHost:
             if op=='credentials':
                 service.coordinate_account(session['id'])
                 from .managed_credentials import handle_credentials
-                client.call('browser_observe',**own,target_id=session['target_id'],cdp_url=cfg['cdp_url'])
+                gate=client.call('browser_observe',**own,target_id=session['target_id'],cdp_url=cfg['cdp_url'])
+                if not gate.get('native_takeover_authorized',gate.get('quiescent')):
+                    raise ProtocolError('simplify_input_or_settlement_required')
                 action=uid();started=time.monotonic();result={}
                 client.call('action_start',**own,action_id=action,tool_name='credentials')
                 try:result=handle_credentials(cfg,package,dict(params,target_id=session['target_id']));return result
@@ -283,6 +319,8 @@ class WorkspaceHost:
             if 'job_id' in params and params['job_id']!=attempt['job_id']:raise ProtocolError('context_forbidden')
             scoped['job_id']=attempt['job_id'];params.pop('job_id',None)
         result=client.call(op,**scoped,**params)
+        if op=='finish':
+            return {k:result.get(k) for k in ('id','job_id','outcome','evidence','completed_at','duration_seconds')}
         if op=='record_account_event' and params.get('state') in ('confirmed','verified','created_unverified'):
             service.coordinate_account(session['id'],release=True)
         return result
@@ -291,6 +329,7 @@ class WorkspaceHost:
         while not self.exit.is_set():
             try:pipe=listener.accept()
             except (OSError,EOFError):return
+            self.requests+=1
             try:
                 if not pipe.poll(5):continue
                 request=json.loads(pipe.recv_bytes(65536))
@@ -304,7 +343,8 @@ class WorkspaceHost:
             except Exception as exc:
                 try:pipe.send_bytes(json.dumps({'error':error_detail(exc)}).encode())
                 except (OSError,EOFError):pass
-            finally:pipe.close()
+            finally:
+                pipe.close();self.requests-=1
 
     def run(self):
         with FileLock(lock_path(self.workspace)):
@@ -327,6 +367,12 @@ class WorkspaceHost:
                             self.service.host_seen(self.workspace_id,self.host_id,self.browser.identity if self.browser else None);last_seen=time.monotonic()
                         if not session:
                             idle_since=idle_since or time.monotonic()
+                            if self.retire and not self.requests and not self.busy.locked():
+                                with FileLock(str(lock_path(self.workspace))+'.startup'):
+                                    if not self.active_session():
+                                        with self.service.tx() as db:
+                                            db.execute("UPDATE browser_workspaces SET state='offline' WHERE id=? AND host_id=?",(self.workspace_id,self.host_id))
+                                        break
                             if time.monotonic()-idle_since>60:break
                             continue
                         idle_since=None
@@ -336,6 +382,10 @@ class WorkspaceHost:
                         # Startup owns the child reference until it observes the pending
                         # control. Never acknowledge stop while a launch can still occur.
                         if session['id'] in self.preparing:continue
+                        inspection=self.inspection_deadlines.get(session['id'])
+                        if inspection is not None and time.monotonic()>=inspection:
+                            self.stop_session(session,'Submission confirmation not captured; bounded inspection ended')
+                            continue
                         if session['state']=='finishing' or run['control'] in ('pause_requested','stop_requested') or expired:
                             self.stop_session(session,'Maximum runtime reached' if expired else session['reason'] or run['control'],
                                               paused=run['control']=='pause_requested' and not expired)

@@ -177,6 +177,37 @@ def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
         return False
 
 
+def is_post_submit_scope(job_url: str, candidate_url: str) -> bool:
+    """Read-only confirmation scope after intent, never an application-write grant."""
+    if is_same_application_scope(job_url,candidate_url) or is_workday_candidate_home(job_url,candidate_url):
+        return True
+    try:
+        job=urlsplit(canonical_url(job_url));current=urlsplit(canonical_url(candidate_url))
+        if job.scheme!=current.scheme or job.netloc!=current.netloc:return False
+        if any(s in current.path.lower() for s in ('/login','/signin','/reset','/verify','/oauth','..')):return False
+        a=job.path.strip('/').split('/');b=current.path.strip('/').split('/')
+        if (job.hostname or '').endswith('.myworkdayjobs.com'):
+            if a and _LOCALE_RE.fullmatch(a[0]):a=a[1:]
+            if b and _LOCALE_RE.fullmatch(b[0]):b=b[1:]
+            if not a or not b or a[0].casefold()!=b[0].casefold():return False
+            # A different requisition on the same career site is never evidence.
+            if 'job' in b:
+                i=b.index('job');j=a.index('job') if 'job' in a else -1
+                return j>=0 and len(a)>j+2 and len(b)>i+2 and b[i+2].casefold()==a[j+2].casefold()
+            return len(b)==1 or all(part.casefold() in ('apply','applymanually','confirmation','success','thankyou','thank-you','submitted','userhome','candidatehome') for part in b[1:])
+        # Shared company/Greenhouse/Lever thank-you destinations. Keep the
+        # employer path prefix and reject another job's id in that prefix.
+        end=b[-1].casefold() if b else ''
+        if end not in ('confirmation','success','thank-you','thank_you','thankyou','submitted'):return False
+        if a and b and a[0].casefold()!=b[0].casefold():return False
+        for marker in ('jobs','job','positions','posting','postings'):
+            if marker in a and marker in b:
+                i=a.index(marker);j=b.index(marker)
+                if len(a)>i+1 and len(b)>j+1 and b[j+1]!=a[i+1]:return False
+        return True
+    except (ValueError,ProtocolError):return False
+
+
 def is_workday_candidate_home(job_url, candidate_url):
     """Exact tenant career-site confirmation read surface; never authorizes writes."""
     try:

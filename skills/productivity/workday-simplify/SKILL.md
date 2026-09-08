@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.1
+version: 0.3.2
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -94,11 +94,18 @@ runner contains no model and retains one CDP connection during its bounded call.
 5. `blocked`: handle only the actual required blocker with the shared session's
    `browser` operation and approved facts. One initial autofill and one retry per
    step remain the limit. Do not audit every optional field or reconstruct history.
+   Enabled `Autofill N Skills` is a separate input action; a cosmetic spinner
+   does not defeat it. Counts are observed and bounded per page. Salary/privacy
+   preferences use the shared profile policy; the runner applies them before
+   continuing. Use shared `browser select` for native or ARIA dropdown recovery.
 6. A review count does not defeat enabled Continue after quiescence. Same URL does
    not imply same step; the runner observes Workday's actual section/stepper.
 7. At authorized Review, observe the correct approved attachment. The runner
-   records intent, submits once and verifies the exact requisition in native
-   employer evidence. Do not treat the Simplify success panel as confirmation.
+   arms the shared confirmation collector, records intent and submits once.
+   It captures native and Simplify confirmation with the actual source and applies
+   the profile's accepted sources. Valid post-submit routes can be inspected even
+   after Workday's form step disappears. Follow the shared bounded inspection and
+   reconciliation procedure when evidence remains uncertain.
 8. `applied`: read the report; do not submit or finish again. `already_applied`
    requires exact native evidence and no new submit. `submission_unknown` allows
    observation/reconciliation only. `ready_for_review` applies only in review mode.

@@ -83,9 +83,17 @@ class Harness:
         return r
 
 
-def test_runner_advances_without_model_tick_and_preserves_submission_intent():
+def test_runner_advances_without_model_tick_and_preserves_submission_intent(monkeypatch):
     a=snapshot(); b=snapshot(step='review',resume_attached=True); b['controls']={'submit':{'enabled':True}}
     c=snapshot(step='unknown',submitted=True); h=Harness([a,b,c]); r=h.runner()
+    async def capture(page,call,package,owner,config,target,activate,**kwargs):
+        assert page is r.page and target==r.target and not kwargs.get('confirmation_only')
+        call('submission_intent')
+        r.last_click_execution='clicked'
+        assert (await activate())['clicked']
+        call('finish',outcome='applied')
+        return {'status':'applied'}
+    monkeypatch.setattr('job_applier.submission.submit',capture)
     result=asyncio.run(r.run(seconds=20))
     assert result['status']=='applied'
     assert h.clicks==['continue','submit']
@@ -103,9 +111,13 @@ def test_runner_stop_performs_no_click_and_only_acks_quiescence():
     assert any(op=='ack_control' for op,_ in h.calls)
 
 
-def test_runner_prior_submit_intent_never_resubmits():
+def test_runner_prior_submit_intent_never_resubmits(monkeypatch):
     s=snapshot(step='review'); s['controls']={'submit':{'enabled':True}}
     h=Harness([s],intent=True)
+    async def confirm(page,call,package,owner,config,target,activate,**kwargs):
+        assert kwargs['confirmation_only'] is True
+        return {'status':'submission_unknown'}
+    monkeypatch.setattr('job_applier.submission.submit',confirm)
     result=asyncio.run(h.runner().run(seconds=3))
     assert h.clicks==[]
     assert result['status']=='submission_unknown'

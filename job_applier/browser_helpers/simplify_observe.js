@@ -12,7 +12,7 @@
   const reference=key=>{if(!scope.referenceKeys.has(key))scope.referenceKeys.set(key,crypto.randomUUID());return scope.referenceKeys.get(key);};
   scope.fieldValues=scope.fieldValues||new Map();
   scope.valueEpoch=scope.valueEpoch||0;
-  const CONTROL_KINDS=['autofill','continue','start','create_account_autofill','create_account','sign_in','submit'];
+  const CONTROL_KINDS=['autofill','autofill_skills','continue','start','create_account_autofill','create_account','sign_in','submit'];
   const candidates={};
   const controls={};
   const inventory=[];
@@ -25,13 +25,14 @@
       const label=(button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').trim().toLowerCase();
       let kind=null;
       if(/^autofill this page$/.test(label)) kind='autofill';
+      else if(/^autofill\s+\d+\s+skills?$/.test(label)) kind='autofill_skills';
       else if(/^continue application$/.test(label)) kind='continue';
       else if(/^start application$/.test(label)) kind='start';
       else if(/^create account (&|and) autofill$/.test(label)) kind='create_account_autofill';
       else if(/^create account$/.test(label)) kind='create_account';
       else if(/^sign in( (&|and) autofill)?$/.test(label)) kind='sign_in';
       else if(/^submit application$/.test(label)) kind='submit';
-      const enabled=!button.disabled && button.getAttribute('aria-disabled')!=='true';
+      const enabled=!button.disabled && button.getAttribute('aria-disabled')!=='true' && button.getAttribute('aria-busy')!=='true';
       if(!kind){
         const ref=reference('other:'+label);
         if(ambiguousOther.has(ref))continue;
@@ -48,7 +49,7 @@
       const chosen = actionable[0];
       const ref = reference(kind+':'+chosen.label);
       scope.controls.set(ref, {element:chosen.button, kind, root:chosen.root});
-      controls[kind] = {ref, enabled:true};
+      controls[kind] = {ref, enabled:true, label:chosen.label};
       inventory.push({ref,label:chosen.label,operation:kind,enabled:true});
     } else if(actionable.length > 1) {
       // Ambiguous multiple actionable controls: fail-closed, do not guess
@@ -124,12 +125,14 @@
   let status='missing';
   let login_kind=null;
   let reviewCount=null;
+  let activity={busy_indicator:false,explicit_writer:false,waiting_for_input:false};
   if(roots.length > 0) {
     let hasActive=false, hasReview=false, hasComplete=false, hasLogin=false, hasUnsupported=false;
     for(const r of roots) {
       const busy = (typeof r.querySelector==='function') ? r.querySelector('[aria-busy="true"]') : null;
       const text = getRenderedText(r);
       if(busy || /autofilling|filling your application|autofill in progress|stop account step|creating (?:your )?account/i.test(text)) hasActive=true;
+      if(/filling your application|autofill in progress|stop (?:account step|autofill)|creating (?:your )?account/i.test(text)) activity.explicit_writer=true;
       const mInput = text.match(/(\d+)\s+fields?\s+need(?:s)?\s+(?:your\s+input|review)/i);
       const mReviewParen = text.match(/need(?:s)?\s+(?:to\s+)?review\s*\((\d+)\)/i);
       const mReviews = text.match(/(\d+)\s+reviews?/i);
@@ -155,9 +158,16 @@
       candidates.create_account_autofill.length > 0 || candidates.create_account.length > 0 || candidates.sign_in.length > 0
     );
     login_kind=hasLogin?'simplify':inventory.some(c=>/^(?:sign in|create account) (&|and) autofill$/.test(c.label))?'employer':hasAccountControls?'unknown':null;
-    // Precedence: active visible writer beats account step; stop account step beats review/complete/ready
-    if(hasActive) status='active';
+    // A panel spinner is not the state of an enabled input prompt. Skills can
+    // require another click while the surrounding panel continues to animate.
+    const inputReady=['autofill','autofill_skills','continue','start','create_account_autofill','sign_in']
+      .some(k=>controls[k].enabled);
+    activity.busy_indicator=hasActive;
+    activity.waiting_for_input=inputReady&&!activity.explicit_writer&&
+      (controls.autofill_skills.enabled||!roots.some(r=>/autofilling/i.test(getRenderedText(r))));
+    if(hasActive&&!activity.waiting_for_input) status='active';
     else if(hasLogin || hasAccountControls) status='login_required';
+    else if(controls.autofill_skills.enabled) status='ready';
     else if(hasReview) status='needs_review';
     else if(hasComplete) status='complete';
     else if(hasUnsupported) status='unsupported';
@@ -168,6 +178,6 @@
   }
   return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,inventory,login_kind,
     panel_text:roots.map(getRenderedText).join(' ').replace(/\s+/g,' ').slice(0,2200),
-    review_count:reviewCount,writer_safe:status!=='active'&&status!=='unknown',
+    review_count:reviewCount,writer_safe:status!=='active'&&status!=='unknown',activity,
     source:fixture?'fixture':'observed_dom',field_summary:{visible:fields.length,required:fields.filter(x=>x.required).length,invalid:fields.filter(x=>x.invalid).length}};
 })()

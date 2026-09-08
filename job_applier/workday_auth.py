@@ -35,6 +35,8 @@ async def recover_screen(r,mapping):
     gate=await asyncio.to_thread(r.owned,'browser_observe',target_id=r.target,cdp_url=r.config.get('cdp_url'))
     observed=await r.observe();screen=screen_inventory(observed,r.package)
     if not gate.get('quiescent'):return stopped('writer_activity_unconfirmed_observe_only')
+    if (mapping.get('credentials') or mapping.get('fields') or (mapping.get('action') or {}).get('source')!='simplify') and not gate.get('native_takeover_authorized',True):
+        return stopped('simplify_input_required')
     if mapping.get('screen_key')!=screen['screen_key']:return stopped('new_screen_evidence_requires_mapping')
     key=screen['screen_key'];steps=r.state.setdefault('recovery_steps',{})
     if key in steps:return stopped('screen_action_already_attempted',steps[key])
@@ -155,7 +157,7 @@ async def advance_auth(r,observed):
     if not r.account_lock:return result('workday_account_coordination_unavailable')
     if not r.config.get('credential_profile_path'):return result('configured_credentials_unavailable')
     gate=await asyncio.to_thread(r.owned,'browser_observe',target_id=r.target,cdp_url=r.config.get('cdp_url'))
-    if not gate.get('quiescent'):return result(status='waiting')
+    if not gate.get('native_takeover_authorized',gate.get('quiescent')):return result(status='waiting')
     fresh=await r.observe()
     if not fresh.get('auth') or fresh.get('auth_ui')!=ui:return result(status='waiting')
     observed=fresh

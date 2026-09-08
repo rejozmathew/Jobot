@@ -23,13 +23,15 @@ class SimplifyBoundary:
         if not isinstance(raw,dict) or raw.get('status') not in STATES or not isinstance(raw.get('url'),str):
             raise ValueError('Unrecognized Simplify observation')
         controls={}
-        for kind in ('autofill','continue','start','create_account_autofill','create_account','sign_in','submit'):
+        for kind in ('autofill','autofill_skills','continue','start','create_account_autofill','create_account','sign_in','submit'):
             item=(raw.get('controls') or {}).get(kind) or {}
-            controls[kind]={'ref':item.get('ref') if isinstance(item.get('ref'),str) else None,'enabled':item.get('enabled') is True}
+            controls[kind]={'ref':item.get('ref') if isinstance(item.get('ref'),str) else None,'enabled':item.get('enabled') is True,
+                            'label':item.get('label','')}
         result={key:raw[key] for key in ('url','fingerprint','page_ref','page_signature') if key in raw and isinstance(raw[key],str)}
         result.update(panel=raw.get('panel') is True,status=raw['status'],controls=controls,
             source='fixture' if raw.get('source')=='fixture' else 'observed_dom')
         result['login_kind']=raw.get('login_kind')
+        result['activity']=raw.get('activity') or {}
         if 'review_count' in raw and (raw['review_count'] is None or isinstance(raw['review_count'], int)):
             result['review_count']=raw['review_count']
         if 'field_summary' in raw and isinstance(raw['field_summary'], dict):
@@ -46,6 +48,8 @@ class SimplifyBoundary:
         if status=='active':return {'action':'wait','reason':'autofill_active'}
         if status in ('unsupported','missing','login_required'):return {'action':'fallback','reason':status}
         if status=='unknown':return {'action':'fallback','reason':'controls_unavailable'}
+        if controls.get('autofill_skills',{}).get('enabled'):
+            return {'action':'autofill_skills','reason':'simplify_waiting_for_skills_input'}
         if fast and status in ('complete','needs_review') and controls.get('continue',{}).get('enabled'):
             return {'action':'continue','reason':'prefer_extension_continue'}
         if status=='needs_review':return {'action':'review','reason':'review_residual_fields'}
@@ -69,15 +73,18 @@ class SimplifyBoundary:
 
     def _result(self,observed,changed,writer,reason):
         return {'status':observed.get('status','unknown'),'changed':bool(changed),
-            'writer_state':writer,'reason':reason,'native_takeover_authorized':writer=='idle',
+            'writer_state':writer,'reason':reason,'native_takeover_authorized':writer=='idle' and not (
+                observed.get('activity',{}).get('busy_indicator') and observed.get('activity',{}).get('waiting_for_input')),
             'observation':observed,'execution':getattr(self,'execution','not_executed')}
 
     async def perform(self,operation,*,retry=False,credential_evidence=None):
-        if operation not in ('autofill','continue','start','sign_in'):raise ValueError('Unsupported Simplify operation')
+        if operation not in ('autofill','autofill_skills','continue','start','sign_in'):raise ValueError('Unsupported Simplify operation')
         self.execution='not_executed'
         self.deadline=self.clock()+self.budget
         before=await self.observe();current=before
         page_key=before.get('page_signature') or before['url']
+        if operation=='autofill_skills':
+            page_key=(page_key,operation,before['controls'][operation].get('label'))
         already=page_key in self.attempted
         can_retry=(bool(retry) and self.fast and operation=='autofill' and already
             and before['status'] in ('ready','complete','needs_review')
@@ -96,7 +103,7 @@ class SimplifyBoundary:
                 decision={'action':'sign_in','reason':'observed_employer_sign_in'}
             if before['status']=='unknown':
                 return self._result(before,False,'unknown','quiescence_unverified')
-            if operation in ('autofill','start') and already and not can_retry and before['status'] in ('ready','complete','needs_review'):
+            if operation in ('autofill','autofill_skills','start') and already and not can_retry and before['status'] in ('ready','complete','needs_review'):
                 return self._result(before,False,'idle','already_attempted')
             if not active:
                 control=before['controls'][operation]
@@ -116,14 +123,14 @@ class SimplifyBoundary:
                 self.execution='clicked'
                 if can_retry:
                     self.retries[page_key]=self.retries.get(page_key,0)+1
-                elif operation in ('autofill','start'):
+                elif operation in ('autofill','autofill_skills','start'):
                     self.attempted.add(page_key)
             stable_count=0;saw_active_or_change=False
             while self.clock()<self.deadline:
                 current=await self.observe();changed=self._changed(before,current)
                 if current['status']=='active' or changed:
                     saw_active_or_change=True
-                if operation in ('autofill','sign_in') and current['status'] in ('complete','needs_review'):
+                if operation in ('autofill','autofill_skills','sign_in') and current['status'] in ('complete','needs_review'):
                     if saw_active_or_change or stable_count>=1:
                         return self._result(current,changed,'idle','observed_change' if changed else 'no_observable_progress')
                     stable_count+=1
