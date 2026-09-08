@@ -26,6 +26,18 @@ def job_key(url, namespace=None, requisition_id=None):
     return hashlib.sha256(dumps(data).encode()).hexdigest()
 
 
+def same_job_url(left, right):
+    """Compare URLs without changing persisted identity hashes or opaque queries."""
+    try:
+        a, b = urlsplit(canonical_url(left)), urlsplit(canonical_url(right))
+    except (ValueError, ProtocolError):
+        return False
+    if (a.hostname or '').endswith('.myworkdayjobs.com'):
+        a = a._replace(path=a.path.casefold())
+        b = b._replace(path=b.path.casefold())
+    return a == b
+
+
 RELATED = """WITH RECURSIVE related(id) AS (
     SELECT ? UNION
     SELECT other.job_id FROM related r
@@ -56,12 +68,12 @@ _LOCALE_RE = re.compile(r"^[a-zA-Z]{2}(?:-[a-zA-Z0-9]{2,4})?$")
 def is_workday_application_scope(job_url: str, candidate_url: str) -> bool:
     try:
         raw_cand = str(candidate_url).strip()
-        raw_cand_lower = raw_cand.lower()
-        if any(seq in raw_cand_lower for seq in ('%2f', '%2e', '%5c')):
-            return False
-
         job_p = urlsplit(str(job_url).strip())
         cand_p = urlsplit(raw_cand)
+        # Encoded separators in a path are ambiguous. In a login redirect query
+        # they are normal URL encoding and must be decoded and validated below.
+        if any(seq in cand_p.path.lower() for seq in ('%2f', '%2e', '%5c')):
+            return False
 
         # HTTPS only on exact same host
         if job_p.scheme.lower() != 'https' or cand_p.scheme.lower() != 'https':
@@ -96,10 +108,27 @@ def is_workday_application_scope(job_url: str, candidate_url: str) -> bool:
         if cand_segs and _LOCALE_RE.match(cand_segs[0]):
             cand_segs = cand_segs[1:]
 
+        # Workday redirects stored lowercase links to mixed-case job paths.
+        # Normalize only this comparison, not stored URLs or other ATS paths.
+        workday_host = (job_p.hostname or '').endswith('.myworkdayjobs.com')
+        if workday_host:
+            job_segs = [s.casefold() for s in job_segs]
+            cand_segs = [s.casefold() for s in cand_segs]
+            if len(job_segs)>=3 and cand_segs==[job_segs[0],'login']:
+                if len(cand_query)!=1 or cand_query[0][0].casefold()!='redirect':return False
+                redirect=cand_query[0][1]
+                if not redirect.startswith('/') or redirect.startswith('//') or '\\' in redirect:return False
+                destination=urlsplit(redirect)
+                if destination.query or destination.fragment:return False
+                parts=[s.casefold() for s in destination.path.strip('/').split('/') if s]
+                if parts and _LOCALE_RE.fullmatch(parts[0]):parts=parts[1:]
+                if len(parts)<3 or parts[0]!=job_segs[0] or parts[1] not in ('job','details'):return False
+                return is_workday_application_scope(job_url,urlunsplit((job_p.scheme,job_p.netloc,destination.path,'','')))
+
         # Workday's search detail link omits the location segment that Apply
         # inserts into the canonical job route. Keep the exact career site and
         # full requisition slug (including any suffix), plus the child allowlist.
-        if (job_p.hostname or '').endswith('.myworkdayjobs.com') and (
+        if workday_host and (
             job_segs[1:2] == ['details'] or cand_segs[1:2] == ['details']
         ):
             for segments in (job_segs, cand_segs):
@@ -116,7 +145,8 @@ def is_workday_application_scope(job_url: str, candidate_url: str) -> bool:
         # Check remaining child route
         child_parts = cand_segs[len(job_segs):]
         child_route = "/" + "/".join(child_parts) if child_parts else ""
-        return child_route in _ALLOWED_WORKDAY_CHILD_ROUTES
+        allowed_routes = (route.casefold() for route in _ALLOWED_WORKDAY_CHILD_ROUTES) if workday_host else _ALLOWED_WORKDAY_CHILD_ROUTES
+        return child_route in allowed_routes
     except Exception:
         return False
 
@@ -159,6 +189,6 @@ def is_workday_candidate_home(job_url, candidate_url):
         other=candidate.path.strip('/').split('/')
         if parts and _LOCALE_RE.fullmatch(parts[0]):parts=parts[1:]
         if other and _LOCALE_RE.fullmatch(other[0]):other=other[1:]
-        return bool(parts) and other==[parts[0],'candidateHome']
+        return bool(parts) and [s.casefold() for s in other]==[parts[0].casefold(),'candidatehome']
     except (ValueError,ProtocolError):
         return False

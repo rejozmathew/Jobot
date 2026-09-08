@@ -11,9 +11,11 @@ from .managed_identity import job_key
 
 def valid_namespace(value):
     # Namespace is host plus optional tenant path, not an arbitrary URL or company name.
-    if not isinstance(value,str) or len(value)>255 or not re.fullmatch(r'[a-z0-9.-]+(?:/[A-Za-z0-9._-]+)*',value) or '..' in value:
+    if not isinstance(value,str) or len(value)>255 or not re.fullmatch(r'[A-Za-z0-9.-]+(?:/[A-Za-z0-9._-]+)*',value) or '..' in value:
         raise ProtocolError('invalid_namespace')
-    return value
+    host,sep,path=value.partition('/')
+    host=host.casefold()
+    return host+sep+(path.casefold() if host.endswith('.myworkdayjobs.com') else path)
 
 
 def stamp(value):
@@ -27,21 +29,24 @@ def stamp(value):
 class AccountServices:
     @staticmethod
     def _namespace(db,value):
-        valid_namespace(value);seen=set()
+        value=valid_namespace(value);seen=set()
         while True:
             if value in seen or len(seen)>20:raise ProtocolError('namespace_alias_cycle')
-            seen.add(value);row=db.execute('SELECT canonical FROM account_namespace_aliases WHERE alias=?',(value,)).fetchone()
+            seen.add(value)
+            rows=[r for r in db.execute('SELECT alias,canonical FROM account_namespace_aliases') if valid_namespace(r['alias'])==value]
+            if len({valid_namespace(r['canonical']) for r in rows})>1:raise ProtocolError('namespace_alias_conflict')
+            row=rows[0] if rows else None
             if not row:return value
-            value=row[0]
+            value=valid_namespace(row['canonical'])
 
     def namespace_alias(self,*,alias,canonical,verification_evidence):
-        valid_namespace(alias);valid_namespace(canonical)
+        alias=valid_namespace(alias);canonical=valid_namespace(canonical)
         if not isinstance(verification_evidence,str) or not verification_evidence.strip():raise ProtocolError('namespace_verification_required')
         with self.tx() as db:
             if self._namespace(db,canonical)==alias:raise ProtocolError('namespace_alias_cycle')
-            old=db.execute('SELECT * FROM account_namespace_aliases WHERE alias=?',(alias,)).fetchone()
+            old=next((r for r in db.execute('SELECT * FROM account_namespace_aliases') if valid_namespace(r['alias'])==alias),None)
             if old:
-                if old['canonical']!=canonical:raise ProtocolError('namespace_alias_conflict')
+                if valid_namespace(old['canonical'])!=canonical:raise ProtocolError('namespace_alias_conflict')
                 return dict(old)
             db.execute('INSERT INTO account_namespace_aliases VALUES (?,?,?,?)',(alias,canonical,safe_text(verification_evidence),self.now()))
             return dict(db.execute('SELECT * FROM account_namespace_aliases WHERE alias=?',(alias,)).fetchone())
@@ -100,7 +105,7 @@ class AccountServices:
             account_id=old['id']
         else:
             # Never silently attach an unclassified legacy account to a new identity.
-            legacy=db.execute('SELECT 1 FROM company_portal_accounts WHERE portal_key=? AND email=?',(namespace,candidate['email'])).fetchone()
+            legacy=db.execute('SELECT 1 FROM company_portal_accounts WHERE portal_key=? COLLATE NOCASE AND email=? COLLATE NOCASE',(namespace,candidate['email'])).fetchone()
             if legacy:raise ProtocolError('legacy_account_reconciliation_required')
             cursor=db.execute('INSERT INTO company_portal_accounts(company_key,company_name,platform,portal_key,email,status,notes,created_at,updated_at,identity_id,namespace,credential_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (namespace,namespace,'unknown',namespace,candidate['email'],state,evidence,self.now(),self.now(),identity_id,namespace,credential_ref))
@@ -161,9 +166,12 @@ class AccountServices:
             candidate=self._get(db,'candidates',request['identity_id'])
             matches=set()
             for message in messages:
-                if any(message.get(k)!=expected for k,expected in {
-                    'recipient':candidate['email'],'sender':request['expected_sender'],
-                    'namespace':request['namespace'],'purpose':request['purpose']}.items()):continue
+                if any(str(message.get(k,'')).casefold()!=expected.casefold() for k,expected in {
+                    'recipient':candidate['email'],'sender':request['expected_sender']}.items()):continue
+                try:
+                    if self._namespace(db,message.get('namespace'))!=self._namespace(db,request['namespace']):continue
+                except ProtocolError:continue
+                if message.get('purpose')!=request['purpose']:continue
                 try:received=stamp(message.get('received_at'))
                 except ProtocolError:continue
                 if stamp(request['requested_at'])<=received<=stamp(request['expires_at']) and message.get('id'):

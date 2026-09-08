@@ -5,7 +5,7 @@ import re
 from urllib.parse import urlsplit,urlunsplit
 from .managed_shared import ProtocolError,uid
 from .managed_redaction import safe_text
-from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope,is_workday_candidate_home
+from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope,is_workday_candidate_home,is_workday_application_scope,same_job_url
 
 
 class RuntimeServices:
@@ -74,10 +74,12 @@ class RuntimeServices:
             # same-origin /apply child preserves the posting identity implicitly.
             apply_child=(bool(expected.path) and parsed.scheme==expected.scheme and parsed.netloc==expected.netloc
                 and parsed.path==expected.path+'/apply' and parsed.query==expected.query)
+            if (expected.hostname or '').endswith('.myworkdayjobs.com'):
+                apply_child=is_workday_application_scope(job['url'],canonical) and parsed.query==expected.query
             if not verified and not apply_child:raise ProtocolError('target_job_mismatch')
             old=db.execute('SELECT * FROM owned_targets WHERE profile=? AND target_id=? AND state!=?',(a['browser_profile'],target_id,'closed')).fetchone()
             if old:
-                if old['attempt_id']!=attempt_id or old['identity_key']!=identity:raise ProtocolError('target_owned_elsewhere')
+                if old['attempt_id']!=attempt_id or (old['identity_key']!=identity and not same_job_url(old['url'],canonical)):raise ProtocolError('target_owned_elsewhere')
                 return dict(old)
             prior=db.execute('SELECT * FROM owned_targets WHERE attempt_id=? AND target_id=?',(attempt_id,target_id)).fetchone()
             if prior:raise ProtocolError('closed_target_cannot_rebind')
@@ -128,7 +130,7 @@ class RuntimeServices:
             if target is None:raise ProtocolError('target_not_owned')
             if expected_url is not None:
                 expected_canonical=canonical_url(expected_url)
-                if expected_canonical!=canonical_url(target['url']) and expected_canonical!=canonical_url(job['url']):
+                if not same_job_url(expected_canonical,target['url']) and not same_job_url(expected_canonical,job['url']):
                     raise ProtocolError('target_job_mismatch')
         settings=json.loads(a['settings_json'])
         def verify_url(url):

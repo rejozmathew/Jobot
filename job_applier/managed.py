@@ -35,7 +35,7 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-from .managed_identity import canonical_url, job_key, RELATED
+from .managed_identity import canonical_url, job_key, RELATED, same_job_url
 
 
 class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices):
@@ -116,6 +116,9 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         now=self.now()
         with self.tx() as db:
             row=db.execute('SELECT j.* FROM jobs j JOIN job_identity_keys k ON k.job_id=j.id WHERE k.identity_key IN (?,?) ORDER BY (j.url=?) DESC,j.created_at,j.id LIMIT 1',(key,url_key,canonical)).fetchone()
+            # Preserve old identity hashes; add this spelling as another alias.
+            if not row and (urlsplit(canonical).hostname or '').endswith('.myworkdayjobs.com'):
+                row=next((r for r in db.execute('SELECT * FROM jobs ORDER BY created_at,id') if same_job_url(r['url'],canonical)),None)
             if not row:
                 job_id=uid()
                 seq=db.execute('SELECT COALESCE(MAX(seq_id),0)+1 FROM jobs').fetchone()[0]
@@ -123,7 +126,12 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             else:
                 job_id=row['id']
                 if namespace and requisition_id:
-                    if row['namespace'] and (row['namespace']!=namespace or str(row['requisition_id'])!=str(requisition_id)):raise ProtocolError('identity_conflict')
+                    old_identity=(row['namespace'],str(row['requisition_id']))
+                    new_identity=(namespace,str(requisition_id))
+                    if (urlsplit(canonical).hostname or '').endswith('.myworkdayjobs.com'):
+                        old_identity=tuple(str(v).casefold() for v in old_identity)
+                        new_identity=tuple(str(v).casefold() for v in new_identity)
+                    if row['namespace'] and old_identity!=new_identity:raise ProtocolError('identity_conflict')
                     db.execute('UPDATE jobs SET namespace=?,requisition_id=? WHERE id=?',(namespace,str(requisition_id),job_id))
             for alias_key in {key,url_key}:
                 db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(alias_key,job_id,safe_text(identity_evidence or 'normalized_url')))
@@ -144,7 +152,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         encoded=dumps(profile)
         with self.tx() as db:
             previous=db.execute('SELECT * FROM candidates WHERE id=?',(identity_id,)).fetchone()
-            if previous and (previous['email']!=email or previous['person_key']!=person_key):
+            if previous and (previous['email'].casefold()!=email.casefold() or previous['person_key']!=person_key):
                 raise ProtocolError('identity_immutable')
             db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,profile_json=excluded.profile_json,profile_hash=excluded.profile_hash', (identity_id,person_key,email,state,encoded,hashlib.sha256(encoded.encode()).hexdigest()))
             return dict(self._get(db,'candidates',identity_id))
@@ -173,14 +181,14 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             if target_id:
                 prev = db.execute('SELECT * FROM candidates WHERE id=?', (target_id,)).fetchone()
                 if prev:
-                    if prev['email'] != email:
-                        match = db.execute('SELECT * FROM candidates WHERE email=?', (email,)).fetchone()
-                        target_id = match['id'] if match else f"cand-{hashlib.sha256(email.encode()).hexdigest()[:12]}"
+                    if prev['email'].casefold() != email.casefold():
+                        match = db.execute('SELECT * FROM candidates WHERE email=? COLLATE NOCASE', (email,)).fetchone()
+                        target_id = match['id'] if match else f"cand-{hashlib.sha256(email.casefold().encode()).hexdigest()[:12]}"
                     elif not person_key:
                         pk = prev['person_key']
             else:
-                match = db.execute('SELECT * FROM candidates WHERE email=?', (email,)).fetchone()
-                target_id = match['id'] if match else f"cand-{hashlib.sha256(email.encode()).hexdigest()[:12]}"
+                match = db.execute('SELECT * FROM candidates WHERE email=? COLLATE NOCASE', (email,)).fetchone()
+                target_id = match['id'] if match else f"cand-{hashlib.sha256(email.casefold().encode()).hexdigest()[:12]}"
                 if match and not person_key:
                     pk = match['person_key']
         cand = self.identity(identity_id=target_id, person_key=pk, email=email, profile=sanitized)

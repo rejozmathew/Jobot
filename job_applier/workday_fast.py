@@ -51,6 +51,45 @@ WORKDAY_OBSERVE=(HELPERS/'workday_observe.js').read_text(encoding='utf-8')
 WORKDAY_CLICK=(HELPERS/'workday_click.js').read_text(encoding='utf-8')
 
 
+async def observe_page(page,package):
+    """One native/extension inventory shared by snapshot and runner recovery."""
+    url=await page.evaluate('location.href')
+    if not (is_same_application_scope(package['job']['url'],url) or is_workday_candidate_home(package['job']['url'],url)):
+        raise ValueError('target_scope_changed')
+    profile=package['attempt'].get('profile_json') or {}
+    if isinstance(profile,str):profile=json.loads(profile)
+    asset=next((a for a in package.get('documents',{}).get('assets',[]) if a.get('kind')=='resume'),None)
+    name=unquote(urlsplit(asset['storage_ref']).path).replace('\\','/').rsplit('/',1)[-1] if asset else ''
+    shared=await page.evaluate(OBSERVE)
+    wd=await page.evaluate_function(WORKDAY_OBSERVE,{
+        'requisition':package['job'].get('requisition_id') or package['job']['url'].rstrip('/').rsplit('_',1)[-1],
+        'resume_name':name,'expected_email':profile.get('identity',{}).get('email'),
+        'page_signature':shared.get('page_signature')})
+    return dict(shared,**wd,simplify_inventory=shared.get('inventory',[]),
+                confirmation_surface=is_workday_candidate_home(package['job']['url'],url))
+
+
+def screen_inventory(observed,package):
+    import hashlib
+    # Values, spinners and ordinary rerenders are not new decisions. New questions,
+    # native validation and auth transitions are useful evidence for another one.
+    evidence=[observed.get('page_signature'),observed.get('step'),observed.get('auth_ui'),
+              observed.get('blocking_errors'),[(c.get('label'),c.get('name')) for c in observed.get('inventory',[]) if c.get('required')],
+              sorted({c.get('text') or c.get('label') or '' for c in observed.get('inventory',[]) if c.get('tag') in ('BUTTON','A') or c.get('role')=='button'})]
+    key=hashlib.sha256(json.dumps(evidence,sort_keys=True).encode()).hexdigest()
+    account=package.get('account') or {}
+    settings=package['attempt'].get('settings_json') or {}
+    if isinstance(settings,str):settings=json.loads(settings)
+    return {'screen_key':key,'page_signature':observed.get('page_signature'),'url':observed.get('url'),
+        'step':observed.get('step'),'auth':observed.get('auth'),'auth_ui':observed.get('auth_ui'),
+        'native':observed.get('inventory',[]),'errors':observed.get('blocking_errors',[]),
+        'simplify':{'enabled':settings.get('autofill','simplify')=='simplify','status':observed.get('status'),'panel':observed.get('panel'),
+                    'login_kind':observed.get('login_kind'),'controls':observed.get('simplify_inventory',[]),
+                    'text':observed.get('panel_text',''),'credential_use':'unverified'},
+        'account':{k:account.get(k) for k in ('action','namespace','credential_ref')},
+        'instruction':'Map this logical screen once. Call fast_forward with recovery:{screen_key, credentials:{email_ref,password_ref,confirmation_ref?}, fields:[{ref,value}], action:{source:native|simplify,ref}, account_mode:sign_in|create_account if submitting auth}. Omit unused fields. All refs come from this inventory. A Simplify employer sign-in also needs credential_evidence establishing retained credential use. Never send secrets or use recovery for final Submit.'}
+
+
 class FastRunner:
     """One bounded supervised loop over a fenced managed attempt, any harness.
 
@@ -88,16 +127,10 @@ class FastRunner:
                    observed_at=datetime.now(timezone.utc).isoformat(),payload=payload)
 
     async def observe(self):
-        url=await self.page.evaluate('location.href')
-        if not (is_same_application_scope(self.package['job']['url'],url) or is_workday_candidate_home(self.package['job']['url'],url)):
-            raise ValueError('target_scope_changed')
-        shared=await self.page.evaluate(OBSERVE)
-        args={'requisition':self.package['job'].get('requisition_id') or self.package['job']['url'].rstrip('/').rsplit('_',1)[-1],
-              'resume_name':self.resume_name,'expected_email':self.email}
-        wd=await self.page.evaluate_function(WORKDAY_OBSERVE,args)
-        return dict(shared,**wd,confirmation_surface=is_workday_candidate_home(self.package['job']['url'],url))
+        return await observe_page(self.page,self.package)
 
     async def click(self,action,observed):
+        self.last_click_execution='not_executed'
         operation='autofill' if action=='retry' else action
         native=operation.startswith('native_') or (operation=='submit' and not observed.get('controls',{}).get('submit',{}).get('enabled'))
         operation=operation.removeprefix('native_')
@@ -105,7 +138,8 @@ class FastRunner:
         if not control.get('enabled') or not control.get('ref'):return False
         args={'ref':control['ref'],'step':observed['step']} if native else {
             'ref':control['ref'],'url':observed['url'],'page_ref':observed.get('page_ref'),'operation':operation}
-        result=await self.page.evaluate_function(WORKDAY_CLICK if native else CLICK,args)
+        result=await self.page.click_observed(WORKDAY_CLICK,args) if native else await self.page.evaluate_function(CLICK,args)
+        self.last_click_execution=result.get('execution','possibly_executed') if isinstance(result,dict) else 'possibly_executed'
         return isinstance(result,dict) and (result.get('clicked') is True if native else result.get('status')=='clicked')
 
     def report(self,status,observed=None,reason=None):
@@ -116,16 +150,25 @@ class FastRunner:
                 'blocking_errors':observed.get('blocking_errors',[]),
                 'auth_refs':observed.get('auth_refs',{}) if status=='authentication_required' else {},
                 'metrics':self.state.get('metrics',{}),'target_id':self.target,
+                'page_decisions':self.state.get('page_decisions',0),
+                **({'screen':screen_inventory(observed,self.package)} if observed and status in ('authentication_required','blocked','inspection_required') else {}),
                 'attempt_id':self.owner['attempt_id']}
 
-    async def run(self,*,seconds=60):
+    async def run(self,*,seconds=60,recovery=None):
         if type(seconds) not in (int,float) or not 0<seconds<=120:raise ValueError('bounded_seconds_required')
         start=self.clock(); deadline=start+seconds
         metrics=self.state.setdefault('metrics',{'polls':0,'clicks':0,'wait_seconds':0,'elapsed_seconds':0})
         try:
+            if recovery is not None:
+                from .workday_auth import recover_screen
+                recovered=await recover_screen(self,recovery)
+                if recovered['status']!='progress':
+                    report=self.report('inspection_required',await self.observe(),recovered.get('reason'))
+                    report['recovery_result']=recovered;return report
             while self.clock()<deadline:
                 pulse=self.owned('heartbeat')
                 observed=await self.observe(); metrics['polls']+=1
+                if self.settings.get('autofill','simplify')!='simplify':observed['controls']={}
                 if pulse.get('control')!='running':
                     gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
                     if gate.get('quiescent') and pulse.get('control') in ('stop_requested','pause_requested'):
@@ -174,6 +217,11 @@ class FastRunner:
                         page_state['failure_fingerprint']=observed.get('fingerprint')
                     self.pending=None
                 action=choose(observed,dict(page_state,submit_intent=self.state['submit_intent']))
+                if observed.get('status')=='unknown' and not observed.get('auth'):
+                    gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
+                    if gate.get('quiescent'):
+                        return self.report('inspection_required',observed,'settled_screen_unrecognized')
+                    return self.report('inspection_required',observed,'writer_activity_unconfirmed_observe_only')
                 activity_key=[step,action]
                 if self.state.get('reported_activity')!=activity_key:
                     labels={'wait':'Waiting for Simplify to settle','confirm_only':'Checking employer submission confirmation',
@@ -243,7 +291,7 @@ def advance(config,client,ownership,params):
     import os
     from .application_runtime import history_matches
     from .cdp_client import CDPBrowser
-    if set(params)-{'target_id','seconds'} or not isinstance(params.get('target_id'),str) or not params['target_id']:
+    if set(params)-{'target_id','seconds','recovery'} or not isinstance(params.get('target_id'),str) or not params['target_id']:
         raise ValueError('invalid_fast_parameters')
     seconds=params.get('seconds',60)
     if type(seconds) not in (int,float) or not 0<seconds<=120:raise ValueError('bounded_seconds_required')
@@ -285,7 +333,7 @@ def advance(config,client,ownership,params):
                 authority=getattr(service,'session_authority',None)
                 account_lock=(lambda **kw:service.coordinate_account(authority[0],**kw)) if authority else None
                 runner=FastRunner(await browser.get_current_page(),client.call,package,ownership,config,params['target_id'],state=state,persist=persist,account_lock=account_lock)
-                return await runner.run(seconds=seconds)
+                return await runner.run(seconds=seconds,recovery=params.get('recovery'))
             finally:await browser.close()
         return asyncio.run(execute())
     finally:lock.release()

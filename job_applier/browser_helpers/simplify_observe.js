@@ -8,17 +8,21 @@
   let scope=window.__jobbotSimplifyScope;
   if(!scope || scope.url!==location.href) scope=window.__jobbotSimplifyScope={url:location.href,id:crypto.randomUUID(),controls:new Map()};
   scope.controls=new Map();
+  scope.referenceKeys=scope.referenceKeys||new Map();
+  const reference=key=>{if(!scope.referenceKeys.has(key))scope.referenceKeys.set(key,crypto.randomUUID());return scope.referenceKeys.get(key);};
   scope.fieldValues=scope.fieldValues||new Map();
   scope.valueEpoch=scope.valueEpoch||0;
   const CONTROL_KINDS=['autofill','continue','start','create_account_autofill','create_account','sign_in','submit'];
   const candidates={};
   const controls={};
+  const inventory=[];
+  const ambiguousOther=new Set();
   for(const k of CONTROL_KINDS){candidates[k]=[];controls[k]={ref:null,enabled:false};}
   for(const root of roots) {
     const btns = (typeof root.querySelectorAll === 'function') ? root.querySelectorAll('button,[role="button"]') : [];
     for(const button of btns) {
       if(!visible(button))continue;
-      const label=(button.innerText || button.textContent || button.getAttribute('aria-label') || '').trim().toLowerCase();
+      const label=(button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').trim().toLowerCase();
       let kind=null;
       if(/^autofill this page$/.test(label)) kind='autofill';
       else if(/^continue application$/.test(label)) kind='continue';
@@ -27,26 +31,34 @@
       else if(/^create account$/.test(label)) kind='create_account';
       else if(/^sign in( (&|and) autofill)?$/.test(label)) kind='sign_in';
       else if(/^submit application$/.test(label)) kind='submit';
-      if(!kind)continue;
       const enabled=!button.disabled && button.getAttribute('aria-disabled')!=='true';
-      candidates[kind].push({button,enabled,root});
+      if(!kind){
+        const ref=reference('other:'+label);
+        if(ambiguousOther.has(ref))continue;
+        if(scope.controls.has(ref)){scope.controls.delete(ref);ambiguousOther.add(ref);inventory.filter(c=>c.ref===ref).forEach(c=>c.enabled=false);continue;}
+        scope.controls.set(ref,{element:button,kind:'other',root});
+        inventory.push({ref,label,operation:'other',enabled});continue;
+      }
+      candidates[kind].push({button,enabled,root,label});
     }
   }
   for(const kind of CONTROL_KINDS) {
     const actionable = candidates[kind].filter(c=>c.enabled);
     if(actionable.length === 1) {
       const chosen = actionable[0];
-      const ref = crypto.randomUUID();
+      const ref = reference(kind+':'+chosen.label);
       scope.controls.set(ref, {element:chosen.button, kind, root:chosen.root});
       controls[kind] = {ref, enabled:true};
+      inventory.push({ref,label:chosen.label,operation:kind,enabled:true});
     } else if(actionable.length > 1) {
       // Ambiguous multiple actionable controls: fail-closed, do not guess
       controls[kind] = {ref:null, enabled:false};
     } else if(candidates[kind].length === 1) {
       const chosen = candidates[kind][0];
-      const ref = crypto.randomUUID();
+      const ref = reference(kind+':'+chosen.label);
       scope.controls.set(ref, {element:chosen.button, kind, root:chosen.root});
       controls[kind] = {ref, enabled:false};
+      inventory.push({ref,label:chosen.label,operation:kind,enabled:false});
     } else {
       controls[kind] = {ref:null, enabled:false};
     }
@@ -110,6 +122,7 @@
     return (root.innerText !== undefined ? root.innerText : root.textContent) || '';
   };
   let status='missing';
+  let login_kind=null;
   let reviewCount=null;
   if(roots.length > 0) {
     let hasActive=false, hasReview=false, hasComplete=false, hasLogin=false, hasUnsupported=false;
@@ -141,6 +154,7 @@
       controls.create_account_autofill.enabled || controls.create_account.enabled || controls.sign_in.enabled ||
       candidates.create_account_autofill.length > 0 || candidates.create_account.length > 0 || candidates.sign_in.length > 0
     );
+    login_kind=hasLogin?'simplify':inventory.some(c=>/^(?:sign in|create account) (&|and) autofill$/.test(c.label))?'employer':hasAccountControls?'unknown':null;
     // Precedence: active visible writer beats account step; stop account step beats review/complete/ready
     if(hasActive) status='active';
     else if(hasLogin || hasAccountControls) status='login_required';
@@ -152,7 +166,8 @@
     else status='unknown';
     if(declared && ['ready','active','complete','needs_review','unsupported','login_required'].includes(declared)) status=declared;
   }
-  return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,
+  return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,inventory,login_kind,
+    panel_text:roots.map(getRenderedText).join(' ').replace(/\s+/g,' ').slice(0,2200),
     review_count:reviewCount,writer_safe:status!=='active'&&status!=='unknown',
     source:fixture?'fixture':'observed_dom',field_summary:{visible:fields.length,required:fields.filter(x=>x.required).length,invalid:fields.filter(x=>x.invalid).length}};
 })()

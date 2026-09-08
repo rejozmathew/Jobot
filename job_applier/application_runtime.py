@@ -240,11 +240,10 @@ def browser_action(config,client,ownership,package,target_id,params):
                 return {'image_path':str(path),'mime_type':'image/png','url':url,'target_id':target_id,
                     'instruction':'Inspect this owned-page image with the current harness image/vision capability; snapshot supplies observed selectors.'}
             if method=='snapshot':
-                return await page.evaluate("""(()=>({url:location.href,title:document.title,text:document.body.innerText.slice(0,16000),
-                    controls:Array.from(document.querySelectorAll('input,select,textarea,button,a,[role=button]')).filter(e=>e.getClientRects().length).map(e=>({
-                    tag:e.tagName,type:e.type,id:e.id,name:e.name,role:e.getAttribute('role'),text:(e.innerText||'').slice(0,150),
-                    label:e.getAttribute('aria-label')||Array.from(e.labels||[]).map(l=>l.innerText).join(' '),disabled:!!e.disabled,
-                    required:!!e.required,automation_id:e.getAttribute('data-automation-id')}))}))()""")
+                from .workday_fast import observe_page,screen_inventory
+                inventory=screen_inventory(await observe_page(page,package),package)
+                inventory['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
+                return inventory
             if method=='evaluate':
                 return await page.evaluate_function(params['script'],params['argument']) if 'argument' in params else await page.evaluate(params['script'])
             if method=='navigate':
@@ -254,11 +253,25 @@ def browser_action(config,client,ownership,package,target_id,params):
             if method=='simplify':
                 from .simplify_boundary import SimplifyBoundary
                 client.call('writer_state',**ownership,state='active')
-                result=await SimplifyBoundary(page,budget_seconds=45).perform(params.get('action','autofill'))
+                result=await SimplifyBoundary(page,budget_seconds=45).perform(params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
                 client.call('writer_state',**ownership,state='idle' if result.get('native_takeover_authorized') else 'unknown')
                 return result
+            if method=='click' and params.get('ref'):
+                from .workday_fast import observe_page,WORKDAY_CLICK
+                from .simplify_boundary import CLICK
+                observed=await observe_page(page,package)
+                if params.get('page_signature')!=observed.get('page_signature'):return {'execution':'not_executed','reason':'stale_screen'}
+                if params.get('source')=='simplify':
+                    control=next((c for c in observed.get('simplify_inventory',[]) if c['ref']==params['ref']),None)
+                    if not control:return {'execution':'not_executed','reason':'stale_control'}
+                    if control['operation']=='sign_in':return {'execution':'not_executed','reason':'use_scoped_simplify_sign_in_with_credential_evidence'}
+                    return await page.evaluate_function(CLICK,{'ref':control['ref'],'operation':control['operation'],'url':observed['url'],'page_ref':observed.get('page_ref')})
+                return await page.click_observed(WORKDAY_CLICK,{'ref':params['ref'],'step':observed['step'],'page_signature':observed['page_signature']})
             selector=params['selector']
             if not isinstance(selector,str) or not selector:raise ProtocolError('observed_selector_required')
+            if method=='click':
+                from .workday_fast import WORKDAY_CLICK
+                return await page.click_observed(WORKDAY_CLICK,{'selector':selector,'expected_url':url})
             if method=='upload':
                 from .managed_documents import local_asset_path
                 asset=next((a for a in package['documents']['assets'] if a['id']==params['asset_id']),None)
@@ -272,7 +285,6 @@ def browser_action(config,client,ownership,package,target_id,params):
             return await page.evaluate_function("""p=>{const es=document.querySelectorAll(p.selector);
                 if(es.length!==1)throw Error('ambiguous_or_stale_control');const e=es[0];
                 if(!e.getClientRects().length||e.disabled)throw Error('control_unavailable');
-                if(p.method==='click'){e.click();return {clicked:true};}
                 if(e.type==='password')throw Error('use_private_credentials_helper');
                 e.focus();const proto=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
                 Object.getOwnPropertyDescriptor(proto,'value').set.call(e,p.value);
@@ -280,7 +292,9 @@ def browser_action(config,client,ownership,package,target_id,params):
                 return {committed:e.value===p.value};} """,{'selector':selector,'method':method,'value':params.get('value')})
         finally:await browser.close()
     try:
-        result=asyncio.run(execute());succeeded=True;return result
+        result=asyncio.run(execute())
+        succeeded=bool(result.get('clicked') or result.get('execution')=='clicked') if method=='click' else True
+        return result
     finally:
         client.call('action_end',**ownership,action_id=aid,status='success' if succeeded else 'failed',duration_seconds=time.monotonic()-started)
 
@@ -305,7 +319,7 @@ def readonly(path):
 def history_key(url):
     canonical=canonical_url(url); p=urlsplit(canonical)
     if (p.hostname or '').endswith('.myworkdayjobs.com'):
-        parts=p.path.strip('/').split('/')
+        parts=p.path.casefold().strip('/').split('/')
         if parts and re.fullmatch(r'[a-z]{2}(?:-[A-Za-z0-9]{2,4})?',parts[0]):parts=parts[1:]
         if 'job' in parts:
             i=parts.index('job')

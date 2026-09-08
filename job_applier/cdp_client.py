@@ -286,6 +286,24 @@ class CDPPage:
         await self._session.call("Page.navigate", {"url": url}, timeout=timeout)
         self.url = url
 
+    async def click_observed(self, validator: str, args: dict) -> dict:
+        """Activate a validated owned-page control through browser input events."""
+        prepared = dict(args, prepare_pointer=True)
+        point = await self.evaluate_function(validator, prepared)
+        if not isinstance(point, dict) or not point.get('pointer_ready'):
+            return dict(point or {}, clicked=False, execution='not_executed')
+        await self._session.call('Input.dispatchMouseEvent', dict(type='mouseMoved', x=point['x'], y=point['y']))
+        fresh = await self.evaluate_function(validator, prepared)
+        if not isinstance(fresh, dict) or not fresh.get('pointer_ready') or any(fresh[k]!=point[k] for k in ('x','y')):
+            return {'clicked':False,'execution':'not_executed','reason':'control_changed_before_press'}
+        params = dict(x=point['x'], y=point['y'], button='left', clickCount=1)
+        try:
+            await self._session.call('Input.dispatchMouseEvent', dict(params, type='mousePressed', buttons=1))
+            await self._session.call('Input.dispatchMouseEvent', dict(params, type='mouseReleased', buttons=0))
+        except Exception:
+            return {'clicked':False,'execution':'possibly_executed','reason':'pointer_dispatch_unconfirmed'}
+        return {'clicked':True,'execution':'clicked','activation':'browser_pointer','outcome_verified':False}
+
     async def query_selector_all(self, selector: str) -> list[CDPElement]:
         res = await self._session.call("Runtime.evaluate", {
             "expression": f"document.querySelectorAll({json.dumps(selector)}).length",

@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Run repository-managed job applications with tracking.
-version: 0.4.2
+version: 0.4.3
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]

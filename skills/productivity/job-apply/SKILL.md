@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.4.2
+version: 0.4.3
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -87,6 +87,10 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    `request_id` and non-secret `evidence`. Use `account_lock` with `release:true`
    after a completed/rejected authentication step. Never repeatedly create an
    account whose outcome is unknown. Different employers have independent locks.
+   For Workday recognition misses, prefer the combined `screen` inventory and
+   one `fast_forward` call with a `recovery` mapping, as described in the Workday
+   skill. It fills the selected private controls, acts and observes in one owned
+   connection; do not rerun the failed matcher or take a model turn per field.
 3. Let official Simplify do bulk filling. Observe until it settles; never compete
    with active/unknown writers. On Workday read
    [workday-simplify](../workday-simplify/SKILL.md) and use `fast_forward`.
@@ -104,6 +108,13 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    capability; in ordinary Hermes, use `vision_analyze(image_url=<image_path>,
    question=<specific question>)`. It uses the existing configured capability,
    not a new worker. Pair the image with `snapshot` for fresh control selectors.
+   `snapshot` now combines native and official Simplify controls, their observed
+   refs, account strategy and current activity/errors. For an observed button,
+   `browser click` also accepts `source`, `ref`, and `page_signature` from that
+   inventory. No custom DOM-discovery code is needed. Simplify employer sign-in
+   uses `browser simplify` with `action:sign_in` and non-secret
+   `credential_evidence` establishing retained credential use. An enabled button
+   alone is not that evidence, and Simplify's own login is a separate operation.
 6. Verify the approved resume attachment using actual employer controls. Retain
    a correct verified attachment; do not reupload it unnecessarily. If needed,
    `browser upload` hash-checks only the selected asset and records the attempt.

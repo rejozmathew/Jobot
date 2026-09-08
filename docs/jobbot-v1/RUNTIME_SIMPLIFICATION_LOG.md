@@ -1,5 +1,103 @@
 # Runtime simplification implementation log
 
+## Credit Acceptance login redirect and native activation — 2026-09-08
+
+Attempt 23 reached Create Account after loading the casing fix. Its structured
+`workday_auth.auth_submit` action at 20:57:29 UTC was logged as successful, but
+the implementation only invoked JavaScript `element.click()`. That proves an
+invocation, not an employer-accepted account action. The user reported that a
+manual click worked. The owned target subsequently reached the career site's
+`/login?redirect=<encoded exact R13799 application route>`, which the validator
+rejected because it banned encoded separators across the entire URL and did not
+recognize the login wrapper. This is distinct from the earlier casing defect.
+
+The existing scope validator now checks the login site's identity and the decoded
+same-job return path. Missing/duplicate redirects, nested redirects, other jobs
+and external destinations remain rejected. Native mapped and selector-based
+activation now share CDP pointer input after fresh visibility/coverage checks;
+partial dispatch stays uncertain. Local click action status no longer treats a
+returned not-executed result as success. Skills distinguish dispatched input from
+employer acceptance and describe the email option before native account forms.
+
+The focused redirect check passed. One isolated local Chromium check demonstrated
+that JavaScript click did not trigger a trusted-event-only button, native runner
+pointer input did, and an overlay prevented dispatch (1.02s final check). This
+does not establish why Credit Acceptance ignored its earlier click or prove live
+account acceptance. Initial test setup hit sandbox GPU failure and an insecure
+blank-page fixture; the final fixture used isolated localhost. No employer form,
+account, production record, or running browser was changed during engineering.
+The existing resident host must restart to load these source changes.
+
+## Credit Acceptance casing repair — 2026-09-08
+
+The owned R13799 target remained on the already-supported
+`/apply/applyManually` route. The stored lowercase job path versus Workday's
+mixed-case redirect caused `target_job_mismatch`; this was not an unknown SSO
+route. Workday scope comparison now ignores path case. The follow-up covers
+candidate-home recognition, history matching, target binding/expected URL checks,
+confirmation comparison, existing-job reuse at intake, account namespaces, and
+candidate/mail/private-fill email comparisons. Existing identity hashes, secrets,
+opaque query values and other ATS path semantics are preserved. Native and
+Simplify action-label matching was already case-insensitive. Three directly
+relevant synthetic checks passed; no broad suite or live application was run.
+
+Session 22 reused host PID 97880, started at 20:28:53 UTC before the repair,
+despite creating a fresh browser target. Current source accepts that exact target
+URL. The resident host needs to exit and restart to load the changes; restarting
+only the application session can reuse it. No active browser was stopped during
+this investigation, and no live sign-in/submission is claimed.
+
+## Focused execution follow-up — 2026-09-08
+
+The user supplied a focused execution brief and explicitly replaced broad test
+gates with quick syntax/import and directly relevant checks. Work resumed from
+clean HEAD `497689c884212780ffc3b340909d7e91538f32fd`; the prior review checkpoint
+below remains historical. No broad suite, test delegation, second workspace or
+new framework is part of this repair. No automatic push/merge is planned.
+
+The connected change extends the existing observer/snapshot, private filler,
+Workday runner and Simplify boundary. A combined screen inventory includes native
+and official extension controls and account/activity context. A single mapped
+recovery call can privately fill credentials, apply required native answers,
+verify, act and return to the runner. It does not rerun the matcher that missed
+the field. Unique semantic refs survive routine rerenders. Native authentication
+confirmation updates the existing account state; possibly-executed actions remain
+distinct from not-executed outcomes. Simplify sign-in is callable with separate
+retained-credential-use evidence and an employer/extension login distinction.
+The known labelled-text email variant is recognized. Settled unknown screens
+return context promptly instead of consuming a full helper window.
+
+Quick compile/import and JS syntax checks passed. The directly relevant mapping
+and credential checks passed (18 checks, 1.86s); the first invocation encountered
+only a sandbox temp-directory access error, then the same checks used an isolated
+ignored temp path. Coverage includes the demonstrated labelled-text email,
+mapped input/button use across a rerender, private credential output, the Simplify
+sign-in capability/evidence boundary and account state after mapped recovery.
+This is not live proof. Shared edits will be frozen for an ordinary Hermes retry
+using the configured application model, the existing Wiley account uncertainty,
+approved assets and the same managed DB. The first milestone is real authenticated
+form access and official Simplify filling; completion still requires submission.
+
+First focused live run: ordinary Hermes `20260908_145203_d29018`, attempt 15,
+session `db66b298-15f0-46e3-bbd3-4f8e79b59ae4`, took 314.72s for the full
+invocation. It inspected the official Simplify settings and reported ordinary
+autofill enabled, continuous multipage autofill disabled by default. Wiley's
+Start Your Application chooser opened. No authentication or autofill occurred.
+A mapped native action incorrectly marked the writer active as though it had
+started Simplify; later unknown extension UI could not settle that false state.
+The new chooser's native actions also were missing from screen-key evidence.
+The executor stopped safely after failed guarded recovery, leaving interrupted
+history and no submission intent. No engineering writes occurred during the run.
+One executor-supplied event time was in the future; use server/tool timestamps
+for timing, not that client claim. Model/tool/website timing is not yet a complete
+attribution. The reported single accepted mapping is not total page interpretations.
+
+After the run ended, two tiny regressions reproduced those exact issues. The
+bounded correction marks only Simplify dispatch as an active extension writer,
+and includes new native choices in screen evidence (not values/enabled flags).
+Existing action ownership still guards native writes. Only the directly relevant
+mapping checks are rerun before another frozen ordinary execution.
+
 ## Review checkpoint — paused after Wiley attempt 14
 
 This is an implementation checkpoint for independent review, **not accepted live

@@ -5,10 +5,10 @@ September 2026. Older HTTP accept/claim/lease startup is **compatibility only**.
 Historical failures in REVIEW_HANDOFF remain historical evidence. Actual delivery
 checks and unresolved acceptance are in [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md).
 
-Current review status: live Wiley attempt 14 stopped prematurely at sign-in.
-Simplify sign-in actuation and the helper/LLM recovery policy remain unresolved.
-The implementation is paused for independent review; see the log's opening
-checkpoint before interpreting the implemented flow below as live acceptance.
+Live Wiley attempt 14 stopped prematurely at sign-in. The focused follow-up
+connects observed native/extension controls to one mapped recovery step in the
+existing runner. Current live proof and remaining limitations are in the log's
+opening entry; do not infer acceptance from the implementation described here.
 
 ## Before and after
 
@@ -185,7 +185,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | managed_identity.py | Shared target scope, including Workday details-to-job redirects with exact host, career site, full requisition slug and allowed child route |
 | workday_fast.py | Bounded Workday supervisor; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
-| cdp_client.py | Exact-target connection and structured evaluate_function arguments |
+| cdp_client.py | Exact-target connection, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | managed_credentials.py / managed_documents.py / hermes_gmail.py | Private credentials and shared screenshot masking (local and legacy callers), hash-checked selected-asset uploads, configured correlated mailbox |
@@ -193,13 +193,27 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js | Existing dashboard, parallel session/process/driver/model/progress and independent controls |
 
-Common policy is job-apply v0.4.2; Workday policy is workday-simplify v0.3.0, in
+Common policy is job-apply v0.4.3; Workday policy is workday-simplify v0.3.1, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision
 on the next application. Trace all callers before declaring older helpers unused.
 
 ## Verification boundaries
+
+Snapshot and Workday recovery share one native/official-extension inventory in
+workday_fast.observe_page/screen_inventory. workday_observe retains unique
+semantic refs across routine rerenders; the existing private filler and native
+click helper accept those exact mappings. fast_forward recovery performs a bounded
+mapped fill/verify/action/observe step in its existing connection, then resumes
+routine execution. Mapped decisions and possibly-executed actions persist in the
+existing private checkpoint; actual authenticated form access confirms the account.
+No new service, migration or execution framework is involved. Simplify sign-in is
+callable, distinguishes employer from extension login and requires separate
+evidence of retained credential use. Enabled controls alone do not establish it.
+Settled unrecognized UI returns actionable context promptly; writer uncertainty
+remains an observation-only condition. Accepted mapped-step counts are recorded,
+but are not a measurement of every model interpretation outside this interface.
 
 The shared credential resolver selects the account ledger's saved reference. The
 canonical default is credential:profile/accounts/default, resolved privately from

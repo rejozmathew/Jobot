@@ -254,7 +254,7 @@ class WorkspaceHost:
             return client.call('application_context' if op=='context' else 'attempt_report',attempt_id=attempt['id'])
         if op=='fast_forward':
             from .workday_fast import advance
-            return advance(cfg,client,own,{'target_id':session['target_id'],'seconds':params.get('seconds',60)})
+            return advance(cfg,client,own,dict(params,target_id=session['target_id']))
         if op=='account_lock':return service.coordinate_account(session['id'],release=params.get('release',False))
         if op in ('browser','credentials'):
             package=service.application_context(attempt['id'])

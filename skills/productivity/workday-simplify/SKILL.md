@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.0
+version: 0.3.1
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -45,12 +45,52 @@ runner contains no model and retains one CDP connection during its bounded call.
    rejected credential, missing saved reference or unfamiliar auth page returns
    to the executor without closing the application. Never reset counters or
    create again while the previous account outcome is unknown.
+   If the employer first offers Apple/Google/LinkedIn and **Sign in with email**,
+   select the observed email option, then use the resulting native account form.
+   A same-site `/login?redirect=...` is supported only when the decoded redirect
+   leads back to this exact requisition. Native clicks use browser pointer input;
+   a dispatched click is not employer acceptance. Report account creation/sign-in
+   as confirmed only after the employer supplies the corresponding evidence.
+   If the user completed account creation manually, continue with sign-in and
+   reconcile the account evidence; do not start another creation attempt.
    Follow the returned `recovery` handoff: inspect `browser screenshot` using
    the current executor's image capability, pair with `browser snapshot` for
    observed selectors, and use supported native controls or settled Simplify.
    Report possible changed/unsupported controls distinctly from rejected
    credentials or a verification challenge. After recovery, call the runner again;
    record the mismatch for a later helper update, never an in-run code patch.
+   The handoff now includes ONE combined `screen` inventory. Map that logical
+   screen once and pass the mapping directly to the existing runner:
+
+   ```json
+   {"seconds":60,"recovery":{"screen_key":"<observed>","account_mode":"sign_in","credentials":{"email_ref":"<observed wd ref>","password_ref":"<observed wd ref>"},"fields":[],"action":{"source":"native","ref":"<observed sign-in ref>"}}}
+   ```
+
+   This is `jobbot fast_forward` parameters, or the portable session `call`
+   operation `fast_forward`. Omit unused credentials/account_mode/fields. Select
+   all necessary native answers/checkboxes together in `fields:[{ref,value}]`;
+   values are approved facts, never passwords or OTPs. Native SELECT controls
+   use observed option values. The private filler resolves the mapped credential
+   refs directly; the failed semantic matcher is not applied again. Unique
+   semantic references refresh locally across ordinary rerenders. It persists
+   action uncertainty before clicking and updates account/helper state on actual
+   authentication. A lost click response does not authorize replay.
+
+   When Simplify is enabled, consider its current controls from authentication
+   onward. Use native sign-in with retained credentials unless Simplify's use of
+   those credentials is established. A mapped Simplify sign-in additionally needs
+   non-secret `credential_evidence`; Simplify login is distinct from employer login.
+   Inspect the installed extension's settings once: retain supervised page-by-page
+   operation and never enable continuous execution that can submit outside the
+   existing submission boundary. Do not turn settings inspection into a project.
+
+   `inspection_required` returns promptly for a settled recognition miss or an
+   explicit writer uncertainty. The latter allows observation only until settled.
+   Do not finish merely because a helper missed a field. A second screen decision
+   needs new required questions, native validation, verification or unresolved
+   ambiguity; values, spinners, scrolling and ordinary rerenders are not new
+   reasoning problems. Return routine pages to Simplify without LLM interpretation.
+   Keep going in the same application after the first successful auth/autofill.
 5. `blocked`: handle only the actual required blocker with the shared session's
    `browser` operation and approved facts. One initial autofill and one retry per
    step remain the limit. Do not audit every optional field or reconstruct history.

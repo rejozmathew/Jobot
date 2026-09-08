@@ -44,7 +44,10 @@ FILL_SELECTED = r"""async (args) => {
    if(role==='confirmation'&&!ref)continue;
    if(!ref)return {...result,error:'missing_'+role+'_ref'};
    let matches;
-   try {matches=document.querySelectorAll(ref);}catch{return {...result,error:'invalid_'+role+'_ref'};}
+   try {
+     const mapped=ref.startsWith('wd:')?window.__jobbotWorkdayScope?.inventory?.get(ref):null;
+     matches=ref.startsWith('wd:')?(mapped?[mapped]:[]):document.querySelectorAll(ref);
+   }catch{return {...result,error:'invalid_'+role+'_ref'};}
    if(matches.length!==1)return {...result,error:'ambiguous_or_stale_'+role+'_ref',match_count:matches.length};
    const e=matches[0],r=e.getBoundingClientRect();
    if(e.tagName!=='INPUT'||!e.isConnected||!r.width||!r.height||getComputedStyle(e).visibility==='hidden'||e.disabled||e.readOnly)
@@ -67,11 +70,11 @@ FILL_SELECTED = r"""async (args) => {
    requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(timer);resolve();}));
  });
  for(const {role,e,value} of selected){
-   const ok=e.isConnected&&e.value===value;
+   const ok=e.isConnected&&(role==='email'?e.value.toLowerCase()===value.toLowerCase():e.value===value);
    if(role==='email')result.email_filled=ok;
    else if(ok)result.passwords_filled_count++;
  }
- result.values_committed=selected.every(({e,value})=>e.isConnected&&e.value===value);
+  result.values_committed=selected.every(({role,e,value})=>e.isConnected&&(role==='email'?e.value.toLowerCase()===value.toLowerCase():e.value===value));
  if(!result.values_committed)result.error='values_not_committed';
  return result;
 }"""

@@ -29,6 +29,7 @@ class SimplifyBoundary:
         result={key:raw[key] for key in ('url','fingerprint','page_ref','page_signature') if key in raw and isinstance(raw[key],str)}
         result.update(panel=raw.get('panel') is True,status=raw['status'],controls=controls,
             source='fixture' if raw.get('source')=='fixture' else 'observed_dom')
+        result['login_kind']=raw.get('login_kind')
         if 'review_count' in raw and (raw['review_count'] is None or isinstance(raw['review_count'], int)):
             result['review_count']=raw['review_count']
         if 'field_summary' in raw and isinstance(raw['field_summary'], dict):
@@ -66,14 +67,14 @@ class SimplifyBoundary:
         return (before.get('url')!=after.get('url') or
             any(before.get(k) and after.get(k) and before[k]!=after[k] for k in ('page_ref','page_signature')))
 
-    @staticmethod
-    def _result(observed,changed,writer,reason):
+    def _result(self,observed,changed,writer,reason):
         return {'status':observed.get('status','unknown'),'changed':bool(changed),
             'writer_state':writer,'reason':reason,'native_takeover_authorized':writer=='idle',
-            'observation':observed}
+            'observation':observed,'execution':getattr(self,'execution','not_executed')}
 
-    async def perform(self,operation,*,retry=False):
-        if operation not in ('autofill','continue','start'):raise ValueError('Unsupported Simplify operation')
+    async def perform(self,operation,*,retry=False,credential_evidence=None):
+        if operation not in ('autofill','continue','start','sign_in'):raise ValueError('Unsupported Simplify operation')
+        self.execution='not_executed'
         self.deadline=self.clock()+self.budget
         before=await self.observe();current=before
         page_key=before.get('page_signature') or before['url']
@@ -85,6 +86,14 @@ class SimplifyBoundary:
         decision=self.decide(before,already and not can_retry,fast=self.fast)
         active=before['status']=='active';clicked=False
         try:
+            if operation=='sign_in' and not active:
+                if before.get('login_kind')!='employer':
+                    return self._result(before,False,'idle','simplify_login_is_not_employer_sign_in')
+                if not isinstance(credential_evidence,str) or not credential_evidence.strip():
+                    return self._result(before,False,'idle','retained_credential_use_unverified')
+                if ('sign_in',page_key) in self.attempted:
+                    return self._result(before,False,'idle','sign_in_already_attempted')
+                decision={'action':'sign_in','reason':'observed_employer_sign_in'}
             if before['status']=='unknown':
                 return self._result(before,False,'unknown','quiescence_unverified')
             if operation in ('autofill','start') and already and not can_retry and before['status'] in ('ready','complete','needs_review'):
@@ -97,10 +106,14 @@ class SimplifyBoundary:
                     return self._result(before,False,'unknown' if before['status']=='unknown' else 'idle',decision['reason'])
                 args={'ref':control['ref'],'url':before['url'],'operation':operation}
                 if before.get('page_ref'):args['page_ref']=before['page_ref']
+                if operation=='sign_in':self.attempted.add(('sign_in',page_key))
+                self.execution='possibly_executed'
                 result=await asyncio.wait_for(self.page.evaluate(CLICK,args),timeout=max(0.05,self.deadline-self.clock()))
                 if not isinstance(result,dict) or result.get('status') not in ('clicked','ok'):
+                    if isinstance(result,dict) and result.get('clicked') is False:self.execution='not_executed'
                     return self._result(before,False,'unknown','stale_or_unconfirmed_control')
                 clicked=True
+                self.execution='clicked'
                 if can_retry:
                     self.retries[page_key]=self.retries.get(page_key,0)+1
                 elif operation in ('autofill','start'):
@@ -110,12 +123,14 @@ class SimplifyBoundary:
                 current=await self.observe();changed=self._changed(before,current)
                 if current['status']=='active' or changed:
                     saw_active_or_change=True
-                if operation=='autofill' and current['status'] in ('complete','needs_review'):
+                if operation in ('autofill','sign_in') and current['status'] in ('complete','needs_review'):
                     if saw_active_or_change or stable_count>=1:
                         return self._result(current,changed,'idle','observed_change' if changed else 'no_observable_progress')
                     stable_count+=1
-                if operation in ('continue','start') and self._page_changed(before,current) and current['status'] not in ('active','unknown'):
+                if operation in ('continue','start','sign_in') and self._page_changed(before,current) and current['status'] not in ('active','unknown'):
                     return self._result(current,True,'idle','page_changed_rediscover_controls')
+                if operation=='sign_in' and current['status']=='login_required' and self.clock()-(self.deadline-self.budget)>5:
+                    return self._result(current,changed,'idle','sign_in_response_needs_inspection')
                 await self.sleep(self.poll)
             page_or_field_changed = self._page_changed(before,current) if operation in ('continue','start') else self._changed(before,current)
             return self._result(current,page_or_field_changed,'unknown','autofill_budget_timeout')

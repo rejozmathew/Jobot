@@ -21,7 +21,7 @@ import uuid
 
 from .managed_client import Client
 from .managed_shared import ProtocolError
-from .managed_identity import is_same_application_scope
+from .managed_identity import is_same_application_scope, same_job_url
 
 MODELS = ('gpt-5.6-luna', 'gpt-5.6-terra')
 EFFORTS = ('low', 'medium', 'high', 'xhigh')
@@ -37,9 +37,13 @@ def select_runtime(settings):
 
 
 def confirmation_verified(job_url, url, text):
-    job, current = urlsplit(job_url), urlsplit(url)
-    same_job = current.path.rstrip('/') in (job.path.rstrip('/'), job.path.rstrip('/') + '/confirmation')
-    return bool(current.scheme == job.scheme and current.netloc == job.netloc and same_job
+    job = urlsplit(job_url)
+    try:
+        same_job = any(same_job_url(expected, url) for expected in (
+            job_url, job._replace(path=job.path.rstrip('/')+'/confirmation').geturl()))
+    except (ValueError, ProtocolError):
+        return False
+    return bool(same_job
                 and re.search(r'thank you for (?:applying|your application)|application (?:has been |was )?(?:successfully )?(?:submitted|received)', text, re.I))
 
 
@@ -144,13 +148,14 @@ AUTH_FIND_AND_FILL = r"""async (args) => {
  const p2=passwords[1]?.value;
  const allMatch=(passwords.length>0)&&passwords.every(p=>p.value===args.password);
  const bothMatch=passwords.length<2||(p1===p2);
- const verified=allMatch && bothMatch && emails[0].value===args.email;
+ const emailMatch=emails[0].value.toLowerCase()===args.email.toLowerCase();
+ const verified=allMatch && bothMatch && emailMatch;
 
  const bodyText=document.body.innerText||'';
  const existing_account=/account already exists|email already in use|already registered|user already exists|account with this email|please sign in/i.test(bodyText);
 
  return {
-  email_filled:Boolean(emails.length>0 && emails[0].value===args.email),
+  email_filled:emailMatch,
   passwords_filled_count:passwords.length,
   verified:verified,
   existing_account:existing_account
