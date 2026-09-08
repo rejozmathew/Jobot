@@ -96,6 +96,18 @@ def is_workday_application_scope(job_url: str, candidate_url: str) -> bool:
         if cand_segs and _LOCALE_RE.match(cand_segs[0]):
             cand_segs = cand_segs[1:]
 
+        # Workday's search detail link omits the location segment that Apply
+        # inserts into the canonical job route. Keep the exact career site and
+        # full requisition slug (including any suffix), plus the child allowlist.
+        if (job_p.hostname or '').endswith('.myworkdayjobs.com') and (
+            job_segs[1:2] == ['details'] or cand_segs[1:2] == ['details']
+        ):
+            for segments in (job_segs, cand_segs):
+                if len(segments) >= 3 and segments[1] == 'details' and '_' in segments[2]:
+                    segments[1] = 'job'
+                elif len(segments) >= 4 and segments[1] == 'job' and '_' in segments[3]:
+                    del segments[2]
+
         if len(cand_segs) < len(job_segs):
             return False
         if cand_segs[:len(job_segs)] != job_segs:

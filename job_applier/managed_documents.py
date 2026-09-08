@@ -14,6 +14,20 @@ KINDS={'resume','cover_letter'}
 RECOMMENDATIONS={'Strong apply','Apply','Apply with caveats','Skip'}
 
 
+def local_asset_path(asset):
+    """Resolve and hash-check one explicitly selected local document; never extract it."""
+    from pathlib import Path
+    from urllib.parse import unquote
+    from urllib.request import url2pathname
+    url=urlsplit(asset['storage_ref'])
+    if url.scheme!='file' or url.netloc or url.query or url.fragment:
+        raise ValueError('Selected resume must be a verified local file')
+    path=Path(url2pathname(unquote(url.path)))
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=asset['sha256']:
+        raise ValueError('Selected resume is missing or changed')
+    return path
+
+
 def checked_hash(value):
     if not isinstance(value,str) or not HASH.fullmatch(value):raise ProtocolError('invalid_hash')
     return value

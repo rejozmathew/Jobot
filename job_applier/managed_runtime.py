@@ -40,6 +40,11 @@ class RuntimeServices:
         return context
 
     def _budget_check(self,db,a):
+        from .managed_sessions import local_session
+        if local_session(db,a['id']):
+            # Reasoning gaps are visible telemetry. An optional hard maximum is
+            # enforced by the host terminating its owned browser before release.
+            return
         cfg=json.loads(a['settings_json']);now=datetime.fromisoformat(self.now())
         extra=db.execute('SELECT COALESCE(SUM(seconds),0) FROM budget_extensions WHERE attempt_id=?',(a['id'],)).fetchone()[0]
         if (now-datetime.fromisoformat(a['started_at'])).total_seconds()>cfg.get('attempt_seconds',300)+extra:raise ProtocolError('attempt_budget_exceeded')
@@ -60,6 +65,9 @@ class RuntimeServices:
         identity=job_key(canonical)
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence);job=self._get(db,'jobs',a['job_id']);expected=urlsplit(canonical_url(job['url']))
+            from .managed_sessions import local_session
+            session=local_session(db,attempt_id)
+            if session and session['target_id']!=target_id:raise ProtocolError('target_not_owned')
             verified=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone()
             # An account alias proves credential scope, NOT requisition/tab ownership.
             # Alternate URLs need a verified job identity; only the conventional
@@ -94,6 +102,15 @@ class RuntimeServices:
             return dict(self._get(db,'owned_targets',target['id']))
 
     def browser_observe(self,attempt_id,*,worker_id,fence,target_id=None,cdp_url=None,expected_url=None):
+        from .managed_sessions import local_session
+        with self.tx() as db:
+            session=local_session(db,attempt_id)
+            if session:
+                workspace=json.loads(self._get(db,'browser_workspaces',session['workspace_id'])['config_json'])
+                if cdp_url and cdp_url!=workspace['cdp_url']:raise ProtocolError('workspace_endpoint_mismatch')
+                cdp_url=workspace['cdp_url']
+                if target_id and target_id!=session['target_id']:raise ProtocolError('target_not_owned')
+                target_id=session['target_id']
         endpoint_url=cdp_url or "http://127.0.0.1:9222"
         endpoint=urlsplit(endpoint_url)
         if (endpoint.scheme!="http" or endpoint.hostname not in ("127.0.0.1","localhost","::1")

@@ -26,6 +26,7 @@ from .managed_reports import ReportServices
 from .managed_runtime import RuntimeServices
 from .managed_context import ContextServices
 from .managed_archive import ArchiveServices
+from .managed_sessions import SessionServices, local_session
 from .managed_versions import code_evidence
 from .managed_redaction import safe_text, reject_secrets
 
@@ -37,7 +38,7 @@ def utc_now():
 from .managed_identity import canonical_url, job_key, RELATED
 
 
-class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices):
+class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices):
     def __init__(self, db_path, *, instance_id=None, now_fn=utc_now):
         p=Path(db_path)
         if not p.is_absolute(): raise ProtocolError('absolute_db_path_required')
@@ -203,14 +204,17 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         prior=db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id LEFT JOIN submission_ledger l ON l.job_id=r.id WHERE l.job_id IS NOT NULL OR j.status IN ('applied','already_applied') LIMIT 1",(job_id,)).fetchone()
         if prior:raise ProtocolError('already_applied')
 
-    def _assert_no_owner(self, db, job_id):
+    def _assert_no_owner(self, db, job_id, exclude_session=None):
+        if self._has_local_schema(db):
+            session=db.execute(RELATED+"SELECT s.id FROM related r JOIN application_sessions s ON s.job_id=r.id WHERE s.ended_at IS NULL AND s.id IS NOT ? LIMIT 1",(job_id,exclude_session)).fetchone()
+            if session:raise ProtocolError('owned_elsewhere')
         lease=db.execute(RELATED+"SELECT l.* FROM related r JOIN application_attempts a ON a.job_id=r.id JOIN browser_leases l ON l.attempt_id=a.id WHERE l.state!='released' LIMIT 1",(job_id,)).fetchone()
         if lease:
             if lease['state']=='quarantined' or datetime.fromisoformat(lease['expires_at'])<=datetime.fromisoformat(self.now()):raise ProtocolError('reconciliation_required')
             raise ProtocolError('owned_elsewhere')
         if db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id WHERE j.status IN ('submission_unknown','running')",(job_id,)).fetchone():raise ProtocolError('reconciliation_required')
 
-    def _eligible(self, db, job_id, settings=None):
+    def _eligible(self, db, job_id, settings=None, exclude_session=None):
         job=self._get(db,'jobs',job_id)
         policy=settings or self.settings
         if (job['company'] or '').casefold().strip() in {x.casefold().strip() for x in policy.get('excluded_companies',[])}:
@@ -220,7 +224,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             raise ProtocolError('market_incompatible')
         self._assert_not_suppressed(db,job_id)
         if db.execute('SELECT 1 FROM job_archives WHERE job_id=?',(job_id,)).fetchone():raise ProtocolError('job_archived')
-        self._assert_no_owner(db,job_id)
+        self._assert_no_owner(db,job_id,exclude_session)
         if job['status']=='interrupted': raise ProtocolError('reconciliation_required')
         if job['eligibility']!='ready': raise ProtocolError('not_ready')
         return job
@@ -295,6 +299,9 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         now=self.now()
         with self.tx() as db:
             run=self._get(db,'runs',run_id)
+            if self._has_local_schema(db) and db.execute('SELECT 1 FROM application_sessions WHERE run_id=?',(run_id,)).fetchone():
+                raise ProtocolError('local_session_requires_start')
+            self._legacy_workspace_guard(db,run['browser_profile'])
             if run['state']=='awaiting_worker': raise ProtocolError('awaiting_worker')
             if run['worker_id']!=worker_id: raise ProtocolError('owned_elsewhere')
             if run['control']!='running': raise ProtocolError(run['control'])
@@ -315,9 +322,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             candidate=self._get(db,'candidates',run['identity_id'])
             if candidate['state']!='active': raise ProtocolError('identity_inactive')
             fence=(lease['generation'] if lease else 0)+1
-            args=(job['id'],'unknown','external',now,run_id,run['identity_id'],worker_id,run['session_id'],run['browser_profile'],fence,now,now,run['settings_json'],candidate['profile_json'],run['capabilities_json'])
-            cursor=db.execute('INSERT INTO application_attempts(job_id,platform,workflow,started_at,run_id,identity_id,worker_id,session_id,browser_profile,fence,heartbeat_at,progress_at,settings_json,profile_json,versions_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',args)
-            attempt_id=cursor.lastrowid
+            attempt_id=self._create_attempt(db,run,job,candidate,fence,now)
             db.execute("INSERT INTO browser_leases VALUES (?,?,?,?,?,?) ON CONFLICT(profile) DO UPDATE SET attempt_id=excluded.attempt_id,worker_id=excluded.worker_id,generation=excluded.generation,expires_at=excluded.expires_at,state=excluded.state",(run['browser_profile'],attempt_id,worker_id,fence,self._expiry(snapshot),'active'))
             db.execute("UPDATE jobs SET status='running',started_at=?,updated_at=? WHERE id=?",(now,now,job['id']))
             db.execute("UPDATE run_jobs SET state='active' WHERE run_id=? AND job_id=?",(run_id,job['id']))
@@ -325,6 +330,11 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             result=dict(self._get(db,'application_attempts',attempt_id))
             result['settings_hash']=hashlib.sha256(result['settings_json'].encode()).hexdigest()
             return result
+
+    def _create_attempt(self, db, run, job, candidate, fence, now, workflow='external'):
+        """Shared attempt snapshot; caller owns only the short reservation transaction."""
+        args=(job['id'],'unknown',workflow,now,run['id'],run['identity_id'],run['worker_id'],run['session_id'],run['browser_profile'],fence,now,now,run['settings_json'],candidate['profile_json'],run['capabilities_json'])
+        return db.execute('INSERT INTO application_attempts(job_id,platform,workflow,started_at,run_id,identity_id,worker_id,session_id,browser_profile,fence,heartbeat_at,progress_at,settings_json,profile_json,versions_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',args).lastrowid
 
     def attempt(self, attempt_id):
         with self.tx() as db: return dict(self._get(db,'application_attempts',attempt_id))
@@ -334,6 +344,11 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if a['worker_id']!=worker_id or a['fence']!=fence: raise ProtocolError('stale_owner')
         if completed and a['completed_at']: return a
         if a['completed_at']: raise ProtocolError('attempt_completed')
+        session=local_session(db,attempt_id)
+        if session:
+            self._local_owner(db,session)
+            return a
+        self._legacy_workspace_guard(db,a['browser_profile'])
         lease=db.execute('SELECT * FROM browser_leases WHERE profile=?',(a['browser_profile'],)).fetchone()
         if not lease or lease['generation']!=fence or lease['attempt_id']!=attempt_id: raise ProtocolError('stale_owner')
         if lease['state']!='active' or lease['expires_at']<=self.now(): raise ProtocolError('reconciliation_required')
@@ -343,7 +358,10 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
             db.execute('UPDATE application_attempts SET heartbeat_at=? WHERE id=?',(self.now(),attempt_id))
-            db.execute('UPDATE browser_leases SET expires_at=? WHERE profile=?',(self._expiry(json.loads(a['settings_json'])),a['browser_profile']))
+            if local_session(db,attempt_id):
+                db.execute('UPDATE application_sessions SET driver_seen_at=? WHERE attempt_id=?',(self.now(),attempt_id))
+            else:
+                db.execute('UPDATE browser_leases SET expires_at=? WHERE profile=?',(self._expiry(json.loads(a['settings_json'])),a['browser_profile']))
             run=self._get(db,'runs',a['run_id'])
             return {'control':run['control'],'heartbeat_at':self.now(),'last_progress_at':a['progress_at']}
 
@@ -373,6 +391,9 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         # A late reconciliation may NEVER release a newer owner's browser.
         state='released' if quiescent and outcome!='submission_unknown' else 'quarantined'
         db.execute('UPDATE browser_leases SET state=? WHERE profile=? AND generation=? AND attempt_id=?',(state,a['browser_profile'],a['fence'],a['id']))
+        if local_session(db,a['id']):
+            # The host must stop the owned browser before freeing this workspace.
+            db.execute("UPDATE application_sessions SET state='finishing',reason=? WHERE attempt_id=? AND ended_at IS NULL",(outcome,a['id']))
         return dict(self._get(db,'application_attempts',a['id']))
 
     def finish(self, attempt_id, *, worker_id, fence, outcome, evidence='', quiescent=False):
@@ -397,6 +418,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             raise ProtocolError('reconciliation_evidence_required')
         with self.tx() as db:
             a=self._get(db,'application_attempts',attempt_id)
+            session=local_session(db,attempt_id)
+            if session and not session['ended_at']:raise ProtocolError('local_session_stop_required')
             if db.execute('SELECT 1 FROM application_attempts WHERE job_id=? AND id>?',(a['job_id'],a['id'])).fetchone():
                 raise ProtocolError('newer_attempt_exists')
             if a['outcome'] in ('applied','already_applied'):

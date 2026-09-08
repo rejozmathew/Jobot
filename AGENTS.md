@@ -4,9 +4,9 @@
 
 - Read `skills/productivity/job-apply/SKILL.md`; for Workday also read `skills/productivity/workday-simplify/SKILL.md`.
 - These repository files are canonical. Hermes discovery is a thin entry point under `integrations/hermes_jobbot/skills/job-apply/`; other harnesses read the same canonical skills directly.
-- Use the explicit configured managed app/database and a claimed owner/fence/target. Never guess `job_applier.db` from cwd, dual-write old tracking, or bypass uncertain submissions.
-- Run `python -m job_applier.workday_fast doctor --config <absolute-config> --url <job-url>` before Workday intake. Use the repository virtualenv's Python.
-- Use `jobbot fast_forward` or `python -m job_applier.workday_fast advance ...` for Workday's normal path. The CLI is harness-neutral; it does not launch a model.
+- Start through `jobbot start` or `python -m job_applier.application_runtime start <url>` using the selected private configuration and actual conversation ID. No API token, running dashboard or expiring browser lease is required locally. Never guess a database, dual-write history or bypass uncertain submission.
+- Use the repository virtualenv. `application_runtime doctor` is an optional read-only diagnostic; start performs configuration/history and real browser readiness checks automatically.
+- Use `jobbot fast_forward` or `python -m job_applier.workday_fast session <session-id> --seconds 60` for Workday. Session-scoped calls resolve ownership and target. The CLI is harness-neutral and launches no model. Explicit HTTP accept/claim/advance is legacy compatibility only.
 - Simplify fills; the harness handles exceptions. No in-run PDF extraction, resume hunts or reconstruction of career/education fields, on any ATS. Approved file upload remains allowed.
 - Never edit helpers/skills during an application benchmark. Follow actual controls, preserve quiescence/ownership checks and verify employer submission once.
 

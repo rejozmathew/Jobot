@@ -6,7 +6,7 @@ PAYLOAD_FIELDS = frozenset({
     'phase', 'helper_id', 'helper_version', 'lesson_id', 'field', 'resolution',
     'reason_code', 'provider', 'model', 'response_model', 'input_tokens', 'output_tokens', 'operation',
     'source', 'fallback_reason', 'residual_fields', 'field_key', 'field_label', 'elapsed_seconds',
-    'field_attribution',
+    'field_attribution', 'activity', 'next_step',
 })
 SECRET = re.compile(r'''(?ix)(?:\b(?:password|passwd|otp|(?:access_|refresh_|reset_)?token|api[_-]?key|cookie|authorization|secret)[\\"']*\s*[=:]|\bbearer\s+\S+)''')
 

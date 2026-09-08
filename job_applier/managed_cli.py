@@ -12,7 +12,8 @@ def load_config(path):
     if not path.is_absolute():raise ProtocolError('absolute_config_path_required')
     if not path.is_file():raise ProtocolError('config_not_found')
     config=json.loads(path.read_text(encoding='utf-8'))
-    if not isinstance(config,dict) or not all(config.get(k) for k in ('db_path','instance_id','base_url','operator_token_env')):raise ProtocolError('invalid_config')
+    required=('db_path','instance_id') if isinstance(config,dict) and config.get('transport')=='local' else ('db_path','instance_id','base_url','operator_token_env')
+    if not isinstance(config,dict) or not all(config.get(k) for k in required):raise ProtocolError('invalid_config')
     if not Path(config['db_path']).is_absolute():raise ProtocolError('absolute_db_path_required')
     return config
 
@@ -64,6 +65,7 @@ def main(argv=None):
     call=subs.add_parser('call',help='thin authenticated JSON client')
     call.add_argument('--config',required=True);call.add_argument('--operation',required=True)
     call.add_argument('--payload',default='{}');call.add_argument('--token-env')
+    call.add_argument('--transport',choices=('local','http'))
     fake=subs.add_parser('fake-worker',help='synthetic protocol exerciser; never contacts portals')
     fake.add_argument('--config',required=True);fake.add_argument('--token-env',required=True)
     fake.add_argument('--run-id',required=True);fake.add_argument('--worker-id',required=True)
@@ -79,9 +81,9 @@ def main(argv=None):
         else:
             from .managed_client import Client
             config=load_config(args.config)
-            token=credential(getattr(args,'token_env',None) or config['operator_token_env'],config)
             service=Service(config['db_path'],instance_id=config['instance_id'])
             if args.command=='serve':
+                token=credential(config['operator_token_env'],config)
                 import uvicorn
                 from .managed_api import create_app
                 # Reuse client's strict URL validation; it performs no network call.
@@ -91,9 +93,10 @@ def main(argv=None):
                 parsed=urlsplit(config['base_url'])
                 uvicorn.run(app,host=parsed.hostname,port=parsed.port or 8000,access_log=False)
                 return 0
-            with Client(config['base_url'],config['instance_id'],token) as client:
+            from .managed_client import configured_client
+            with configured_client(config,token_name=getattr(args,'token_env',None),transport=getattr(args,'transport',None)) as client:
                 if args.command=='call':
-                    payload=json.loads(args.payload)
+                    payload=json.loads(Path(args.payload[1:]).read_text(encoding='utf-8') if args.payload.startswith('@') else args.payload)
                     if not isinstance(payload,dict):raise ProtocolError('invalid_payload')
                     result=client.call(args.operation,**payload)
                 else:

@@ -126,6 +126,23 @@ def test_greenhouse_preservation():
     assert is_same_application_scope(gh_base, gh_base + "/confirmation") is True
     # Greenhouse rejects sibling job
     assert is_same_application_scope(gh_base, "https://job-boards.greenhouse.io/acme/jobs/123457") is False
+
+
+def test_workday_details_to_canonical_job_keeps_exact_requisition_scope():
+    base = "https://tenant.wd1.myworkdayjobs.com/en-US/Careers/details/Director_R12345-1?q=director"
+    canonical = "https://tenant.wd1.myworkdayjobs.com/Careers/job/GBR---Oxford/Director_R12345-1"
+    for child in ("", "/apply", "/apply/applyManually", "/apply/success"):
+        assert is_same_application_scope(base, canonical + child)
+    assert is_same_application_scope(canonical, base)
+    for candidate in (
+        canonical.replace("R12345-1", "R12346-1"),
+        canonical.replace("R12345-1", "R12345-2"),
+        canonical.replace("/Careers/", "/OtherCareers/"),
+        canonical.replace("tenant.wd1", "other.wd1"),
+        canonical + "/apply/unauthorized",
+        canonical + "/apply?otp=123456",
+    ):
+        assert not is_same_application_scope(base, candidate)
 import asyncio
 from unittest.mock import AsyncMock
 

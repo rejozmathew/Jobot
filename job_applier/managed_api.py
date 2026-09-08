@@ -14,6 +14,7 @@ from .managed_ui import OperatorSessions,COOKIE,install_ui
 READS=frozenset({'job','attempt_status','events','attempt_report','application_context','account_strategy','lessons_for_context','helpers_for_context','documents_status','candidate','browser_observe','next_request'})
 OPERATOR=frozenset({'identity','intake','eligibility','request_run','control','reconcile','retry','account_update','mail_request','match_mail','view','settings_view','configure','candidate','import_profile'})|READS
 OPERATOR=OPERATOR|frozenset({'lesson_observe','lesson_set_status','lesson_record_outcome','helper_register','helper_activate','register_asset','select_asset','register_assessment','namespace_alias','preview_archive','archive'})
+OPERATOR=OPERATOR|frozenset({'sessions_view','session_status'})
 WORKER=frozenset({'accept_run','claim','heartbeat','event','action_start','action_end','writer_state','submission_intent','finish','ack_control','ack_run_control','checkpoint','resume_run'})|READS
 WORKER=WORKER|frozenset({'observe_owned_lesson','report_upload','record_account_event','extend_budget','bind_target','target_state','request_mail_for_attempt','match_mail_for_attempt','browser_observe'})
 
@@ -152,5 +153,6 @@ def create_app(service, *, operator_token, worker_tokens):
             code=409 if exc.code in ('owned_elsewhere','already_applied','stale_owner','reconciliation_required','idempotency_conflict','conflicting_finish','awaiting_worker') else 422
             return JSONResponse({'error':exc.code},status_code=code)
         except (TypeError,ValueError,KeyError):return JSONResponse({'error':'invalid_payload'},status_code=422)
-        except sqlite3.Error:return JSONResponse({'error':'database_operation_failed'},status_code=409)
+        except sqlite3.Error as exc:
+            return JSONResponse({'error':'local_runtime_upgrade_required' if 'local_runtime_upgrade_required' in str(exc) else 'database_operation_failed'},status_code=409)
     return app

@@ -13,6 +13,16 @@ def attempt_timing_state(db,row,now):
     if a.get('uncertain_duration') or a['outcome'] in ('interrupted','submission_unknown'):reasons.append('recorded_uncertainty')
     if db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND (ended_at IS NULL OR uncertainty=1)',(a['id'],)).fetchone():reasons.append('unfinished_or_unmeasured_action')
     if not a['completed_at']:
+        from .managed_sessions import local_session
+        session=local_session(db,a['id'])
+        if session:
+            a['local_session_id']=session['id']
+            a['session_state']=session['state']
+            a['workspace_id']=session['workspace_id']
+            if session['state'] not in ('connected','waiting','paused'):reasons.append('session_not_connected')
+            a['uncertain_duration']=bool(reasons)
+            a['timing_uncertainty_reasons']=reasons
+            return a
         lease=db.execute('SELECT * FROM browser_leases WHERE profile=?',(a['browser_profile'],)).fetchone()
         live=bool(lease and lease['state']=='active' and lease['worker_id']==a['worker_id'] and lease['generation']==a['fence'])
         if live:
@@ -206,4 +216,5 @@ class ViewServices:
         return {'health':dict(self.health(),schema_version=schema),'settings':self.settings_view(),
             'jobs':jobs,'runs':runs,'accounts':accounts,'candidates':candidates,'current_run':current,
             'lessons':lessons,'helpers':helpers,'assets':assets,'assessments':assessments,
-            'document_selections':selections,'document_uploads':uploads}
+            'document_selections':selections,'document_uploads':uploads,
+            'local_runtime':self.sessions_view()}

@@ -7,6 +7,33 @@ from .cdp_client import CDPBrowser
 from .managed_identity import is_same_application_scope
 
 
+MASK_CREDENTIALS = r"""(() => {
+ window.__maskedCredentialNodes = [];
+ const els = Array.from(document.querySelectorAll('input[type="password"], [data-credential], [autocomplete*="password" i]'));
+ for (const el of els) {
+  window.__maskedCredentialNodes.push({el, visibility: el.style.visibility});
+  el.style.visibility = 'hidden';
+ }
+ return {masked_count: window.__maskedCredentialNodes.length};
+})()"""
+
+UNMASK_CREDENTIALS = r"""(() => {
+ const list = window.__maskedCredentialNodes || [];
+ for (const item of list) {
+  if (item.el) item.el.style.visibility = item.visibility;
+ }
+ delete window.__maskedCredentialNodes;
+ return {unmasked_count: list.length};
+})()"""
+
+
+async def capture_private_screenshot(page,path):
+    """Existing credential mask, shared by local and legacy browser paths."""
+    await page.evaluate(MASK_CREDENTIALS)
+    try:await page.screenshot(str(path))
+    finally:await page.evaluate(UNMASK_CREDENTIALS)
+
+
 FILL_SELECTED = r"""async (args) => {
  const result={email_filled:false,passwords_filled_count:0,
    confirmation_present:!!args.confirmation_ref,values_committed:false,
@@ -33,7 +60,12 @@ FILL_SELECTED = r"""async (args) => {
    e.dispatchEvent(new Event('input',{bubbles:true}));
    e.dispatchEvent(new Event('change',{bubbles:true}));e.blur();
  }
- await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ // Background/occluded browser windows may suspend animation frames. Verify
+ // the committed input values after a bounded settle, without waiting forever.
+ await new Promise(resolve=>{
+   const timer=setTimeout(resolve,150);
+   requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(timer);resolve();}));
+ });
  for(const {role,e,value} of selected){
    const ok=e.isConnected&&e.value===value;
    if(role==='email')result.email_filled=ok;
@@ -45,28 +77,55 @@ FILL_SELECTED = r"""async (args) => {
 }"""
 
 
-async def fill_credentials(config, package, params):
-    """Selectors are observed control references, never inferred by this helper."""
-    allowed = {'target_id', 'email_ref', 'password_ref', 'confirmation_ref'}
-    if set(params) - allowed:
-        return {'error': 'invalid_credential_parameters'}
+DEFAULT_CREDENTIAL_REF='credential:profile/accounts/default'
+
+
+def resolve_employer_credential(config, package):
+    """Resolve only a saved explicit reference or the configured retained default.
+
+    Return values stay inside the private filler. The ledger stores the reference.
+    Never replace an unavailable saved credential with a different password.
+    """
     raw = json.loads(Path(config['credential_profile_path']).read_text(encoding='utf-8'))
-    account = raw.get('accounts', {}).get('default', {})
+    reference=(package.get('account') or {}).get('credential_ref') or DEFAULT_CREDENTIAL_REF
+    key='default' if reference==DEFAULT_CREDENTIAL_REF else config.get('credential_account_keys',{}).get(reference)
+    if not key:raise ValueError('saved_credential_reference_unavailable')
+    account = raw.get('accounts', {}).get(key, {})
     if not account.get('email') or not account.get('password'):
-        return {'error': 'configured_credentials_unavailable'}
+        raise ValueError('configured_credentials_unavailable')
     profile = package['attempt']['profile_json']
     if isinstance(profile, str):
         profile = json.loads(profile)
     if profile.get('identity', {}).get('email', '').casefold() != account['email'].casefold():
-        return {'error': 'candidate_credential_identity_mismatch'}
+        raise ValueError('candidate_credential_identity_mismatch')
+    return dict(email=account['email'],password=account['password'],credential_ref=reference)
+
+
+async def fill_page_credentials(config, package, page, params):
+    """Fill the already-owned page; no new connection, credential output or logs."""
+    if set(params)-{'target_id','email_ref','password_ref','confirmation_ref'}:
+        return {'error':'invalid_credential_parameters','values_committed':False}
+    try:
+        account=resolve_employer_credential(config,package)
+        url=await page.evaluate('location.href')
+        if not is_same_application_scope(package['job']['url'],url):
+            return {'error':'credential_target_scope_mismatch','values_committed':False}
+        result=await page.evaluate_function(FILL_SELECTED,dict(params,email=account['email'],password=account['password']))
+        return dict(result,credential_ref=account['credential_ref'])
+    except ValueError as exc:
+        known={'saved_credential_reference_unavailable','configured_credentials_unavailable','candidate_credential_identity_mismatch'}
+        return {'error':str(exc) if str(exc) in known else 'credential_configuration_invalid','values_committed':False}
+    except Exception as exc:
+        return {'error':'credential_transport_failed','error_type':type(exc).__name__,'values_committed':False}
+
+
+async def fill_credentials(config, package, params):
+    """Selectors are observed control references, never inferred by this helper."""
     browser = await CDPBrowser.connect(config.get('cdp_url', 'http://127.0.0.1:9222'),
                                        target_id=params['target_id'], expected_mode='headed')
     try:
         page = await browser.get_current_page()
-        url = await page.evaluate('location.href')
-        if not is_same_application_scope(package['job']['url'], url):
-            return {'error': 'credential_target_scope_mismatch'}
-        return await page.evaluate(FILL_SELECTED, dict(params, email=account['email'], password=account['password']))
+        return await fill_page_credentials(config,package,page,params)
     finally:
         await browser.close()
 

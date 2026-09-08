@@ -58,7 +58,7 @@ class FastRunner:
     only action counters/booleans/step IDs; never candidate or credential values.
     """
     def __init__(self,page,call,package,ownership,config,target_id,*,state=None,
-                 clock=time.monotonic,sleeper=asyncio.sleep,persist=None):
+                 clock=time.monotonic,sleeper=asyncio.sleep,persist=None,account_lock=None):
         self.page=page; self.call=call; self.package=package; self.owner=ownership
         self.config=config; self.target=target_id; self.clock=clock; self.sleep=sleeper
         self.state=state if state is not None else {}; self._persist=persist or (lambda:None)
@@ -73,6 +73,7 @@ class FastRunner:
         self.resume_name=unquote(urlsplit(self.asset['storage_ref']).path).replace('\\','/').rsplit('/',1)[-1] if self.asset else ''
         self.last=None; self.stable=0
         self.pending=tuple(self.state['pending']) if self.state.get('pending') else None
+        self.account_lock=account_lock
         self.last_action=self.clock()
 
     def persist(self):
@@ -126,14 +127,16 @@ class FastRunner:
                 pulse=self.owned('heartbeat')
                 observed=await self.observe(); metrics['polls']+=1
                 if pulse.get('control')!='running':
-                    gate=self.owned('browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
+                    gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
                     if gate.get('quiescent') and pulse.get('control') in ('stop_requested','pause_requested'):
                         self.owned('ack_control',quiescent=True)
                     return self.report(pulse.get('control','control_unknown'),observed)
+                from .workday_auth import confirm_authenticated
+                await confirm_authenticated(self,observed)
                 if observed.get('submitted'):
                     if not self.state['submit_intent']:
                         return self.report('already_applied',observed,'employer_row_already_submitted')
-                    gate=self.owned('browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
+                    gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
                     if gate.get('quiescent'):
                         evidence='Employer My Applications row matches requisition and Application Submitted status'
                         self.owned('target_state',target_id=self.target,state='preserved',evidence='Completed target retained for benchmark inspection')
@@ -171,16 +174,40 @@ class FastRunner:
                         page_state['failure_fingerprint']=observed.get('fingerprint')
                     self.pending=None
                 action=choose(observed,dict(page_state,submit_intent=self.state['submit_intent']))
+                activity_key=[step,action]
+                if self.state.get('reported_activity')!=activity_key:
+                    labels={'wait':'Waiting for Simplify to settle','confirm_only':'Checking employer submission confirmation',
+                            'authentication_required':'Employer sign-in is required','blocked':'Inspecting required form blockers',
+                            'continue':'Continuing through Simplify','native_continue':'Continuing with the employer control',
+                            'start':'Starting the Simplify application flow','autofill':'Starting Simplify autofill',
+                            'retry':'Retrying Simplify after a failed advancement','submit':'Preparing the authorized submission'}
+                    self.event('phase_changed',{'phase':step,'page':step,'activity':labels.get(action,action),
+                        'source':'Workday helper','status':observed.get('status','unknown'),
+                        'evidence':'Observed current Workday step and available controls'})
+                    self.state['reported_activity']=activity_key
                 if action in ('wait','confirm_only') or self.stable<1:
                     await self.sleep(.5); metrics['wait_seconds']+=.5; continue
-                if action in ('blocked','authentication_required'):
-                    return self.report(action,observed,'required_blocker_only' if action=='blocked' else 'use_configured_native_credentials')
+                if action=='authentication_required':
+                    from .workday_auth import advance_auth,recovery_handoff
+                    auth=await advance_auth(self,observed)
+                    if auth['status'] in ('progress','waiting'):
+                        await self.sleep(.5);metrics['wait_seconds']+=.5;continue
+                    reason=auth.get('reason');handoff=recovery_handoff(reason,observed)
+                    if self.state.get('auth_recovery_reason')!=reason:
+                        self.event('recovery',{'phase':'authentication','error_type':reason,
+                            'activity':'Workday account routine needs executor inspection: '+handoff['kind'],
+                            'next_step':'Inspect the owned screenshot and fresh controls; recover without repeating an uncertain action',
+                            'source':'Workday helper'})
+                        self.state['auth_recovery_reason']=reason
+                    report=self.report('authentication_required',observed,reason)
+                    report['recovery']=handoff;return report
+                if action=='blocked':return self.report(action,observed,'required_blocker_only')
                 if action=='submit':
                     if self.settings.get('submission_mode')!='submit':
                         return self.report('ready_for_review',observed,'submission_not_authorized')
                     if not self.state.get('resume_attached'):
                         return self.report('blocked',observed,'approved_resume_not_observed')
-                gate=self.owned('browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
+                gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
                 if not gate.get('quiescent'):
                     await self.sleep(.5); metrics['wait_seconds']+=.5; continue
                 # Server observation refreshes refs; rediscover immediately before click.
@@ -240,10 +267,11 @@ def advance(config,client,ownership,params):
     spool.mkdir(parents=True,exist_ok=True)
     key=hashlib.sha256(json.dumps([config['instance_id'],ownership,params['target_id']],sort_keys=True).encode()).hexdigest()[:32]
     state_path=spool/('fast-'+key+'.json'); lock_path=spool/('fast-'+key+'.lock')
-    try:lock=lock_path.open('x',encoding='utf-8')
-    except FileExistsError:raise ValueError('fast_runner_already_owned_or_crash_lock')
+    from .workspace_process import FileLock
+    from .managed_shared import ProtocolError
+    try:lock=FileLock(lock_path).acquire()
+    except ProtocolError:raise ValueError('fast_runner_already_owned_or_crash_lock')
     try:
-        lock.close()
         state=json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
         if not isinstance(state,dict):raise ValueError('invalid_fast_checkpoint')
         def persist():
@@ -251,13 +279,16 @@ def advance(config,client,ownership,params):
             temporary.write_text(json.dumps(state,indent=2),encoding='utf-8')
             os.replace(temporary,state_path)
         async def execute():
-            browser=await CDPBrowser.connect(config['cdp_url'],target_id=params['target_id'],expected_mode='headed')
+            browser=await CDPBrowser.connect(config['cdp_url'],target_id=params['target_id'],expected_mode=config.get('browser_mode','headed'))
             try:
-                runner=FastRunner(await browser.get_current_page(),client.call,package,ownership,config,params['target_id'],state=state,persist=persist)
+                service=getattr(client,'service',None)
+                authority=getattr(service,'session_authority',None)
+                account_lock=(lambda **kw:service.coordinate_account(authority[0],**kw)) if authority else None
+                runner=FastRunner(await browser.get_current_page(),client.call,package,ownership,config,params['target_id'],state=state,persist=persist,account_lock=account_lock)
                 return await runner.run(seconds=seconds)
             finally:await browser.close()
         return asyncio.run(execute())
-    finally:lock_path.unlink(missing_ok=True)
+    finally:lock.release()
 
 
 def main(argv=None):
@@ -275,9 +306,15 @@ def main(argv=None):
     run.add_argument('--config',required=True);run.add_argument('--attempt-id',type=int,required=True)
     run.add_argument('--fence',type=int,required=True);run.add_argument('--target-id',required=True)
     run.add_argument('--seconds',type=float,default=60)
+    session=subs.add_parser('session',help='Advance a local session; endpoint/ownership resolved by its host')
+    session.add_argument('session_id');session.add_argument('--config');session.add_argument('--driver-id')
+    session.add_argument('--seconds',type=float,default=60)
     args=parser.parse_args(argv)
     try:
         if args.operation=='doctor':result=inspect_runtime(args.config,args.url)
+        elif args.operation=='session':
+            from .application_runtime import resolve_config,session_call
+            result=session_call(resolve_config(args.config),args.session_id,'fast_forward',{'seconds':args.seconds},args.driver_id)
         else:
             inspect_runtime(args.config)
             cfg=read_config(args.config)

@@ -150,7 +150,44 @@ def migration_14(db):
     add_columns(db,'owned_targets',{'identity_key':'TEXT'})
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14)]
+def migration_15(db):
+    db.execute('''CREATE TABLE browser_workspaces (
+        id TEXT PRIMARY KEY, config_json TEXT NOT NULL, host_id TEXT,
+        host_identity_json TEXT, host_seen_at TEXT, state TEXT NOT NULL DEFAULT 'offline',
+        reason TEXT, browser_identity_json TEXT, updated_at TEXT NOT NULL)''')
+    db.execute('''CREATE TABLE application_sessions (
+        id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, request_key TEXT NOT NULL,
+        job_id TEXT NOT NULL REFERENCES jobs(id), identity_id TEXT NOT NULL REFERENCES candidates(id),
+        driver_id TEXT NOT NULL, workspace_id TEXT REFERENCES browser_workspaces(id),
+        run_id TEXT REFERENCES runs(id), attempt_id INTEGER REFERENCES application_attempts(id),
+        target_id TEXT, state TEXT NOT NULL, reason TEXT, requested_at TEXT NOT NULL,
+        preparing_at TEXT, connected_at TEXT, ended_at TEXT, driver_seen_at TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}')''')
+    db.execute('CREATE TABLE workspace_profile_aliases (profile TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES browser_workspaces(id))')
+    db.execute("CREATE UNIQUE INDEX one_workspace_session ON application_sessions(workspace_id) WHERE ended_at IS NULL AND workspace_id IS NOT NULL")
+    db.execute("CREATE UNIQUE INDEX one_local_job ON application_sessions(job_id) WHERE ended_at IS NULL")
+    # Old in-memory/API workers cannot acquire a locally reserved job or profile.
+    # These guards also cover the interval before readiness creates an attempt.
+    db.execute('''CREATE TRIGGER local_reserved_attempt BEFORE INSERT ON application_attempts
+        WHEN NEW.workflow != 'local-session-v1' AND (EXISTS (
+            SELECT 1 FROM application_sessions s WHERE s.ended_at IS NULL AND s.job_id=NEW.job_id)
+            OR EXISTS (SELECT 1 FROM workspace_profile_aliases WHERE profile=NEW.browser_profile))
+        BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
+    for action in ('INSERT', 'UPDATE'):
+        db.execute(f'''CREATE TRIGGER local_reserved_lease_{action.lower()} BEFORE {action} ON browser_leases
+            WHEN NEW.state != 'released' AND EXISTS (
+                SELECT 1 FROM application_sessions s WHERE s.workspace_id=NEW.profile
+                AND s.ended_at IS NULL AND (s.attempt_id IS NULL OR s.attempt_id!=NEW.attempt_id))
+            BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
+        db.execute(f'''CREATE TRIGGER legacy_workspace_lease_{action.lower()} BEFORE {action} ON browser_leases
+            WHEN NEW.state!='released' AND EXISTS(SELECT 1 FROM workspace_profile_aliases WHERE profile=NEW.profile)
+            BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
+    db.execute('''CREATE TABLE account_coordination (
+        person_key TEXT NOT NULL, namespace TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES application_sessions(id),
+        acquired_at TEXT NOT NULL, PRIMARY KEY(person_key,namespace))''')
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15)]
 
 
 def migrate(path):

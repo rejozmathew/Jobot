@@ -43,14 +43,7 @@ def confirmation_verified(job_url, url, text):
                 and re.search(r'thank you for (?:applying|your application)|application (?:has been |was )?(?:successfully )?(?:submitted|received)', text, re.I))
 
 
-def local_asset_path(asset):
-    url = urlsplit(asset['storage_ref'])
-    if url.scheme != 'file' or url.netloc or url.query or url.fragment:
-        raise ValueError('Selected resume must be a verified local file')
-    path = Path(url2pathname(unquote(url.path)))
-    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != asset['sha256']:
-        raise ValueError('Selected resume is missing or changed')
-    return path
+from .managed_documents import local_asset_path  # shared with ordinary local sessions
 
 
 def make_field_metadata(item):
@@ -118,26 +111,7 @@ INVENTORY = r"""(() => {
  text:(form?.innerText||document.body.innerText).slice(-14000)};
 })()"""
 
-MASK_CREDENTIALS = r"""(() => {
- window.__maskedCredentialNodes = [];
- const els = Array.from(document.querySelectorAll('input[type="password"], [data-credential], [autocomplete*="password" i]'));
- for (const el of els) {
-  window.__maskedCredentialNodes.push({el, visibility: el.style.visibility});
-  el.style.visibility = 'hidden';
- }
- return {masked_count: window.__maskedCredentialNodes.length};
-})()"""
-
-UNMASK_CREDENTIALS = r"""(() => {
- const list = window.__maskedCredentialNodes || [];
- for (const item of list) {
-  if (item.el) {
-   item.el.style.visibility = item.visibility;
-  }
- }
- delete window.__maskedCredentialNodes;
- return {unmasked_count: list.length};
-})()"""
+from .managed_credentials import MASK_CREDENTIALS, UNMASK_CREDENTIALS
 
 AUTH_FIND_AND_FILL = r"""async (args) => {
  const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden';};

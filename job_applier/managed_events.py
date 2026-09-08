@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timezone
 from .managed_shared import ProtocolError, dumps
 from .managed_redaction import safe_payload, safe_text
+from .managed_sessions import local_session
 
 EVENT_TYPES = frozenset({'tool_started','tool_finished','model_finished','navigation_verified',
     'field_verified','field_context','phase_changed','account_verified','checkpoint','recovery','control','outcome'})
@@ -38,7 +39,11 @@ class EventServices:
             return dict(old)
         lease=db.execute('SELECT * FROM browser_leases WHERE profile=?',(a['browser_profile'],)).fetchone()
         now=self.now()
-        stale=bool(a['completed_at'] or not lease or lease['attempt_id']!=a['id'] or lease['generation']!=fence or lease['state']!='active' or lease['expires_at']<=now)
+        session=local_session(db,a['id'])
+        if session:
+            stale=bool(a['completed_at'] or session['ended_at'] or session['state'] not in ('connected','waiting'))
+        else:
+            stale=bool(a['completed_at'] or not lease or lease['attempt_id']!=a['id'] or lease['generation']!=fence or lease['state']!='active' or lease['expires_at']<=now)
         db.execute('INSERT INTO managed_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
             (event_id,a['id'],a['run_id'],action_id,worker_id,event_type,observed_at,now,duration_seconds,int(stale),dumps(payload),key))
         if not stale and event_type in PROGRESS_TYPES and payload.get('evidence'):
@@ -136,6 +141,7 @@ class EventServices:
     def ack_control(self, attempt_id, *, worker_id, fence, quiescent):
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
+            if local_session(db,attempt_id):raise ProtocolError('local_host_must_stop_browser')
             if not quiescent or not self._is_quiescent(db,a):raise ProtocolError('writers_not_quiescent')
             run=self._get(db,'runs',a['run_id'])
             if run['control'] not in ('pause_requested','stop_requested'):raise ProtocolError('no_control_request')
@@ -167,6 +173,11 @@ class EventServices:
         settings=json.loads(a['settings_json'])
         elapsed=seconds(a['completed_at'] or now,a['started_at'])
         # Explicit clock uncertainty beats a fabricated negative/exact duration.
+        if a.get('local_session_id'):
+            s=self.session_status(a['local_session_id'])
+            return {**a,'elapsed_seconds':max(0,elapsed),'alive':s['host_alive'],
+                    'host_alive':s['host_alive'],'driver_recently_active':s['driver_recently_active'],
+                    'stalled':not a['completed_at'] and seconds(now,a['progress_at'])>settings.get('no_progress_seconds',45)}
         return {**a,'elapsed_seconds':max(0,elapsed),'uncertain_duration':bool(a['uncertain_duration'] or elapsed<0),
             'stalled':not a['completed_at'] and seconds(now,a['progress_at'])>settings.get('no_progress_seconds',45),
             'alive':not a['completed_at'] and 'ownership_lost_or_expired' not in a['timing_uncertainty_reasons'] and seconds(now,a['heartbeat_at'])<settings.get('lease_seconds',60)}

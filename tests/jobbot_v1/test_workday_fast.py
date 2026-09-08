@@ -118,6 +118,15 @@ def test_runner_waits_for_writer_and_returns_boundedly():
     assert result['status']=='waiting'
 
 
+def test_runner_records_meaningful_step_and_decision_without_poll_spam():
+    h=Harness([snapshot('active')]);result=asyncio.run(h.runner().run(seconds=3))
+    events=[args for op,args in h.calls if op=='event' and args['event_type']=='phase_changed']
+    assert len(events)==1
+    assert events[0]['payload']['page']=='my_experience'
+    assert events[0]['payload']['activity']=='Waiting for Simplify to settle'
+    assert result['status']=='waiting' and not h.clicks
+
+
 def test_runner_missing_resume_blocks_submit_not_reconstructs_pdf():
     s=snapshot(step='review'); s['controls']={'submit':{'enabled':True}}
     h=Harness([s]); result=asyncio.run(h.runner().run(seconds=4))

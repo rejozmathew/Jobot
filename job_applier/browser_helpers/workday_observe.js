@@ -24,6 +24,32 @@
   const email=all('input[type="email"],input[autocomplete="username"],input[name="email"]');
   const selector=e=>e&&e.id?'[id='+JSON.stringify(e.id)+']':null;
   const auth_refs={email_ref:email.length===1?selector(email[0]):null,password_ref:pw.length>=1?selector(pw[0]):null,confirmation_ref:pw.length===2?selector(pw[1]):null};
+  const mode=pw.length===2?'create_account':pw.length===1?'sign_in':'unknown';
+  const authRoot=pw[0]&&(pw[0].closest('form,[role="dialog"]')||document);
+  const authButtons=authRoot?all('button,a,[role="button"]').filter(e=>authRoot.contains(e)):[];
+  const authControl=(kind,matches)=>{
+    if(matches.length!==1){if(matches.length)controls[kind]={enabled:false,ref:null};return;}
+    const e=matches[0];scope.controls.set(kind,e);
+    controls[kind]={ref:kind,enabled:!e.disabled&&e.getAttribute('aria-disabled')!=='true'};
+  };
+  const label=mode==='create_account'?'create account':'sign in';
+  authControl('auth_submit',authButtons.filter(e=>text(e).toLowerCase()===label&&(e.tagName==='BUTTON'||e.getAttribute('role')==='button')));
+  authControl('auth_switch_sign_in',mode==='create_account'?authButtons.filter(e=>text(e).toLowerCase()==='sign in'):[]);
+  authControl('auth_switch_create_account',mode==='sign_in'?authButtons.filter(e=>text(e).toLowerCase()==='create account'):[]);
+  const checkboxes=authRoot?all('input[type="checkbox"],[role="checkbox"]').filter(e=>authRoot.contains(e)):[];
+  const checkboxLabel=e=>[...(e.labels||[])].map(text).join(' ')||e.getAttribute('aria-label')||
+    (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)).filter(Boolean).map(text).join(' ')||text(e.closest('label')||e.parentElement);
+  const consent=e=>{const t=checkboxLabel(e);return !/marketing|job alerts|talent community|send me/i.test(t)&&
+    /privacy|terms|conditions|consent|personal data/i.test(t)&&(/agree|accept/i.test(t)||e.required||e.getAttribute('aria-required')==='true');};
+  const unchecked=e=>!e.checked&&e.getAttribute('aria-checked')!=='true';
+  const pendingConsent=checkboxes.filter(e=>consent(e)&&unchecked(e));
+  authControl('auth_consent',pendingConsent);
+  const notices=all('[role="alert"],[data-automation-id="errorMessage"],h1,h2,h3,p').map(text).join(' ');
+  const auth_ui={mode,unknown_required_consent:pendingConsent.length>1||checkboxes.some(e=>unchecked(e)&&!consent(e)&&(e.required||e.getAttribute('aria-required')==='true')),
+    challenge:/verify your (?:email|account)|verification (?:email|code)|check your (?:email|inbox)|multi.factor authentication/i.test(notices),
+    account_exists:/(?:account|email).{0,70}already (?:exists|registered|in use)/i.test(notices),
+    account_created:/(?:account.{0,50}(?:successfully created|has been created)|account created successfully)/i.test(notices),
+    credential_rejected:/(?:invalid|incorrect).{0,35}(?:password|credentials|email)|(?:password|credentials).{0,35}(?:invalid|incorrect)|account.{0,30}locked/i.test(notices)};
   const escaped=(args.requisition||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
   const req=escaped?new RegExp('(?:^|[^A-Za-z0-9])'+escaped+'(?:$|[^A-Za-z0-9])','i'):null;
   const rows=all('tr,[role="row"],[data-automation-id="applicationCard"]');
@@ -33,5 +59,5 @@
   const resume_attached=!!args.resume_name&&attachments.some(e=>text(e).includes(args.resume_name)&&(/uploaded/i.test(text(e))||e.tagName==='A'||/file/i.test(e.getAttribute('data-automation-id')||'')));
   const email_inputs=all('input[type="email"]');
   const identity_mismatch=!!args.expected_email&&email_inputs.some(e=>e.value&&e.value.toLowerCase()!==args.expected_email.toLowerCase());
-  return {step,native:controls,blocking_errors:[...new Set(errors)],auth:pw.length>0,auth_refs,submitted,resume_attached,identity_mismatch};
+  return {step,native:controls,blocking_errors:[...new Set(errors)],auth:pw.length>0||auth_ui.challenge,auth_refs,auth_ui,submitted,resume_attached,identity_mismatch};
 }

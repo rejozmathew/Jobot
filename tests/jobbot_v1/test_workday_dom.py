@@ -48,3 +48,17 @@ def test_auth_fields_return_only_selectors_never_credentials():
     assert s['auth_refs']['email_ref']=='[id="email"]'
     assert 'never-log-me' not in json.dumps(s)
     assert 'private@example.test' not in json.dumps(s)
+
+
+def test_selected_credentials_complete_when_animation_frames_are_suspended():
+    from job_applier.managed_credentials import FILL_SELECTED
+    if not JSDOM.exists():pytest.skip('optional jsdom fixture dependency not installed')
+    harness=r'''
+const {JSDOM}=require(process.argv[1]),fs=require('fs'),script=JSON.parse(fs.readFileSync(0,'utf8'));
+const dom=new JSDOM('<input id="email" type="email"><input id="password" type="password">',{runScripts:'outside-only'});
+const w=dom.window;w.HTMLElement.prototype.getBoundingClientRect=()=>({width:100,height:30});
+w.requestAnimationFrame=()=>0;
+Promise.race([w.eval('('+script+')')({email_ref:'#email',password_ref:'#password',email:'fixture@example.test',password:'fixture-value'}),new Promise(r=>setTimeout(()=>r({error:'animation_frame_wait_hung'}),600))]).then(r=>{console.log(JSON.stringify(r));w.close();});
+'''
+    result=subprocess.run(['node','-e',harness,str(JSDOM)],input=json.dumps(FILL_SELECTED),text=True,capture_output=True,check=True,timeout=10)
+    assert json.loads(result.stdout)['values_committed'] is True

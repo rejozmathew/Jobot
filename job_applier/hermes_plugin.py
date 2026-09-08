@@ -10,8 +10,8 @@ from .managed_client import Client
 from .managed_shared import ProtocolError, uid
 
 HOOKS=('pre_tool_call','post_tool_call','pre_api_request','post_api_request','api_request_error')
-OPERATIONS=('status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy','browser_observe','credentials','fast_forward')
-SCHEMA={'name':'jobbot','description':'Pull one reserved job, report verified milestones, and respect app-owned controls. Never starts a model or legacy agent.',
+OPERATIONS=('start','attach','pause','stop','retry','browser','account_lock','status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy','browser_observe','credentials','fast_forward')
+SCHEMA={'name':'jobbot','description':'Start one local application from a URL, use its owned browser and shared helpers, and record verified outcomes. No model is launched.',
     'parameters':{'type':'object','properties':{'operation':{'type':'string','enum':list(OPERATIONS)},'parameters':{'type':'object'}},'required':['operation'],'additionalProperties':False}}
 
 
@@ -20,6 +20,7 @@ class PluginController:
         self.config_path=config_path
         self.adapters={}
         self.runtime={}
+        self.local_sessions={}
         self._stop=threading.Event()
         self._thread=None
         self._lock=threading.RLock()
@@ -28,10 +29,15 @@ class PluginController:
         if not self.config_path or not Path(self.config_path).is_absolute():raise ProtocolError('integration_not_configured')
         try:cfg=json.loads(Path(self.config_path).read_text(encoding='utf-8'))
         except (OSError,ValueError):raise ProtocolError('integration_not_configured')
+        if not isinstance(cfg,dict):raise ProtocolError('integration_not_configured')
+        if cfg.get('transport')=='local':
+            from .application_runtime import resolve_config
+            return resolve_config(self.config_path)
         required=('base_url','instance_id','worker_id','browser_profile','skill_version','provider','model','worker_token_env','spool_dir')
         if not isinstance(cfg,dict) or not all(isinstance(cfg.get(k),str) and cfg[k] for k in required):raise ProtocolError('integration_not_configured')
         if not Path(cfg['spool_dir']).is_absolute():raise ProtocolError('absolute_outbox_path_required')
-        if not os.environ.get(cfg['worker_token_env']):raise ProtocolError('worker_credentials_unavailable')
+        from .managed_cli import credential_available
+        if not credential_available(cfg['worker_token_env'],cfg):raise ProtocolError('worker_credentials_unavailable')
         return cfg
 
     def available(self):
@@ -68,6 +74,11 @@ class PluginController:
 
     def route(self, name, **kwargs):
         if name=='post_api_request':self._observe_runtime(kwargs)
+        if kwargs.get('session_id') in self.local_sessions:
+            tool=kwargs.get('tool_name') or kwargs.get('name') or ''
+            if name=='pre_tool_call' and tool.startswith('browser'):
+                return {'action':'block','message':'This application has its own workspace. Use jobbot browser or fast_forward so actions stay scoped to its session.'}
+            return None
         with self._lock:adapter=self.adapters.get(kwargs.get('session_id'))
         if adapter is None:return None
         try:return getattr(adapter,name)(**kwargs)
@@ -85,7 +96,8 @@ class PluginController:
             raise ProtocolError('requested_runtime_not_verified')
         with self._lock:
             if sid not in self.adapters:
-                client=Client(cfg['base_url'],cfg['instance_id'],os.environ[cfg['worker_token_env']])
+                from .managed_cli import credential
+                client=Client(cfg['base_url'],cfg['instance_id'],credential(cfg['worker_token_env'],cfg))
                 try:
                     health=client.call('health')
                     if health.get('instance_id')!=cfg['instance_id']:raise ProtocolError('instance_mismatch')
@@ -122,6 +134,8 @@ class PluginController:
             params=args.get('parameters') or {}
             if op not in OPERATIONS or not isinstance(params,dict):raise ProtocolError('invalid_operation')
             sid=kwargs.get('session_id')
+            if cfg.get('transport')=='local':
+                return json.dumps(self._handle_local(cfg,op,dict(params),sid),ensure_ascii=False)
             if op=='status':
                 return json.dumps({'available':True,'runtime':self.runtime.get(sid),'bound':sid in self.adapters})
             adapter=self._adapter(sid,cfg)
@@ -204,7 +218,32 @@ class PluginController:
             return json.dumps(result,ensure_ascii=False)
         except Exception as exc:
             code=exc.code if isinstance(exc,ProtocolError) else 'integration_error'
-            return json.dumps({'status':'unavailable' if code in ('integration_not_configured','worker_credentials_unavailable') else 'error','error':code})
+            from .managed_redaction import safe_text
+            return json.dumps({'status':'unavailable' if code in ('integration_not_configured','worker_credentials_unavailable') else 'error','error':code,'detail':safe_text(str(exc))[:1000]})
+
+    def _handle_local(self,cfg,op,params,sid):
+        from .application_runtime import start,session_call,driver_identity
+        from .managed import Service
+        driver_identity(sid)
+        if op=='start':
+            observed=self.runtime.get(sid,{})
+            result=start(cfg,driver_id=sid,metadata={k:observed.get(k) for k in ('model','provider','reasoning_effort','response_model')},**params)
+            self.local_sessions[sid]=result['session_id'];return result
+        session_id=params.pop('session_id',None) or self.local_sessions.get(sid)
+        if not session_id:
+            service=Service(cfg['db_path'],instance_id=cfg['instance_id'])
+            with service.tx() as db:
+                row=db.execute('SELECT id FROM application_sessions WHERE driver_id=? ORDER BY requested_at DESC LIMIT 1',(sid,)).fetchone()
+            if row:session_id=row[0];self.local_sessions[sid]=session_id
+        if op=='status' and not session_id:return {'available':True,'transport':'local','runtime':self.runtime.get(sid),'bound':False,'config_path':cfg['config_path']}
+        if not session_id:raise ProtocolError('start_a_local_session_first')
+        if op in ('accept','next','bind_target','checkpoint','ack_control','extend_budget'):raise ProtocolError('local_session_resolves_lifecycle')
+        aliases={'resume':'attach','observe':'observe_owned_lesson','milestone':'event','mail_request':'request_mail_for_attempt','mail_match':'match_mail_for_attempt'}
+        operation=aliases.get(op,op)
+        if operation=='event':params.setdefault('event_id',uid())
+        result=session_call(cfg,session_id,operation,params,sid)
+        self.local_sessions[sid]=session_id
+        return result
 
     def close(self):
         self._stop.set()

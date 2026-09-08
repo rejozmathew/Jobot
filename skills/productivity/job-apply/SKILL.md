@@ -1,85 +1,206 @@
 ---
 name: job-apply
-description: Run managed applications with evidence and continuity.
-version: 0.3.0
+description: Execute local JobBot applications with Simplify.
+version: 0.4.2
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
-platforms: [linux, macos, windows]
+platforms: [windows]
 metadata:
   hermes:
-    tags: [jobs, managed-worker, simplify]
+    tags: [jobs, local-session, simplify]
     related_skills: [job-posting-harvest]
 ---
 
-# Managed Job Apply
+# Job Apply
 
-The selected harness executes applications using its available browser, shell, file and mailbox capabilities. Shared procedures and helper code live in this repository, not in a personal harness profile. Auto Job Applier supplies the queue, candidate facts, documents, account history and tracking through `jobbot`. This repository is the canonical version of this skill; the loaded content and its references govern this session, including when an older personal skill has the same name. Do not invoke the legacy `run_applier.py apply` engine.
+This repository owns the procedure. Hermes discovery is a thin entry; another
+shell-capable harness uses the same local interface. The application executor
+uses its configured application model and existing mailbox capabilities. This
+skill does not launch a model. Engineering and application execution are separate.
 
-## When to Use
-- A user authorizes an application batch and the app provides a reserved run ID.
-- Resume an explicitly checkpointed managed run after context/session changes.
-- Not for engineering sessions, unsupported runtime combinations, or unsolicited application runs.
+These shared rules apply to all ATS platforms. Respect app-owned controls and
+selected profile facts. Use bounded recovery for demonstrated blockers and actual
+page evidence. Prefer Simplify for bulk filling, without a redundant full final
+audit. Native lifecycle labels are `jobbot start`, `jobbot pause`, `jobbot stop`
+and `jobbot finish`; the portable commands below invoke the same services.
 
-## Prerequisites
-- The app instance, explicit configuration, selected identity and browser profile must agree with the worker.
-- With Hermes, use the installed hooks and native `jobbot` tool when available. Another harness uses the same authenticated managed protocol via its shell and reads these repository files directly; see [runtime ownership and transport](../../../docs/jobbot-v1/APPLICATION_RUNTIME.md). The requested provider/model must match observed runtime metadata; unavailable means unavailable, not another provider or credential route.
-- Inspect selected profile facts and immutable attempt context. Resolve credentials through protected references; do not put credentials, verification codes, mailbox bodies or raw reasoning into ordinary logs.
-- Use the approved browser and exact owned target. A bare URL or successful command is not a managed application.
+## Start in the current conversation
 
-## How to Run
-`jobbot accept`, `jobbot next`, `jobbot checkpoint`, and `jobbot finish` below are operations on the native `jobbot` tool, not invented shell subcommands. For example, call `jobbot` with `operation="accept"` and `parameters={"run_id":"<reserved-run>"}`, then `operation="next"` to claim one job.
+Use native `jobbot(operation="start", parameters={"url":"<eligible-job-url>"})`
+when available. Otherwise run from this repository using its virtualenv Python:
 
-`next` includes the application context. `context` takes empty parameters; ownership identifiers are supplied by the integration. `bind_target` takes exactly `{"target_id":"<observed-CDP-target>","url":"<claimed-job-url>"}`. Do not add attempt, owner, fence or run fields to these calls.
+```text
+.venv/Scripts/python.exe -m job_applier.application_runtime start "<eligible-job-url>"
+```
 
-The fallback transport is the same app protocol through `terminal(command="<python> run_applier.py managed call --config <explicit-config> --operation <operation> --payload <payload>", workdir="<app-repo>")`. Use the configured credential name with `--token-env`; it resolves from the launcher environment or an explicit private-file reference, never from a value in command arguments. For an ordinary Hermes thread without native `jobbot`, read [internal service authentication](references/internal-service-auth.md) and verify the CLI health check before claiming. Do not launch another worker conversation just to obtain credentials.
+The selected private config resolves through `JOBBOT_CONFIG` or the repository's
+ignored `artifacts/jobbot-v1-private/runtime-config.json` pointer. An explicit
+`--config <absolute-json>` overrides the pointer. No API token export, dashboard,
+claim, lease renewal, port selection or target binding is needed. The service
+checks configured identity/resume, eligibility and duplicate history, records
+preparing, launches the assigned headed browser and returns a session handle.
+Doctor is a separate read-only diagnostic; start performs its own live readiness.
 
-## Procedure
-1. Accept the reserved run; request `jobbot next`. Do no form work without the returned attempt ID, owner and fence. If there is no work or pickup is unavailable, stop honestly.
-2. Retain run continuity and reusable helper references. Read selected profile facts, the chosen document reference and account namespace plus identity before any login. See [accounts and mail](references/accounts-and-mail.md).
-3. Confirm the live official role is still eligible under current approved policy; dynamic exclusions, location, level and explicit sponsorship restrictions matter. Existing submission evidence and uncertain prior attempts must not be bypassed.
-4. Open a new application tab in the existing visible Simplify-enabled browser at the supplied CDP endpoint. Capture its actual CDP target ID and call `jobbot bind_target` with `target_id` and the claimed job URL. Use that exact target for browser tools or terminal/CDP helpers; never let a tool silently choose another existing tab. Confirm the visible page and call `jobbot browser_observe` with `target_id` and `cdp_url`. Resolve sign-in/create-account and ordinary email verification autonomously as described below. Then use Simplify as the primary bulk filler. On each new page rediscover supported extension controls. Use [bounded flexible recovery](references/simplify.md), not a rigid screen sequence or repeated full-form reruns.
-5. Let Simplify finish before touching a form. Prefer enabled Continue over nonblocking Need review warnings; do not audit every optional field/template. Confirm identity/contact and the approved attachment, and resolve only actual required blockers using selected profile facts. Unknown or inverted material screening questions require interpretation or clarification, not an invented factual answer. On Workday use the repository [workday-simplify skill](../workday-simplify/SKILL.md) and its bounded runner, not one-off CDP polling scripts.
-6. Prefer extension Continue Application over an ATS advancement button when available. Once the extension is observably quiescent, use approved deterministic helpers or native tools for residuals only. Preserve working filled sections.
-   Before a residual repair, call native `jobbot` operation `milestone` with `event_type="field_context"` and payload containing stable semantic `page`, `field`, and `category` identifiers (letters, digits, `.`, `_`, `:`, `/`, `-`; at most 120 characters each). Never put field values or raw arguments in these identifiers. This context is captured at action start and charged the automatically measured tool duration across tool names. Emit a new context for a genuinely different field/page; `field_verified` or `navigation_verified` clears it, as does an empty `field_context` payload. A milestone alone is not proof of progress. When context is absent, the app reports `coarse_only`: attempt/no-progress limits still apply, but no field-specific precision is claimed. Honor budget blocks; do not rename the same problem to evade them.
-7. Obey app-owned controls before side effects. A pause/stop request is not acknowledged until owned writers and targets are quiescent. Expired or unknown ownership requires reconciliation; stale callbacks never attach to a newer attempt.
-8. Verify the approved resume from `context.documents.assets` is attached. If Simplify attached that exact approved file and the attachment UI verifies it, retain it; otherwise upload the local approved asset to the actual observed file input using native tools/CDP. Do not assume `#resume`. Continue through all pages. In authorized submit mode call `jobbot submission_intent` with employer-page evidence, submit automatically, and observe the actual employer confirmation. Do not stop for human review. A validation rejection is not a submission; uncertain post-click state is submission_unknown.
-9. Record accurate outcome/evidence, close only completed owned targets, and `jobbot finish` with truthful quiescence. Keep an authentication blocker visible for the user if needed. Request the next reserved job in the same conversation; do not make new conversations mandatory per job.
-10. Before a context handoff, `jobbot checkpoint` with a short factual summary, next step and reusable references—no private mail contents or raw reasoning. A new session uses explicit resume after ownership reconciliation.
+`HERMES_SESSION_ID` identifies this conversation. If the shell does not expose
+it, pass `--driver-id <this-conversation-id>` on local commands, consistently for
+this conversation. Another conversation uses its own ID. Never adopt an existing
+active driver's ID. A repeated start returns the same session/attempt/tab.
+`capacity_wait` means the configured pool is occupied or unavailable; inspect
+its occupants/reason. It does not authorize another unmanaged browser.
 
-## Shared fast-path policy (all ATS platforms)
+The returned `session_id`, job/context, approved assets, account namespace,
+workspace and timing are authoritative. Native subsequent operations resolve
+that session automatically. The portable equivalent is:
 
-- Simplify is the primary bulk writer. Never compete with active/unknown writer state.
-- No in-run resume/PDF text extraction, filesystem hunts for another resume, or reconstruction of experience/education. Approved document upload and pre-run asset selection are still allowed; profile maintenance is a separate explicit task.
-- No redundant full final audit: reuse verified profile/document context and resolve only material blockers.
-- Forward progress beats clearing every review warning. Try enabled Continue after observed quiescence, then repair only a demonstrated blocker. Keep retries bounded and preserve working sections.
-- Use shipped helper functions with structured arguments, not ad hoc nested Python/JavaScript strings. Screenshots and detailed field inspection are exception tools, not every polling tick.
-- New writes go through the configured managed service/database. Legacy history is read-only duplicate suppression; never guess schema columns or dual-write outcomes.
+```text
+.venv/Scripts/python.exe -m job_applier.application_runtime call <session-id> <operation> --parameters <JSON-or-@private-file>
+.venv/Scripts/python.exe -m job_applier.application_runtime status <session-id>
+```
 
-## Pitfalls
-- Healthy heartbeat is not verified progress. Use real page/field/validation milestones; avoid narrative progress claims.
-- Ordinary email verification is part of execution, not CAPTCHA or a human handoff. A genuine CAPTCHA/MFA blocker unavailable to the tools becomes a recorded blocked job; continue the batch. Do not repeatedly create accounts or reset passwords.
-- An account created successfully stays confirmed even if a later form page fails.
-- Do not broadly restart browsers. Only operate on the verified owned process/target; absence of controls is a reportable recovery state.
-- Input values can look populated without being committed. See [Greenhouse](references/greenhouse.md), [Workday](references/workday.md), and [CDP recipes](references/cdp-recipes.md).
+Portable operation names include `context`, `report`, `browser_observe`,
+`fast_forward`, `credentials`, `browser`, `event`, `record_account_event`,
+`report_upload`, `submission_intent`, `finish`, `request_mail_for_attempt`,
+`match_mail_for_attempt`, and `account_lock`. No attempt/fence/target/CDP fields
+belong in their parameters. Native `milestone` maps to `event`, `observe` to
+`observe_owned_lesson`, `mail_request`/`mail_match` to the matching mail operations.
+Native `context`, `report`, and `browser_observe` accept empty parameters.
 
-## Verification
-Report actual confirmation or review/blocked state, attempt/run IDs, real elapsed time, known phase/tool/model losses, and reusable fixes. Read the app's attempt/events views (or matching authenticated CLI operations). Missing timing detail remains unknown, not invented. Fixture success is not live Workday/Simplify proof. Do not start applications while shared implementation or skills are being edited.
+## Execute
 
-## Private authentication and Gmail
+1. Verify the actual role remains eligible and the selected identity, account
+   email, contact email, resume and mailbox are the approved ones. Exclusions,
+   unknown required facts and same-job submission uncertainty remain binding.
+2. Read the returned account strategy; use confirmed accounts. Inspect auth
+   controls using `browser` with `{"method":"snapshot"}`. Pass only observed
+   unique selectors `email_ref`, `password_ref`, optional `confirmation_ref` to
+   `credentials`. It privately resolves the site's saved credential reference or
+   the retained configured default for a new site, fills it, and
+   coordinates this candidate/portal account. Click the observed native action
+   through `browser`. For Workday, the fast runner handles the normal account
+   sequence automatically; use manual recovery only for its specific exception.
+   Record `creation_pending` before the create action, `created_unverified` on
+   employer-confirmed creation, and `confirmed` after verified sign-in. Persist
+   the non-secret `credential_ref` returned by the filler; never invent one.
+   Account creation must survive a later application failure.
+   `record_account_event` takes `namespace`, `state`, `credential_ref`,
+   `request_id` and non-secret `evidence`. Use `account_lock` with `release:true`
+   after a completed/rejected authentication step. Never repeatedly create an
+   account whose outcome is unknown. Different employers have independent locks.
+3. Let official Simplify do bulk filling. Observe until it settles; never compete
+   with active/unknown writers. On Workday read
+   [workday-simplify](../workday-simplify/SKILL.md) and use `fast_forward`.
+4. Prefer enabled Continue after settling over nonblocking review warnings.
+   Handle only actual required blockers and material identity/document errors.
+   Use approved facts; never fabricate screening answers or reconstruct history.
+5. For exceptions, `browser` methods are `snapshot`, `screenshot`, `click` (observed `selector`),
+   `fill` (`selector`, approved `value`), `press` (`key`), `navigate` (`url` in the
+   owned application), `evaluate` (`script`, optional structured `argument`),
+   `upload` (`selector`, selected `asset_id`), and `simplify` (`action`). These
+   use the assigned target. Never use global desktop focus, a process-global CDP
+   variable, arbitrary other tabs, or a generic browser tool's default profile.
+   `screenshot` returns an absolute private `image_path` for this session's target
+   with credential controls masked. Inspect it with the current harness's image
+   capability; in ordinary Hermes, use `vision_analyze(image_url=<image_path>,
+   question=<specific question>)`. It uses the existing configured capability,
+   not a new worker. Pair the image with `snapshot` for fresh control selectors.
+6. Verify the approved resume attachment using actual employer controls. Retain
+   a correct verified attachment; do not reupload it unnecessarily. If needed,
+   `browser upload` hash-checks only the selected asset and records the attempt.
+   After observing successful attachment use `report_upload` with `asset_id`,
+   `status:"upload_confirmed"`, and evidence. No in-run PDF extraction, resume
+   hunts, or reconstruction of career/education fields on any ATS.
+7. Continue every page. In configured submit mode, record `submission_intent`
+   with exact employer-page evidence, submit once, and verify the employer's
+   exact requisition confirmation once. Do not add a human review checkpoint.
+   The Workday runner does these steps when supported; do not repeat them after
+   it returns applied. Simplify's success panel alone is not employer evidence.
+8. Use `finish` with the truthful outcome, evidence and observed quiescence.
+   The host isolates its browser before making the workspace available again.
+   A missing post-click confirmation is `submission_unknown`; never click again.
 
-- Read `jobbot account_strategy` for the context's portal namespace. Reuse a confirmed account. Otherwise create an account using the configured credential. Record confirmed account creation immediately with `record_account_event`; credentials remain in the private profile and events store only its reference.
-- Use the actual browser capability exposed by this Hermes installation. With `browser_exec`, read its returned/API documentation and use its native page inspection, evaluation, navigation and upload methods; use one named browser session for the run. Other Hermes versions expose `browser_snapshot`/`browser_console`. Inspect the actual authentication inputs using that native capability or the exact-target CDP helper. Choose the email/username, password and optional confirmation controls yourself. Pass their **observed unique CSS selectors** as `email_ref`, `password_ref`, optional `confirmation_ref`, plus the owned `target_id`, to `jobbot credentials`. These are references to inspected controls, not guesses. The private helper supplies the configured values and returns field counts, committed-state verification, inferred account mode and a non-secret error category. Inspect and correct stale/ambiguous refs; never dump credential files or password values. Click the observed native authentication action after committed values are verified.
-- Use the application contact email from the approved attempt context consistently with portal credentials, Simplify residuals and the verification mailbox. Correct a differing Simplify email before continuing. Do not silently change factual profile fields.
-- The run context supplies an installed Hermes `gmail_script` and `mailbox_token_path`. Use the existing Gmail capability via `terminal`:
-  `<python> -m job_applier.hermes_gmail --script <gmail_script> --token-file <mailbox_token_path> gmail search <query> --max 5`, then the same prefix followed by `gmail get <message_id>`.
-  Set the terminal working directory to the supplied repository. Search narrowly for the current portal, recipient, purpose and request time. Use the actual verification link/code privately in the browser; do not include it or message bodies in milestones, ordinary logs or the final response. Password resets require separate explicit user authorization. Never send unrelated mail.
-- If a recorded generated password was used successfully, preserve it in the existing protected credential store before proceeding; do not record it in JobBot event text.
+`finish` parameters are `{"outcome":"blocked","evidence":"<observed reason>",
+"quiescent":true}` (or another supported truthful outcome). Do not add invented
+fields. `context` and `report` remain readable after the browser host has stopped.
 
-## Execution and tracking contract
+## Mail and private identity
 
-- You own application execution only. Read existing helpers and procedural knowledge as useful. Do not edit shared Python, write application adapters, modify the canonical skill, or delegate the application. Record observations with `jobbot observe`; Codex decides changes after the run.
-- `jobbot` takes `operation` and a `parameters` object. Milestones use `event_type`, `observed_at` (UTC ISO timestamp), and a concise non-secret `payload`. Use `phase_changed`, `navigation_verified`, `field_verified`, `checkpoint` and `outcome` only for real observations. Call `browser_observe` after navigation and after Simplify settles to refresh actual writer state. Do not compete with active Simplify; observe until it finishes or a concrete blocker is established.
-- Before any submit click, `submission_intent` takes `evidence`. Upload reporting uses `asset_id`, `status` (`upload_attempted` or `upload_confirmed`) and `evidence`. Account events use `namespace`, `state`, optional `credential_ref`, and `evidence`; inspect the context for its exact account namespace/state conventions.
-- On failure retain the exact headed target. Record the failed operation, URL, relevant visible controls/refs and non-secret state, attempted next action and exact error. Use `target_state` with `state="preserved"` and evidence. On success close only the owned completed target and record `state="closed"`. Refresh browser observation before closing/preserving to establish quiescence. `finish` takes `outcome`, `evidence`, `quiescent=true`. Request `next` after finishing; do not let one blocked job stall the queue.
-- The launcher records executor, actual model/effort, canonical skill hash, headed mode, run ID and attempt ID. Preserve these identifiers in the final result. A worker process exit is not evidence of application submission.
+The selected config supplies `gmail_script` and `mailbox_token_path`. Use the
+existing mailbox capability from the same conversation:
+
+```text
+.venv/Scripts/python.exe -m job_applier.hermes_gmail --script <configured-script> --token-file <configured-token-file> gmail search <narrow-query> --max 5
+```
+
+The same prefix supports `gmail get <message-id>`. Correlate portal, actual account
+recipient, purpose and request time. Use codes/links privately; never log mailbox
+bodies, passwords, OTPs or reset tokens. Do not use another personal mailbox.
+Routine account creation, relevant verification and approved uploads/submission
+follow standing configured authorization. Respect actual provider permissions.
+A genuinely unavailable CAPTCHA/MFA or unknown required fact blocks that job,
+without blocking unrelated work. Do not bypass challenges. Password recovery
+requires the applicable configured/user authorization. Do not use an unretained
+provider-generated password; use the configured reusable employer credential.
+
+## Stop, attach and retry
+
+```text
+.venv/Scripts/python.exe -m job_applier.application_runtime pause <session-id>
+.venv/Scripts/python.exe -m job_applier.application_runtime stop <session-id>
+.venv/Scripts/python.exe -m job_applier.application_runtime attach <session-id>
+.venv/Scripts/python.exe -m job_applier.application_runtime retry <session-id>
+```
+
+Pause/stop acknowledgement means the host stopped its owned browser activity.
+Pending control is not acknowledgement. Attach by another driver requires that
+pause to finish, then starts a fresh owned target; it does not inherit the old
+page ID. Retry creates a new attempt only after scoped stop/reconciliation and
+no uncertain submission. Heartbeats report activity and never extend local
+permission. A normal reasoning gap is allowed; stalled/disconnected activity is
+visible. No progress is inferred from a live host or recent heartbeat.
+
+## Evidence and change discipline
+
+Record a concise update when starting each application stage and when its outcome
+changes: opening the role, account sign-in/creation, Simplify filling, required
+residuals, resume verification, submitting, and employer confirmation. Use the
+existing `event` operation with `event_type:"phase_changed"` and payload `phase`,
+`activity` (what you are doing), `next_step`, `source:"Hermes executor"`, and
+observed `model`/`provider` when known. Record verified outcomes with the matching
+verification event. These updates appear on the session card and attempt timeline;
+the engineering conversation's progress messages are not a substitute.
+
+A helper exception is not an employer rejection. Record `event_type:"recovery"`
+with its observed `error_type`, concise `evidence`, and the safe `next_step`.
+Use the existing scoped browser/credential tools for a supported exception path
+when possible; keep Simplify as the bulk filler. Do not finish merely because one
+helper failed. If bounded recovery cannot proceed, record what failed, what was
+tried, what is needed, and whether any submission occurred before finishing.
+Do not log raw prompts, private reasoning, field values or credential/mail content.
+
+`authentication_required.recovery` distinguishes unsupported/possibly changed
+controls, rejected credentials, verification, configuration and uncertain account
+actions. Follow its scoped screenshot/snapshot handoff. A possible page change is
+not proof the employer changed its site. Keep the session open while the current
+executor inspects and performs a bounded supported recovery, then return to the
+fast runner/Simplify. If image capability is unavailable, report that limitation
+and use the fresh DOM snapshot where sufficient. Never claim visual inspection
+without seeing the image. Record the observed mismatch and recovery for a later
+helper update; do not edit the helper during the application or repeat a pending
+creation/submission to discover whether it worked.
+
+Use `event`/native `milestone` for real activities, with `event_id`, `event_type`,
+UTC `observed_at`, and a concise non-secret payload. Navigation/field/account
+verification records actual progress. For residual timing use `field_context`
+with semantic `page`, `field`, `category` identifiers, never values. Follow
+observed controls and quiescence guards. A benchmark executor must not edit shared
+Python, JavaScript or skills, spawn an alternative application worker, or generate
+adapters. Record bounded observations for engineering after the run.
+
+Report exact employer evidence, session/attempt IDs, honest request-to-end wall
+time, actual model/effort when observed, and specific blockers. Missing evidence
+stays unknown. Fixture tests do not prove live ATS support or a ten-minute result.
+The authoritative helper/lifecycle map is
+[APPLICATION_RUNTIME.md](../../../docs/jobbot-v1/APPLICATION_RUNTIME.md).
+Older accept/claim/fence/HTTP instructions are compatibility history, not this
+conversation's startup procedure. Do not invoke `run_applier.py apply`.

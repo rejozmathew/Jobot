@@ -1,6 +1,9 @@
 """Synthetic full managed protocol path; actual service/DB, no employer or account."""
 import asyncio
 import hashlib
+import os
+import sys
+from contextlib import nullcontext
 import pytest
 from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
@@ -12,7 +15,8 @@ from job_applier.simplify_boundary import OBSERVE
 
 
 @pytest.mark.parametrize('panel_after',[True,False])
-def test_fast_runner_finishes_through_real_managed_api(tmp_path,monkeypatch,panel_after):
+@pytest.mark.parametrize('transport',['http','local'])
+def test_fast_runner_finishes_through_real_managed_api(tmp_path,monkeypatch,panel_after,transport):
     s=Service.create(tmp_path/'fixture.db',instance_id='fixture-fast',settings={'mode':'pilot','submission_mode':'submit'})
     s.identity(identity_id='fixture-person',person_key='fixture-person',email='fixture@example.test',profile={})
     asset=s.register_asset(identity_id='fixture-person',kind='resume',version='fixture-1',sha256=hashlib.sha256(b'synthetic fixture').hexdigest(),provenance={'source':'synthetic'},storage_ref=(tmp_path/'fixture.pdf').as_uri())
@@ -20,10 +24,18 @@ def test_fast_runner_finishes_through_real_managed_api(tmp_path,monkeypatch,pane
     job=s.intake(url=url,source_id='fixture',company='Synthetic Fixture')
     s.eligibility(job['id'],'ready',reason='synthetic test')
     s.select_asset(asset_id=asset['id'],job_id=job['id'])
-    run=s.request_run(request_id='fixture-run',job_ids=[job['id']],identity_id='fixture-person',browser_profile='fixture-browser')
-    s.accept_run(run['id'],worker_id='fixture-worker',session_id='fixture-session',capabilities={'protocol':1,'skill_version':'fixture','browser_profile':'fixture-browser','provider':'fixture','model':'fixture','telemetry':True})
-    attempt=s.claim(run['id'],worker_id='fixture-worker')
-    owner={'attempt_id':attempt['id'],'worker_id':'fixture-worker','fence':attempt['fence']}
+    if transport=='local':
+        from job_applier.workspace_process import process_identity
+        s.configure_workspaces([{'id':'fixture-browser','user_data_dir':str(tmp_path/'profile'),'browser_executable':sys.executable,'cdp_url':'http://127.0.0.1:9223','mode':'headed'}])
+        session=s.reserve_session(request_id='fixture-run',job_id=job['id'],identity_id='fixture-person',driver_id='fixture-session',workspace_ids=['fixture-browser'],concurrency_limit=1,resume_asset_id=asset['id'])
+        s.host_registered('fixture-browser','fixture-host',process_identity(os.getpid()))
+        session=s.session_connected(session['id'],'fixture-host','fixture-tab',{'synthetic':True})
+        attempt=s.attempt(session['attempt_id'])
+    else:
+        run=s.request_run(request_id='fixture-run',job_ids=[job['id']],identity_id='fixture-person',browser_profile='fixture-browser')
+        s.accept_run(run['id'],worker_id='fixture-worker',session_id='fixture-session',capabilities={'protocol':1,'skill_version':'fixture','browser_profile':'fixture-browser','provider':'fixture','model':'fixture','telemetry':True})
+        attempt=s.claim(run['id'],worker_id='fixture-worker')
+    owner={'attempt_id':attempt['id'],'worker_id':attempt['worker_id'],'fence':attempt['fence']}
     s.bind_target(**owner,target_id='fixture-tab',url=url)
     class Page:
         index=0
@@ -40,12 +52,15 @@ def test_fast_runner_finishes_through_real_managed_api(tmp_path,monkeypatch,pane
     browser=type('Browser',(),{'get_current_page':AsyncMock(return_value=page),'close':AsyncMock(),'observed_mode':'headed'})()
     monkeypatch.setattr(CDPBrowser,'connect',AsyncMock(return_value=browser))
     token='synthetic-fixture-worker-token-32chars'
-    with TestClient(create_app(s,operator_token='synthetic-fixture-operator-token-32chars',worker_tokens={token:'fixture-worker'}),base_url='http://127.0.0.1:8769') as api:
+    with (nullcontext() if transport=='local' else TestClient(create_app(s,operator_token='synthetic-fixture-operator-token-32chars',worker_tokens={token:'fixture-worker'}),base_url='http://127.0.0.1:8769')) as api:
         def call(op,**payload):
+            if transport=='local':
+                from job_applier.managed_client import LocalClient
+                return LocalClient({'db_path':str(s.db_path),'instance_id':s.instance_id},service=s).call(op,**payload)
             response=api.post('/v1/'+op,headers={'Authorization':'Bearer '+token,'X-JobBot-Instance':s.instance_id},json=payload)
             assert response.status_code==200,(op,response.status_code,response.text)
             return response.json()
-        package=call('application_context',attempt_id=attempt['id'],worker_id='fixture-worker')
+        package=call('application_context',attempt_id=attempt['id'],worker_id=owner['worker_id'])
         runner=FastRunner(page,call,package,owner,{'cdp_url':'http://127.0.0.1:9223'},'fixture-tab')
         result=asyncio.run(runner.run(seconds=8))
     assert result['status']=='applied'

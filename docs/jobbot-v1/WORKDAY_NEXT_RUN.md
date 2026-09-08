@@ -1,5 +1,30 @@
 # Clean-thread Workday benchmark
 
+Current status: further applications and implementation are paused for independent
+review after Wiley attempt 14. Read the opening review checkpoint in
+[RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md) before resuming.
+The instructions below describe the execution procedure, not a request to run it.
+
+## Current local-session benchmark
+
+The checklist below this section is historical HTTP/claimed-worker evidence.
+For current acceptance, start a separate ordinary Hermes conversation using the
+configured application model, existing capabilities and canonical repository
+job-apply/workday-simplify skills. Give it one eligible, unsubmitted URL and the
+selected config. It calls application_runtime start, then workday_fast session,
+with scoped browser/credential/mail exceptions. Start includes history checks;
+there is no manual accept/claim/lease/token or dashboard prerequisite.
+
+Time from the original request, including startup/waiting. The executor applies
+and submits under standing approval, verifies exact employer confirmation once,
+records the outcome, and reports actual model/effort and specific blockers. It
+must not edit shared helpers/skills. Do not use GAIG R9045, Tebra or the repeatedly
+debugged Huron case. A second empty profile does not prove Simplify concurrency.
+See APPLICATION_RUNTIME and RUNTIME_SIMPLIFICATION_LOG for current procedures
+and actual evidence. Keep the historical failures below unchanged.
+
+## Historical benchmark procedure
+
 ## Before timing
 
 - Open a fresh conversation in the JobBot project using the configured application model (not the engineering model by accident).

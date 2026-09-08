@@ -40,6 +40,7 @@ function choice(id,items,value){const select=$(id),before=value??select.value;se
 function selection(){$('selection').textContent=`${state.selected.size} job(s) selected`;}
 function link(url,label){try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))return el('span',label);const a=el('a',label);a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';return a;}catch{return el('span',label);}}
 function renderQueue(v){
+ renderSessions(v);
  const key=JSON.stringify(v.jobs);if(key===state.queueKey)return;state.queueKey=key;
  $('queue-count').textContent=`${v.jobs.length} records`;$('queue-rows').replaceChildren();
  for(const job of v.jobs){
@@ -58,6 +59,44 @@ function renderQueue(v){
  if(!v.jobs.length){const tr=el('tr'),td=el('td','No postings in this instance.');td.colSpan=4;tr.append(td);$('queue-rows').append(tr);}
  selection();
 }
+function renderSessions(v){
+ const runtime=v.local_runtime||{sessions:[],workspaces:[]};
+ if($('start-application-btn'))$('start-application-btn').textContent=runtime.workspaces.length?'Start in Hermes':'Start application';
+ $('local-sessions-card').hidden=!runtime.workspaces.length;
+ $('local-sessions').replaceChildren();
+ for(const s of runtime.sessions.slice(0,12)){
+  const job=v.jobs.find(j=>j.id===s.job_id)||{};
+  const candidate=v.candidates.find(c=>c.id===s.identity_id)||{};
+  const metadata=s.metadata||{},n=el('div',undefined,'attempt');
+  n.append(el('strong',`${job.company||'Company unknown'} · ${job.title||s.job_id}`),badge(s.state));
+  n.append(el('p',`${candidate.email||s.identity_id} · ${s.workspace_id||'Waiting for capacity'} · ${s.workspace?.mode||'Mode pending'}`));
+  n.append(el('p',`Host ${s.host_alive?'running':'offline'} · Driver ${s.driver_recently_active?'recently active':'idle or disconnected'} · Writer ${s.writer_state}`));
+  n.append(el('p',`Executor: ${metadata.provider||'unknown'} / ${metadata.model||'unknown'} · effort ${metadata.reasoning_effort||'unknown'}`));
+  const activity=s.activity?.payload;
+  if(activity){
+   n.append(el('p',`Latest step: ${activity.activity||activity.phase||activity.evidence||s.activity.event_type}`));
+   if(activity.next_step)n.append(el('p',`Next: ${activity.next_step}`));
+  }else n.append(el('p','No step update recorded by the executor yet.'));
+  if(s.steps?.length){
+   const details=el('div'),list=el('ol');details.append(el('strong','Recent application steps'));
+   for(const step of s.steps){const p=step.payload||{};list.append(el('li',`${stamp(step.observed_at)} · ${p.source||step.event_type} · ${p.activity||p.evidence||p.phase||step.event_type}${p.error_type?' · '+p.error_type:''}`));}
+   details.append(list);n.append(details);
+  }
+  n.append(el('small',`Requested ${stamp(s.requested_at)} · Connected ${stamp(s.connected_at)} · Ended ${stamp(s.ended_at)} · Total ${duration(s.elapsed_seconds)}`));
+  n.append(el('small',`Queue ${duration(s.queue_seconds)} · Browser startup ${duration(s.startup_seconds)} · Last verified progress ${stamp(s.last_verified_progress_at)}`));
+  if(s.reason)n.append(el('p',s.reason,'job-reason'));
+  n.append(el('small',`Session ${s.id} · Attempt ${s.attempt_id||'not started'} · Config ${metadata.config_path||'unknown'}`,'mono'));
+  if(s.run_id&&!s.ended_at){
+   for(const command of ['pause','stop']){
+    const button=el('button',command==='pause'?'Pause this application':'Stop this application');
+    button.disabled=s.state==='paused'&&command==='pause';
+    button.onclick=async()=>{try{await api('control',{run_id:s.run_id,command});await refresh();}catch(e){notice(e.message,true);}};
+    n.append(button);
+   }
+  }
+  $('local-sessions').append(n);
+ }
+}
 function renderRun(v){
  choice('run-picker',v.runs.map(r=>[r.id,`${stamp(r.requested_at)} · ${r.state}`]),state.run||v.current_run?.run_id);
  const r=v.current_run;$('run-counts').replaceChildren();$('attempts').replaceChildren();
@@ -66,7 +105,8 @@ function renderRun(v){
  if(!r){$('run-state').textContent='No run selected.';$('run-owner').textContent='';return;}
  const activeAttempt=r.attempts?.find(a=>!a.completed_at);
  const leaseSec=v.settings?.values?.lease_seconds||60;
- const connected=!done&&!!activeAttempt&&activeAttempt.heartbeat_age_seconds!==null&&activeAttempt.heartbeat_age_seconds<=leaseSec&&activeAttempt.writer_state!=='expired';
+ const localSession=v.local_runtime?.sessions.find(s=>s.run_id===r.run_id);
+ const connected=localSession?(!done&&localSession.host_alive&&localSession.driver_recently_active):(!done&&!!activeAttempt&&activeAttempt.heartbeat_age_seconds!==null&&activeAttempt.heartbeat_age_seconds<=leaseSec&&activeAttempt.writer_state!=='expired');
  $('run-state').replaceChildren(badge(done?'Completed':r.state));
  if(done){
   $('run-state').append(document.createTextNode(' — No active application worker.'));
@@ -81,6 +121,8 @@ function renderRun(v){
  }
  if(r.state==='awaiting_worker'){
   $('run-state').append(document.createTextNode(' — Waiting for worker acceptance.'));
+ } else if(localSession&&!done){
+  $('run-state').append(document.createTextNode(` · Host ${localSession.host_alive?'running':'offline'}; driver ${localSession.driver_recently_active?'recently active':'idle or disconnected'}`));
  } else if(activeAttempt && (activeAttempt.heartbeat_age_seconds>leaseSec || activeAttempt.writer_state==='expired')){
   const dis=badge('Worker disconnected / not running');dis.dataset.state='stalled';
   $('run-state').append(document.createTextNode(' · '),dis);
@@ -211,7 +253,7 @@ async function loadAttempt(id){state.attempt=id;try{const report=await api('atte
   }
   pTable.append(pBody);$('events').append(el('h4','Problems & Recoveries'),pTable);
  }
- for(const e of report.timeline){const row=el('details',undefined,'event');row.append(el('summary',`${stamp(e.observed_at)} · ${e.event_type} · ${duration(e.duration_seconds)}${e.stale?' · late metadata':''}`),el('pre',JSON.stringify(e.payload,null,2)));$('events').append(row);}if(!report.timeline.length)$('events').append(el('p','No events recorded.'));}catch(e){notice(e.message,true);}}
+ for(const e of report.timeline){const row=el('details',undefined,'event');row.append(el('summary',`${stamp(e.observed_at)} · ${e.payload.activity||e.payload.evidence||e.event_type} · ${duration(e.duration_seconds)}${e.stale?' · late metadata':''}`),el('pre',JSON.stringify(e.payload,null,2)));$('events').append(row);}if(!report.timeline.length)$('events').append(el('p','No events recorded.'));}catch(e){notice(e.message,true);}}
 
 async function refresh(){if(!state.instance||state.busy)return;state.busy=true;try{const v=await api('view',state.run?{run_id:state.run}:{});state.view=v;$('instance').textContent=`Instance ${v.health.instance_id} · DB ${v.health.db_path}`;$('mode').textContent=v.settings.values.mode+' / '+v.settings.values.submission_mode;$('mode').dataset.state=v.settings.values.mode;
  choice('candidate',v.candidates.filter(c=>c.state==='active').map(c=>[c.id,c.email]));
@@ -227,6 +269,7 @@ $('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('
 $('mark-ready').onclick=async()=>{try{if(!state.selected.size)throw Error('Select at least one job.');for(const id of state.selected)await api('eligibility',{job_id:id,decision:'ready',reason:'Explicit operator approval'});notice('Selected eligibility recorded.');await refresh();}catch(e){notice(e.message,true);}};
 $('request-run').onclick=async()=>{try{if(!state.selected.size||!$('candidate').value||!$('browser-profile').value.trim())throw Error('Select jobs, candidate and exact browser profile.');const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:[...state.selected],identity_id:$('candidate').value,browser_profile:$('browser-profile').value.trim()});state.run=r.id;state.attempt=null;notice('Run requested; waiting for worker acceptance.');tab('run');await refresh();}catch(e){notice(e.message,true);}};
 if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{
+ if(state.view?.local_runtime?.workspaces?.length){notice('Give your Hermes conversation one eligible job URL. Its application session and browser will appear here.');return;}
  if(!state.selected.size)throw Error('Please select at least one job from the queue.');
  const candidateId=$('candidate').value;if(!candidateId)throw Error('Please select a candidate.');
  const browserProfile=($('browser-profile').value||'').trim()||'operator-chrome';
