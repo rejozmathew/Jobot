@@ -5,15 +5,15 @@ from functools import wraps
 
 
 def submission_pending(attempt, events=()):
-    """Conservative write guard shared by every submission/retry consumer."""
+    """Unconfirmed dispatch state for observation and reporting, never a write lock."""
     return submission_state(attempt,events)['state'] in ('pending','accepted')
 
 
 def submission_state(attempt,events=()):
-    """Dispatch truth and employer resolution are separate immutable evidence.
+    """Project dispatch and observation history for reporting, never permission.
 
-    A new intent supersedes an earlier resolved dispatch. Legacy dispatches
-    without a scope stay uncertain; a failed outcome alone cannot resolve them.
+    Uncertainty remains in history. A fresh view of unfinished work may describe
+    progress without erasing a click or requiring a special rejection operation.
     """
     attempt=dict(attempt);state='pending' if attempt.get('submit_intent_at') else 'none'
     dispatch=None;resolved=None;accepted=attempt.get('outcome') in ('applied','already_applied')
@@ -24,6 +24,10 @@ def submission_state(attempt,events=()):
         if operation=='submission_confirmed' and payload.get('status') in ('applied','already_applied'):accepted=True
         if operation=='submission_reconciled' and payload.get('status') in ('applied','already_applied'):accepted=True
         if operation=='submission_intent':state='pending';dispatch=None;resolved=None
+        elif operation=='submission_observation' and payload.get('status')=='incomplete':
+            state='incomplete';resolved=payload
+        elif operation=='submission_observation' and payload.get('status')=='pending' and attempt.get('submit_intent_at'):
+            state='pending';resolved=None
         elif operation=='submission_click':
             dispatch=dict(payload,observed_at=row.get('observed_at'));resolved=None
             state='not_executed' if payload.get('status')=='not_executed' else 'pending'

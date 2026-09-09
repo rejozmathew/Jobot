@@ -123,7 +123,7 @@ function renderSessions(v){
   $('local-sessions').append(n);
  }
 }
-function canQueueAnswers(group){return !group.pending_count&&group.browser_stopped&&!['applied','already_applied'].includes(group.status)&&group.retry?.state!=='queued';}
+function canQueueAnswers(group){return !group.pending_count&&!['applied','already_applied'].includes(group.status)&&group.retry?.state!=='queued';}
 function answerError(error){return ({unanswered_questions:'Answer every required question before queueing a retry.',answer_revision_conflict:'This answer changed elsewhere. Refresh and review the latest saved answer.',question_changed:'The employer changed this question. Review its current choices.',owned_elsewhere:'Save your answers now; queue a retry after the current application closes.',reconciliation_required:'The previous browser must finish closing before another attempt can start.',already_applied:'This application was already submitted.'})[error.message]||error.message;}
 async function saveAnswerGroup(group,queue){
  const changes=group.questions.filter(q=>state.answerDrafts.has(q.id)).map(q=>{const draft=state.answerDrafts.get(q.id);return {question_id:q.id,answer:draft.value,expected_revision:draft.revision};});
@@ -174,7 +174,7 @@ function renderAnswers(v){
    card.append(label);
   }
   const actions=el('div',undefined,'answer-actions');const save=el('button','Save answers');save.type='button';save.onclick=()=>saveAnswerGroup(group,false);
-  const retry=el('button','Save and queue retry','primary');retry.type='button';retry.disabled=!group.browser_stopped||['applied','already_applied'].includes(group.status);retry.onclick=()=>saveAnswerGroup(group,true);actions.append(save,retry);card.append(actions);
+  const retry=el('button','Save and queue retry','primary');retry.type='button';retry.disabled=['applied','already_applied'].includes(group.status);retry.onclick=()=>saveAnswerGroup(group,true);actions.append(save,retry);card.append(actions);
   if(!group.browser_stopped)card.append(el('small','Save your answers to continue in the active application.'));
   if(group.retry?.state==='queued')card.append(el('small','Ready for pickup by your next application batch.'));
   const superseded=group.questions.filter(q=>q.state==='superseded');

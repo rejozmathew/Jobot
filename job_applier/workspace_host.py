@@ -85,7 +85,7 @@ def call_host(config, session, operation, parameters, driver_id):
     try:
         with PipeClient(address,family='AF_PIPE' if os.name=='nt' else 'AF_UNIX',authkey=None) as pipe:
             pipe.send_bytes(encoded)
-            if not pipe.poll(150):raise ProtocolError('host_operation_timeout','Do not replay a browser write; inspect session status')
+            if not pipe.poll(150):raise ProtocolError('host_operation_timeout','The response timed out; inspect current session and browser state before choosing the next operation')
             result=json.loads(pipe.recv_bytes(4*1024*1024))
     except (OSError,EOFError) as exc:
         raise ProtocolError('host_connection_lost','Read session status; the command outcome is unknown') from exc
@@ -273,7 +273,8 @@ class WorkspaceHost:
 
     def inspection_result(self,session_id,reason='confirmation_not_captured'):
         return {'status':'submission_unknown','reason':reason,'session_id':session_id,
-                'next_step':'Inspect the owned screenshot/snapshot or reconcile confirmation. Do not replay Submit in this attempt. A new user application request can start a fresh attempt. The session remains open until completion, Stop, or the configured maximum runtime.'}
+                'submission_confirmed':False,
+                'next_step':'Inspect the current page. Complete visible required work, including email verification, in this session. A click is not success and does not lock editing. Finish on actual accepted confirmation; otherwise continue recovery and verification.'}
 
     def dispatch(self, request):
         try:
@@ -295,9 +296,6 @@ class WorkspaceHost:
                             'phase':'helper_exception','activity':str(request.get('operation','Helper'))+' returned an error',
                             'error_type':detail['code'],'evidence':detail['detail'],'source':'Workspace host','status':'error',
                             'next_step':'Executor inspects the error and submission state before choosing a recovery'})
-                    if a['submission_pending']:
-                        result=self.inspection_result(session['id'],detail['code'])
-                        result['diagnostic']=detail;return result
             except Exception:pass  # Retain the original exception if recording also fails.
             raise
 
@@ -317,20 +315,17 @@ class WorkspaceHost:
         attempt=service.attempt(session['attempt_id'])
         own={'attempt_id':attempt['id'],'worker_id':attempt['worker_id'],'fence':attempt['fence']}
         client.call('heartbeat',**own)
-        if op=='finish' and attempt['submission_pending'] and params.get('outcome') not in ('applied','already_applied'):
-            return self.inspection_result(session['id'])
         cfg=dict(self.config,cdp_url=self.workspace['cdp_url'],browser_profile=self.workspace_id,browser_mode=self.workspace['mode'])
         if op in ('context','report'):
             return client.call('application_context' if op=='context' else 'attempt_report',attempt_id=attempt['id'])
         if op=='restart':
-            if attempt['submission_pending']:raise ProtocolError('submission_pending_read_only')
             # Reuse pause/attach: termination proves cancellation, then the host
             # opens a new target with the same account/profile/session/attempt.
             # Mark preparing first so the monitor cannot mistake this for a crash.
             self.preparing.add(session['id'])
             try:
                 client.call('event',**own,event_id=uid(),event_type='recovery',observed_at=service.now(),
-                    payload={'operation':'restart','evidence':'Executor requested recovery of the owned browser before submission',
+                    payload={'operation':'restart','evidence':'Executor requested recovery of the owned browser',
                              'next_step':'Reopen the assigned job in the same attempt and continue'})
                 self.stop_session(session,'Executor requested browser recovery',paused=True)
                 resumed=self.service.attach_session(session['id'],session['driver_id'])
@@ -347,7 +342,6 @@ class WorkspaceHost:
         if op in ('browser','credentials'):
             package=service.application_context(attempt['id'])
             if op=='credentials':
-                if attempt['submission_pending']:raise ProtocolError('submission_pending_read_only')
                 if params.get('mode')!='verification':service.coordinate_account(session['id'])
                 from .managed_credentials import handle_credentials,credential_progress
                 gate=client.call('browser_observe',**own,target_id=session['target_id'],cdp_url=cfg['cdp_url'])
@@ -392,10 +386,9 @@ class WorkspaceHost:
             try:
                 if not pipe.poll(5):continue
                 request=json.loads(pipe.recv_bytes(65536))
-                # Readiness commits just before preparation releases this lock.
-                # Allow its short tail to settle before rejecting the first call
-                # from a newly connected/attached driver. Browser writes still serialize.
-                if not self.busy.acquire(timeout=5):raise ProtocolError('session_operation_busy')
+                # Queue operations on this physical browser instead of rejecting
+                # the next call because preparation or another operation is busy.
+                self.busy.acquire()
                 try:result=self.dispatch(request)
                 finally:self.busy.release()
                 pipe.send_bytes(json.dumps({'result':result}).encode())

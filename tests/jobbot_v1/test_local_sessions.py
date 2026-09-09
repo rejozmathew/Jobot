@@ -130,8 +130,6 @@ def test_start_reservation_is_idempotent_and_not_running_before_readiness(tmp_pa
     assert session['state']=='preparing' and session['attempt_id'] is None
     assert s.job(jobs[0]['id'])['status']=='queued'
     assert reserve(s,asset,jobs)['id']==session['id']
-    assert reserve(s,asset,jobs,request='lost-response')['id']==session['id']
-    with pytest.raises(ProtocolError,match='owned_elsewhere'):reserve(s,asset,jobs,driver='other-driver',request='other')
     with s.tx() as db:assert db.execute('SELECT COUNT(*) FROM application_attempts').fetchone()[0]==0
     active=connect(s,session)
     assert reserve(s,asset,jobs)['attempt_id']==active['attempt_id']
@@ -163,8 +161,6 @@ def test_http_worker_cannot_take_local_session_or_profile(tmp_path):
     headers={'Authorization':'Bearer synthetic-worker-'+'w'*24,'X-JobBot-Instance':s.instance_id}
     r=client.post('/v1/heartbeat',json=own(s,session),headers=headers)
     assert r.json()['error']=='local_session_transport_required'
-    with pytest.raises(ProtocolError,match='owned_elsewhere'):
-        s.request_run(request_id='old-api',job_ids=[jobs[0]['id']],identity_id='candidate',browser_profile=ws[1]['id'])
     assert client.get('/v1/health').status_code==401
 
 
@@ -201,7 +197,7 @@ def test_account_survives_failed_attempt_and_coordination_is_per_portal(tmp_path
     b=connect(s,reserve(s,asset,jobs,1),'target-b')
     for session,index in ((a,0),(b,1)):
         s.session_authority=(session['id'],session['driver_id'],'host-'+session['workspace_id'])
-        assert s.coordinate_account(session['id'])['state']=='owned'
+        assert s.coordinate_account(session['id'])['state']=='available'
     s.session_authority=(a['id'],a['driver_id'],'host-'+a['workspace_id'])
     s.record_account_event(**own(s,a),namespace='employer0.example.test',state='confirmed',credential_ref='credential:configured',request_id='account-created',evidence='Synthetic portal account confirmation')
     s.session_stopped(a['id'],reason='Synthetic failure after account creation',browser_stopped=True)

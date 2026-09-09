@@ -54,13 +54,6 @@ class SessionServices:
             if old:
                 if old['request_key']!=key:raise ProtocolError('idempotency_conflict')
                 if old['state']!='capacity_wait':return dict(old)
-            else:
-                active=db.execute(RELATED+'''SELECT s.* FROM related r JOIN application_sessions s ON s.job_id=r.id
-                    WHERE s.ended_at IS NULL LIMIT 1''',(job_id,)).fetchone()
-                if active:
-                    if active['driver_id']==driver_id and active['identity_id']==identity_id:
-                        return dict(active)
-                    raise ProtocolError('owned_elsewhere')
             settings=self._settings_record(db)['values']
             self._eligible(db,job_id,settings,old['id'] if old else None)
             candidate=self._get(db,'candidates',identity_id)
@@ -90,7 +83,7 @@ class SessionServices:
                 # the retry command. Derive cleanup from history, not driver IDs.
                 session_metadata['fresh_employer_storage']=bool(db.execute(RELATED+'''SELECT 1 FROM related r
                     WHERE EXISTS (SELECT 1 FROM application_attempts a WHERE a.job_id=r.id)
-                       OR EXISTS (SELECT 1 FROM application_sessions s WHERE s.job_id=r.id AND s.ended_at IS NOT NULL)
+                       OR EXISTS (SELECT 1 FROM application_sessions s WHERE s.job_id=r.id)
                     LIMIT 1''',(job_id,)).fetchone())
                 session_metadata['application_kind']='reattempt' if session_metadata['fresh_employer_storage'] else 'first_attempt'
                 db.execute('''INSERT INTO application_sessions(id,request_id,request_key,job_id,identity_id,
@@ -209,7 +202,6 @@ class SessionServices:
             if s['attempt_id']:
                 # Explicit paused-session attach: stopped browser; fresh target, same attempt.
                 attempt=self._get(db,'application_attempts',s['attempt_id'])
-                if self._submission_pending(db,attempt):raise ProtocolError('submission_unknown')
                 attempt_id=attempt['id'];fence=attempt['fence']
             else:
                 attempt_id=self._create_attempt(db,run,job,candidate,fence,now,'local-session-v1')
@@ -243,7 +235,6 @@ class SessionServices:
                 db.execute("UPDATE application_attempts SET writer_state='idle' WHERE id=?",(a['id'],))
                 db.execute("UPDATE owned_targets SET state='closed',evidence=?,updated_at=? WHERE attempt_id=? AND state!='closed'",(reason,now,a['id']))
                 pending=self._submission_pending(db,a)
-                if pending and not a['completed_at']:paused=False
                 if not paused and not a['completed_at']:
                     outcome='submission_unknown' if pending else 'interrupted'
                     self._complete(db,a,outcome,reason,quiescent=True,finish_key=hashlib.sha256(dumps([outcome,reason]).encode()).hexdigest(),reconciled=True)
@@ -263,7 +254,6 @@ class SessionServices:
             if s['driver_id']==driver_id and s['state'] in ('connected','waiting','preparing'):return dict(s)
             if s['state']!='paused' or s['ended_at']:raise ProtocolError('stop_previous_driver_before_attach')
             a=self._get(db,'application_attempts',s['attempt_id']) if s['attempt_id'] else None
-            if a and self._submission_pending(db,a):raise ProtocolError('submission_unknown')
             db.execute("UPDATE application_sessions SET driver_id=?,state='preparing',reason='Explicit attach after owned browser stopped' WHERE id=?",(driver_id,session_id))
             if a:db.execute('UPDATE application_attempts SET session_id=? WHERE id=?',(driver_id,a['id']))
             db.execute("UPDATE runs SET session_id=?,control='running',state='preparing' WHERE id=?",(driver_id,s['run_id']))
@@ -273,15 +263,9 @@ class SessionServices:
         with self.tx() as db:
             s=self._get(db,'application_sessions',session_id);self._local_owner(db,s)
             job=self._get(db,'jobs',s['job_id']);namespace=self._job_account_namespace(db,job)
-            candidate=self._get(db,'candidates',s['identity_id'])
-            key=(candidate['person_key'],namespace)
-            old=db.execute('SELECT * FROM account_coordination WHERE person_key=? AND namespace=?',key).fetchone()
-            if old and old['session_id']!=session_id:raise ProtocolError('account_in_use')
-            if release:
-                db.execute('DELETE FROM account_coordination WHERE person_key=? AND namespace=? AND session_id=?',(*key,session_id))
-            elif not old:
-                db.execute('INSERT INTO account_coordination VALUES (?,?,?,?)',(*key,session_id,self.now()))
-            return {'namespace':namespace,'state':'released' if release else 'owned','session_id':session_id}
+            # Credentials remain tied to candidate/portal. Another browser using
+            # that account is not a reason to prevent this session from signing in.
+            return {'namespace':namespace,'state':'released' if release else 'available','session_id':session_id}
 
     def sessions_view(self):
         with self.tx() as db:

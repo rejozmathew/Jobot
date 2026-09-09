@@ -144,7 +144,6 @@ class EventServices:
             local=bool(local_session(db,attempt_id))
             stopping=tool_name=='local_browser.simplify_stop' and local
             recovering=tool_name=='local_browser.reload' and local
-            if recovering and self._submission_pending(db,a):raise ProtocolError('submission_pending_read_only')
             cancelling=stopping or recovering
             semantic=self._strategy_check(db,a,tool_name) if writes_browser and not cancelling else self._field_context(db,a)
             run=self._get(db,'runs',a['run_id'])

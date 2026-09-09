@@ -3,10 +3,12 @@
 Assessment date: 2026-09-09. **Historical assessment; implementation is recorded below.**
 
 Later decision: [RETRY_POLICY.md](RETRY_POLICY.md) supersedes this assessment's
-cross-attempt uncertainty restrictions, including the original G05 and G16
-recommendations. A new application request can start another attempt unless
+uncertainty and same-job/account exclusion restrictions, including the original
+G05 and G16 recommendations and the blanket single-dispatch rule below. A new application request can start another attempt unless
 success is recorded. Submission uncertainty remains evidence for its own attempt;
-actual browser cleanup is separate. The historical findings below are retained
+actual browser cleanup is separate. Current changes and remaining audit scope
+are in [GUARDRAIL_RESEARCH_HANDOFF.md](GUARDRAIL_RESEARCH_HANDOFF.md).
+The historical findings below are retained
 to explain the evolution, not to reintroduce the superseded retry policy.
 
 ## Implementation follow-up — 2026-09-09

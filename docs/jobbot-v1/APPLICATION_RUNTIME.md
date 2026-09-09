@@ -10,7 +10,7 @@ The current cross-portal request and retry contract is in
 starts a fresh attempt unless successful submission is recorded. Failed,
 interrupted and submission-unknown history remain intact and do not prevent
 another attempt. Actual browser cleanup is a separate lifecycle responsibility.
-This September 9 follow-up supersedes earlier cross-attempt uncertainty guards;
+This September 9 follow-up supersedes earlier uncertainty and same-job/account exclusion guards;
 the previous 761-test checkpoint does not validate this later change.
 
 The [first-principles stop-condition audit](STOP_CONDITION_AUDIT.md) challenges
@@ -76,8 +76,8 @@ need live validation.
 
 Page recovery is shared across every ATS. `browser` method `reload` deliberately
 cancels the current document, so an unknown Simplify writer cannot deadlock the
-refresh needed to recover it. The action ledger still excludes concurrent tool
-writes and unresolved submission. CDP verifies a new document before clearing
+refresh needed to recover it. The host queues tool calls on the physical browser; historical submission
+uncertainty does not prevent recovery. CDP verifies a new document before clearing
 the old writer state; subsequent observations govern new form writes. The host's
 `restart` operation reuses pause/attach to stop the owned process tree and reopen
 the assigned job with the same profile, session and attempt. Shared screen and
@@ -156,19 +156,24 @@ for a code. Ordinary fills, answer queues/history and screenshots exclude every
 segment. Unsupported lengths/delivery and ambiguous/stale mail remain handoffs;
 there is no assumed universal provider expiry or newest-message fallback.
 
-`submission_state` derives one state from the immutable attempt/event ledger:
-`none`, `not_executed`, `pending`, `rejected` or `accepted`. Each new intent starts
-a new dispatch cycle. `record_submission_rejection` accepts only a fresh captured
-employer rejection with matching dispatch/action ID, document ID, frame ID and
-time, from the completed `browser.submit` action. The observer must see a new
-scoped validation error after dispatch; baseline errors, cross-document errors,
-missing confirmation and arbitrary failed outcomes do not resolve pending state.
-The previous dispatch is never relabeled not-executed. A resolved rejection allows
-correction and a new authorized intent within the same attempt. Pending or accepted
-dispatch state prevents automatic Submit replay within that attempt. Across
-attempts, only recorded success suppresses a new request: unfinished and unknown
-history require no reconciliation. Accepted confirmation remains success evidence
-even if a later outcome label contradicts it.
+`submission_state` projects `none`, `not_executed`, `pending`, `incomplete`,
+`rejected` or `accepted` from the existing evidence. It is reporting, never form
+permission. The ordinary shared submission path observes current required work
+and private verification completeness, returns `application_incomplete` for
+continuation, and captures confirmation before finishing. Each explicit Submit
+can activate the current control once. Previous clicks do not prohibit fields,
+mailbox/credentials, answers, reload/restart, pause/resume or another explicit
+Submit. A targetless submit observes only. Workday follows the current page on
+each advance call. The older Hermes worker's parallel click-history restriction
+and mandatory internal resume-upload receipt were also removed.
+
+`record_submission_rejection` remains a compatibility endpoint for precise
+historical evidence; ordinary continuation no longer calls or requires it.
+Structured dispatch/document/frame IDs retain their exact correlation values
+instead of masking numeric UUID segments. Earlier dispatch evidence is preserved
+when a new cycle or replacement browser target is observed. Only recorded
+success suppresses an ordinary new request. Job status aggregates concurrent
+attempts so a later failure cannot erase a successful application.
 
 `enrich_job` and owned `observe_job_metadata` fill missing company/title from one
 scoped posting or unambiguous Simplify job card, preserving nonempty labels and
@@ -225,8 +230,8 @@ One absolute configured `db_path` remains authoritative. `legacy_history_paths`
 are read-only successful-submission sources; unfinished history does not suppress
 a new request. Missing configured sources fail closed. There
 is no cwd-selected database or second outcome store. `prepare_local` checks the
-instance and makes an integrity-checked SQLite backup before additive migration
-16. Existing accounts, attempts and submissions remain. Transactions are short
+instance and makes an integrity-checked SQLite backup before migration 17,
+which removes same-job uniqueness restrictions. Existing accounts, attempts and submissions remain. Transactions are short
 state updates; browser/model/mail work stays outside them. Existing SQLite busy
 handling remains in the shared connection layer.
 
@@ -342,8 +347,8 @@ Generic local service calls use `run_applier.py managed call --config <path>
    and selected-asset verification remain intact.
 7. Existing submission_intent precedes one submit; finish records exact employer
    evidence. The host stops its browser before releasing the slot. Missing
-   confirmation means submission_unknown. The executor must not replay Submit
-   automatically within that attempt. A later user request can start a fresh one.
+   confirmation means inspect the current form and continue actual remaining
+   work. Click history does not prohibit another explicit Submit.
 
 Native Hermes jobbot operations are convenience calls to the same functions.
 Hooks can record observed provider/model/effort; requested settings remain
@@ -362,7 +367,7 @@ Detect the application platform automatically—Workday, Greenhouse, iCIMS, or a
 
 I authorize submission. Continue through supported recoveries and handle required fields using approved facts. Ask only for an unresolved verification challenge or missing required information. Do not change code, skills, or configuration.
 
-Follow the canonical submission and confirmation procedure without adding a final resume or field audit. Do not automatically replay an uncertain Submit within this attempt. A new user request can start a fresh attempt unless success is recorded.
+Follow the canonical submission and confirmation procedure without adding a final resume or field audit. Inspect the current form and confirmation after an uncertain click; continue unfinished work and submit the current form when appropriate. A new user request can start a fresh attempt unless success is recorded.
 
 Report the outcome and evidence source—or the exact unresolved blocker—with total elapsed time and session/attempt IDs.
 ```
@@ -414,8 +419,9 @@ account that rejects manual sign-in.
 Pause/stop acknowledgement follows actual owned process-tree termination and
 abortion of active actions. Startup observes pending control before connecting.
 Explicit attach requires completed pause and creates a fresh target for the new
-driver on the same attempt; the previous driver is rejected. Retry stops the
-previous browser through shared control, then starts a fresh attempt. An old
+driver on the same attempt; the previous driver is rejected. Explicit retry stops the
+particular session through shared control, then starts a fresh attempt. A new
+request can use another workspace without stopping the prior session. An old
 unresolved submission dispatch does not prevent this new request. After a crash, a replacement host
 checks recorded process identities before classifying the lost session. It never
 replays an uncertain command. Orphan activity/unconfirmed host launch remains
@@ -430,8 +436,9 @@ startup time are available separately. Ten minutes is a measured target.
 
 Two distinct configured directories/endpoints allow two independent sessions.
 A third gets capacity_wait and occupants; repeated start retries capacity with
-the same request. Paused sessions retain their slot until stop or a new application
-request closes that session. Same-job successful submission suppresses duplicates
+the same request. Paused sessions retain their physical slot until explicit
+stop or retry replaces that session. The posting and candidate account are not
+exclusive resources; another configured browser can use either. Same-job successful submission suppresses duplicates
 across email identities. Earlier uncertainty does not. concurrency_limit caps use.
 
 ### Headless execution and visual evidence
@@ -481,20 +488,20 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | Component | Scope and consumer |
 |---|---|
 | application_runtime.py | Shared request identity, start/retry and control_session stop/pause lifecycle; successful legacy-history matching, platform guidance, scoped browser exceptions, field-task attribution, Autofill timing and answer/metadata capture |
-| managed_sessions.py / migration 15 | Existing ledger session/workspace/account coordination, first-attempt/reattempt metadata, history-derived retry storage policy and mixed-version guards |
-| workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, scoped JSON dispatch; no model |
+| managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed |
+| workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, queued JSON dispatch on the physical browser; no model or five-second busy veto |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
 | managed_identity.py | Shared Workday host/site/full-requisition parser, comparison identity, history equivalence, diagnostic match states and job_requisition for confirmation; no display-location/title/step allowlist |
-| managed_shared.submission_state / submission_pending and managed_events._submission_state / _submission_pending | One per-attempt evidence projection from existing ordered events; pending/accepted protects current-attempt dispatch, accepted alone suppresses a new requested attempt |
+| managed_shared.submission_state / submission_pending and managed_events._submission_state / _submission_pending | One per-attempt evidence projection from existing ordered events; evidence reporting only; accepted alone suppresses a new requested attempt |
 | workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
-| browser_controls.py / browser_helpers/form_controls.js | Shared form reader, exact committed-selection verification, posting metadata and document-local private verification groups; used by browser runtime, answer capture, credentials and Workday |
+| browser_controls.py / browser_helpers/form_controls.js | Shared form reader, exact committed-selection verification, posting metadata and document-local private verification groups and remaining_submission_work; used by submission, browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
 | application_answers.py | Interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
-| submission.py / browser_helpers/submission_observe.js | Shared authorized dispatch capture, native/Simplify confirmation and fresh employer rejection tied to action/document/frame; local browser and Workday callers |
+| submission.py / browser_helpers/submission_observe.js | One activation per explicit call, current incomplete-form continuation, retained dispatch evidence and native/Simplify confirmation; local browser and Workday callers |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | browser_helpers/workday_source.js | Workday-only recruiting-source field/menu association, live option inventory and virtualized-menu scrolling; workday_fast drives pointer actions and verifies commitment |
@@ -505,7 +512,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js / jobbot.css | Shared posting labels and stage/task progress, persistent expansion and collapsed technical debug, independent application controls |
 
-Common policy is job-apply v0.5.7; Workday policy is workday-simplify v0.3.15, in
+Common policy is job-apply v0.5.8; Workday policy is workday-simplify v0.3.16, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision

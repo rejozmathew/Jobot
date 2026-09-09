@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.15
+version: 0.3.16
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -198,17 +198,19 @@ from scoped posting metadata; existing labels and historical outcomes remain.
 7. At authorized Review, submit immediately through the shared boundary. Do not
    search for or verify the resume again, even if attachment evidence is absent
    from the runner or upload ledger. The runner arms confirmation capture,
-   records intent and submits once.
+   records intent and submits at most once per explicit advance call.
    It captures native and Simplify confirmation with the actual source and applies
    the profile's accepted sources. Valid post-submit routes can be inspected even
    after Workday's form step disappears. Follow the shared inspection and
-   reconciliation procedure when evidence remains uncertain. Same-site
+   current-form continuation procedure when evidence remains uncertain. Same-site
    `jobTasks/completed/application` is an accepted read-only completion route.
    Fresh Simplify "Application Submitted!" is sufficient when its source is
    authorized; finish without another review or email wait.
 8. `applied`: read the report; do not submit or finish again. `already_applied`
-   requires exact native evidence and no new submit. `submission_unknown` allows
-   observation/reconciliation within that attempt. A new user application request
+   requires exact native evidence and no new submit. After `submission_unknown`,
+   inspect confirmation and the current page. Continue actual unfinished fields,
+   verification or browser recovery; another advance follows current controls.
+   Click history does not restrict the attempt to observation. A new user application request
    starts a fresh attempt under the shared job-apply retry policy unless success
    is recorded. `ready_for_review` applies only in review mode.
 

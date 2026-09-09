@@ -295,15 +295,6 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if any(self._submission_state(db,attempt)['state']=='accepted' for attempt in attempts):
             raise ProtocolError('already_applied')
 
-    def _assert_no_owner(self, db, job_id, exclude_session=None):
-        if self._has_local_schema(db):
-            session=db.execute(RELATED+"SELECT s.id FROM related r JOIN application_sessions s ON s.job_id=r.id WHERE s.ended_at IS NULL AND s.id IS NOT ? LIMIT 1",(job_id,exclude_session)).fetchone()
-            if session:raise ProtocolError('owned_elsewhere')
-        lease=db.execute(RELATED+"SELECT l.* FROM related r JOIN application_attempts a ON a.job_id=r.id JOIN browser_leases l ON l.attempt_id=a.id WHERE l.state!='released' LIMIT 1",(job_id,)).fetchone()
-        if lease:
-            if lease['state']=='quarantined' or datetime.fromisoformat(lease['expires_at'])<=datetime.fromisoformat(self.now()):raise ProtocolError('reconciliation_required')
-            raise ProtocolError('owned_elsewhere')
-
     def _eligible(self, db, job_id, settings=None, exclude_session=None):
         job=self._get(db,'jobs',job_id)
         policy=settings or self.settings
@@ -314,7 +305,6 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             raise ProtocolError('market_incompatible')
         self._assert_not_suppressed(db,job_id)
         if db.execute('SELECT 1 FROM job_archives WHERE job_id=?',(job_id,)).fetchone():raise ProtocolError('job_archived')
-        self._assert_no_owner(db,job_id,exclude_session)
         if job['eligibility']!='ready': raise ProtocolError('not_ready')
         return job
 
@@ -465,7 +455,6 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             # fixture is allowed only in an explicitly synthetic development instance.
             if not (fixture and settings['mode']=='development') and settings['submission_mode']!='submit':
                 raise ProtocolError('submission_not_authorized')
-            if a['submit_intent_at'] and self._submission_pending(db,a): raise ProtocolError('reconciliation_required')
             if not evidence: raise ProtocolError('evidence_required')
             db.execute('UPDATE application_attempts SET submit_intent_at=? WHERE id=?',(self.now(),attempt_id))
             self._append_event(db,a,worker_id=worker_id,fence=fence,event_id=uid(),action_id=None,event_type='checkpoint',
@@ -478,10 +467,17 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         duration=max(0,(datetime.fromisoformat(completed)-datetime.fromisoformat(a['started_at']).replace(tzinfo=timezone.utc)).total_seconds())
         uncertain=a['uncertain_duration'] if reconciled and a['completed_at'] else int(reconciled)
         db.execute('UPDATE application_attempts SET outcome=?,evidence=?,completed_at=?,duration_seconds=?,finish_key=?,uncertain_duration=? WHERE id=?',(outcome,evidence,completed,duration,finish_key,uncertain,a['id']))
-        db.execute('UPDATE jobs SET status=?,completed_at=?,updated_at=? WHERE id=?',(outcome,completed,now,a['job_id']))
         if outcome in ('applied','already_applied'):
             person=self._get(db,'candidates',a['identity_id'])['person_key']
             db.execute('INSERT OR IGNORE INTO submission_ledger VALUES (?,?,?,?)',(a['job_id'],person,evidence,now))
+        # The posting summarizes all attempts. A later failure cannot erase a
+        # successful submission, and one ended attempt cannot hide another run.
+        success=db.execute(RELATED+'SELECT l.recorded_at FROM related r JOIN submission_ledger l ON l.job_id=r.id LIMIT 1',(a['job_id'],)).fetchone()
+        active=db.execute('SELECT 1 FROM application_attempts WHERE job_id=? AND completed_at IS NULL',(a['job_id'],)).fetchone()
+        latest=db.execute('SELECT outcome,completed_at FROM application_attempts WHERE job_id=? ORDER BY id DESC LIMIT 1',(a['job_id'],)).fetchone()
+        status=('already_applied' if outcome=='already_applied' else 'applied') if success else 'running' if active else latest['outcome']
+        job_completed=success[0] if success else None if active else latest['completed_at']
+        db.execute('UPDATE jobs SET status=?,completed_at=?,updated_at=? WHERE id=?',(status,job_completed,now,a['job_id']))
         db.execute('UPDATE run_jobs SET state=? WHERE run_id=? AND job_id=?',(outcome,a['run_id'],a['job_id']))
         # A late reconciliation may NEVER release a newer owner's browser.
         # Browser ownership and employer submission evidence are independent.
@@ -543,6 +539,5 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         with self.tx() as db:
             job=self._get(db,'jobs',job_id)
             self._assert_not_suppressed(db,job_id)
-            self._assert_no_owner(db,job_id)
-            db.execute("UPDATE jobs SET status='queued',updated_at=? WHERE id=?",(self.now(),job_id))
+            db.execute("UPDATE jobs SET status=CASE WHEN EXISTS(SELECT 1 FROM application_attempts WHERE job_id=? AND completed_at IS NULL) THEN 'running' ELSE 'queued' END,updated_at=? WHERE id=?",(job_id,self.now(),job_id))
             return dict(self._get(db,'jobs',job_id))

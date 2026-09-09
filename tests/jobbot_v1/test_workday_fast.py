@@ -117,18 +117,6 @@ def test_runner_stop_performs_no_click_and_only_acks_quiescence():
     assert any(op=='ack_control' for op,_ in h.calls)
 
 
-def test_runner_prior_submit_intent_never_resubmits(monkeypatch):
-    s=snapshot(step='review'); s['controls']={'submit':{'enabled':True}}
-    h=Harness([s],intent=True)
-    async def confirm(page,call,package,owner,config,target,activate,**kwargs):
-        assert kwargs['confirmation_only'] is True
-        return {'status':'submission_unknown'}
-    monkeypatch.setattr('job_applier.submission.submit',confirm)
-    result=asyncio.run(h.runner().run(seconds=3))
-    assert h.clicks==[]
-    assert result['status']=='submission_unknown'
-
-
 def test_runner_waits_for_writer_and_returns_boundedly():
     h=Harness([snapshot('active')])
     result=asyncio.run(h.runner().run(seconds=3))

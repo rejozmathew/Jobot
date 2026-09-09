@@ -439,7 +439,7 @@ def test_embedded_confirmation_scope_and_uncertain_dispatch(tmp_path,outcome):
             assert result['status']==expected,result
             assert submissions==['/fake-submit']
             again=await submit(page,ledger.call,package,{'attempt_id':1},{'spool_dir':str(tmp_path),'cdp_url':'fixture'},
-                page.target_id,activate,seconds=1,application_control=target)
+                page.target_id,activate,seconds=1,confirmation_only=True,application_control=target)
             assert again['status']==expected and submissions==['/fake-submit'],again
     asyncio.run(check())
 def test_observed_simplify_stop_settles_in_its_real_document(tmp_path):

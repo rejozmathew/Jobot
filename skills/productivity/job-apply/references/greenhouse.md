@@ -25,13 +25,13 @@ answer. Use the exact approved option, including veteran/disability fields;
 when recovering with `press`, supply the intended label and require `committed`.
 On mismatch inspect the actual selection/options and continue recovery.
 
-A fresh employer “Invalid security code”, “Expired security code” or required
-field rejection captured after Submit can return `submission_rejected` and
-`submission_pending:false`. Correct it in the owned session, request/fill a fresh
-code if appropriate and submit with a new intent. Old errors, missing responses
-and a generic failed reconciliation do not prove that the same click can be
-replayed. A new application request follows the shared retry policy: preserve
-this attempt and start a fresh one, without a non-submission confirmation gate.
+Follow the shared continuation policy after Submit. Visible unfinished fields,
+verification or validation feedback return `application_incomplete`; complete
+them in this session, request/fill a fresh code when appropriate and submit the
+current form. Historical click uncertainty never locks form edits or recovery
+and requires no special rejection-proof operation. Actual accepted confirmation
+establishes success. A new request may start a fresh attempt unless success is
+recorded. These are common application rules, not a Greenhouse exception.
 
 Normal observations persist unambiguous posting/Simplify company and role
 metadata into the existing job record, preserving explicit labels. Progress uses

@@ -124,6 +124,23 @@ async def observe_writers(page,package):
     return _merge_writers(root,children,router.diagnostics)
 
 
+def remaining_submission_work(observed):
+    """Describe visible unfinished work without inferring unknown field values."""
+    fields=observed.get('inventory',[]);required=[]
+    for field in fields:
+        if not field.get('enabled') or not field.get('required') or field.get('type')=='file':continue
+        kind=field.get('role') or field.get('type')
+        if kind=='radio':
+            # Required radio groups are answered by any checked member.
+            if not field.get('name'):continue
+            missing=not any(f.get('name')==field['name'] and f.get('document')==field.get('document') and f.get('checked') for f in fields)
+        elif kind=='checkbox':missing=field.get('checked') is False
+        else:missing=field.get('present') is False
+        if missing:required.append(field)
+    groups=[g for g in observed.get('verification',{}).get('groups',[]) if g.get('complete') is False]
+    return {'required_fields':required,'verification_groups':groups,'errors':observed.get('blocking_errors',[])}
+
+
 def inventory(observed, package):
     from .workday_fast import screen_inventory
     result=screen_inventory(observed,package)

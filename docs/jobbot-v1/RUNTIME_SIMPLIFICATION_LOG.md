@@ -1,5 +1,48 @@
 # Runtime simplification implementation log
 
+## Current-form continuation and removal of posting/account locks - 2026-09-09
+
+The earlier same-attempt uncertainty restrictions below are superseded by
+[RETRY_POLICY.md](RETRY_POLICY.md). A click is retained evidence, not permission
+to freeze a browser. The shared helper reports current unfinished required fields,
+verification and validation feedback as `application_incomplete`, and captures
+accepted confirmation before finishing. Explicit submission checks delayed
+confirmation and activates the current control at most once. Workday and the
+older Hermes worker no longer enter permanent confirmation-only mode. Browser,
+credentials, answers, reload/restart and pause/resume no longer require a special
+rejection-proof unlock. The legacy worker's internal upload-receipt gate is gone.
+
+Independent configured browsers may handle the same posting/account. The global
+job-owner check, reservation exclusion, account-use veto and two same-job unique
+indexes are removed. Ordinary new requests no longer stop earlier requests;
+explicit retry replaces its named session. Host operations queue instead of
+failing after five seconds. Posting status preserves accepted success and active
+parallel work. Structured correlation IDs survive redaction unchanged.
+
+Canonical instructions, shared helper/caller map and the historical audit notice
+were updated. [GUARDRAIL_RESEARCH_HANDOFF.md](GUARDRAIL_RESEARCH_HANDOFF.md) lists
+18 concrete earlier/current removals and provides the requested whole-repository
+research assignment. It explicitly identifies remaining areas for independent
+review; this change does not claim every restriction is gone.
+
+Verification: Python syntax parsed for 18 changed files; both changed JavaScript
+files parsed; diff whitespace and source/caller review completed. No new test
+cases or regression runs, per the user's explicit instruction. One obsolete
+Workday never-resubmit test was removed and existing contradictory assertions
+and fixture expectations were aligned. Historical passing suites do not validate
+this commit, and no live application was used as a fixture.
+
+The user separately requested correction of attempt 46. Its retained employer
+page showed incomplete code verification with no accepted confirmation; an
+appended evidence correction cleared pending state while preserving the click,
+open attempt and browser. Migration 17 was applied through `prepare_local` with
+its integrity-checked backup. The database retained 18 jobs, 46 attempts and
+three submission-ledger entries; the two same-job indexes are absent. The
+dashboard was refreshed, its authenticated health returned HTTP 200/schema 17,
+and the existing dashboard tab was kept open. The application host/browser was
+left running; its existing imports change on its normal next start, not merely
+because files changed on disk. No new employer submission was performed here.
+
 ## Shared retry policy and recovery documentation - 2026-09-09
 
 The current request policy is [RETRY_POLICY.md](RETRY_POLICY.md). Match the URL

@@ -1,4 +1,4 @@
-"""One submit and bounded evidence capture shared by local ATS execution paths."""
+"""Observe application progress and capture confirmation around explicit submits."""
 import asyncio
 from datetime import datetime,timezone
 import json
@@ -16,38 +16,61 @@ SCRIPT=(Path(__file__).parent/'browser_helpers/submission_observe.js').read_text
 def _stamp():return datetime.now(timezone.utc).isoformat()
 
 
-def _issued(call,ownership):
-    from .managed_shared import submission_pending
-    rows=call('events',attempt_id=ownership['attempt_id'])
-    return submission_pending({'submit_intent_at':True},rows)
-
-
 async def submit(page,call,package,ownership,config,target_id,activate,*,seconds=15,confirmation_only=False,application_control=None):
-    """Capture before click, never repeat an uncertain click, and persist before finish."""
+    """One activation per explicit call; previous clicks never lock form recovery."""
     from .application_answers import profile_policy
     from .managed_credentials import capture_private_screenshot
     def owned(operation,**params):return call(operation,**ownership,**params)
     def event(operation,status,evidence='',source='JobBot',**scope):
         owned('event',event_id=str(uuid.uuid4()),action_id=scope.get('dispatch_id'),event_type='checkpoint',observed_at=_stamp(),
               payload={'phase':'submission','stage_id':'submission','task_id':'submit','parent_id':'submission',
-                  'activity':'Submit application','task_state':'completed' if status=='applied' else 'recovering' if status=='not_executed' else 'in_progress',
+                  'activity':'Submit application','task_state':'completed' if status=='applied' else 'recovering' if status in ('not_executed','incomplete') else 'in_progress',
                   'operation':operation,'status':status,'evidence':evidence,'source':source,**scope})
     attempt=call('attempt_status',attempt_id=ownership['attempt_id'])
     if attempt.get('completed_at'):
         return dict({k:attempt.get(k) for k in ('id','outcome','evidence','completed_at')},
                     status=attempt.get('outcome'),attempt_id=ownership['attempt_id'])
-    already_issued=bool(confirmation_only or (attempt.get('submit_intent_at') and _issued(call,ownership)))
     folder=Path(config['spool_dir'])/'submission';folder.mkdir(parents=True,exist_ok=True)
     record_path=folder/('attempt-'+str(ownership['attempt_id'])+'.json')
-    previous=json.loads(record_path.read_text(encoding='utf-8')) if already_issued and record_path.is_file() else {}
-    if previous and previous.get('target_id')!=target_id:raise ValueError('submission_target_mismatch')
+    previous=json.loads(record_path.read_text(encoding='utf-8')) if record_path.is_file() else {}
+    if not confirmation_only and previous.get('dispatch_started_at') and previous.get('target_id')==target_id:
+        # Read any delayed confirmation before a newly requested click. This
+        # observation is not a permission gate: unfinished work can continue.
+        observation=await submit(page,call,package,ownership,config,target_id,activate,
+            seconds=1,confirmation_only=True,application_control=application_control)
+        if observation.get('status') in ('applied','already_applied'):return observation
+        previous=json.loads(record_path.read_text(encoding='utf-8'))
+    previous_path=None
+    if previous and (not confirmation_only or previous.get('target_id')!=target_id):
+        previous_path=folder/('attempt-'+str(ownership['attempt_id'])+'-previous-'+uuid.uuid4().hex[:8]+'.json')
+        previous_path.write_text(json.dumps(previous,indent=2),encoding='utf-8')
+        previous={}
+    already_issued=bool(confirmation_only and attempt.get('submit_intent_at'))
     record={'attempt_id':ownership['attempt_id'],'target_id':target_id,'started_at':previous.get('started_at',_stamp()),
             'baseline':previous.get('baseline',[]),'observations':previous.get('observations',[]),
             'frames':previous.get('frames',[]),'diagnostics':[],'dispatch_context':previous.get('dispatch_context'),
             'dispatch_started_at':previous.get('dispatch_started_at')}
+    if previous_path:record['previous_evidence_path']=str(previous_path)
     def persist():
         temporary=record_path.with_suffix('.tmp')
         temporary.write_text(json.dumps(record,indent=2),encoding='utf-8');temporary.replace(record_path)
+    async def incomplete(*,include_errors):
+        from .browser_controls import observe,inventory,remaining_submission_work
+        try:
+            observed=await observe(page,package)
+            work=remaining_submission_work(observed)
+        except Exception as exc:
+            record['diagnostics'].append('Form observation: '+safe_text(str(exc),300))
+            return None
+        if not any(work[k] for k in ('required_fields','verification_groups')) and not (include_errors and work['errors']):return None
+        event('submission_observation','incomplete','Current application form has unfinished fields, verification or validation feedback','employer')
+        record['observed_at']=_stamp();record['status']='incomplete';persist()
+        return {'status':'application_incomplete','submission_pending':False,'attempt_id':ownership['attempt_id'],
+            'remaining_work':work,'screen':inventory(observed,package),'evidence_path':str(record_path),
+            'next_step':'Continue this application: complete visible required fields and verification using the existing form and private mailbox operations. Inspect validation feedback and submit the current form when ready.'}
+    if not confirmation_only:
+        remaining=await incomplete(include_errors=False)
+        if remaining:return remaining
     binding='__jobbotSubmit'+uuid.uuid4().hex;name=binding+'State'
     allowed=profile_policy(package).get('submission_evidence_sources',['employer'])
     def remember(item):
@@ -71,14 +94,14 @@ async def submit(page,call,package,ownership,config,target_id,activate,*,seconds
               'application_ref':(application_control or {}).get('ref'),
               'rejections':not str((application_control or {}).get('ref','')).startswith('frame:')}
         before=await page.evaluate_function(SCRIPT,args)
-        if not already_issued:
+        if not confirmation_only:
             record['baseline']=before['baseline'];args['baseline']=before['baseline']
             record['dispatch_context']=embedded.dispatch_context or {'document_id':before.get('document_id'),'frame_id':'root'}
         # The new document hook retains capture across a normal submit redirect.
         future=dict(args,active=True)
         installed=await page._session.call('Page.addScriptToEvaluateOnNewDocument',{'source':'if(window===window.top){('+SCRIPT+')('+json.dumps(future)+')} '})
         script_id=installed['identifier'];persist()
-        if not already_issued:
+        if not confirmation_only:
             url=await page.evaluate('location.href')
             if not is_same_application_scope(package['job']['url'],url):raise ValueError('target_job_mismatch')
             gate=await asyncio.to_thread(owned,'browser_observe',target_id=target_id,cdp_url=config['cdp_url'])
@@ -160,24 +183,19 @@ async def submit(page,call,package,ownership,config,target_id,activate,*,seconds
             owned('finish',outcome='applied',evidence=evidence,quiescent=False)
             return {'status':'applied','attempt_id':ownership['attempt_id'],'source':proof['source'],
                     'evidence':evidence,'evidence_path':str(record_path),'image_path':record.get('image_path')}
+        remaining=await incomplete(include_errors=True)
+        if remaining:return dict(remaining,image_path=record.get('image_path'))
         rejection=current_rejection()
-        if rejection and not confirmations():
-            proof={k:rejection[k] for k in ('source','reason_code','observed_at','fresh_after_dispatch')}
-            proof.update(record['dispatch_context'])
-            try:resolution=owned('record_submission_rejection',proof=proof)
-            except Exception as exc:
-                record['diagnostics'].append('Rejection resolution: '+type(exc).__name__);persist()
-            else:
-                if resolution.get('submission_pending') is False:
-                    record['resolution']=resolution;persist()
-                    return {'status':'submission_rejected','submission_pending':False,'attempt_id':ownership['attempt_id'],
-                        'source':'employer','reason':rejection['reason_code'],'evidence_path':str(record_path),
-                        'image_path':record.get('image_path'),
-                        'next_step':'The employer explicitly rejected this submission. Correct the field or request a fresh email code in this owned session, then submit once with a new authorized intent.'}
-        event('submission_observation','pending','Confirmation not captured; preserve the owned page for inspection')
+        if rejection:
+            event('submission_observation','incomplete',rejection['text'],'employer')
+            return {'status':'application_incomplete','submission_pending':False,'attempt_id':ownership['attempt_id'],
+                'source':'employer','reason':rejection['reason_code'],'evidence_path':str(record_path),
+                'image_path':record.get('image_path'),
+                'next_step':'Inspect the current form, correct the rejected field or verification code, and continue submission in this session.'}
+        event('submission_observation','pending','Confirmation not captured; inspect the current application and continue as appropriate')
         return {'status':'submission_unknown','attempt_id':ownership['attempt_id'],'reason':click_error or 'confirmation_not_captured',
                 'evidence_path':str(record_path),'image_path':record.get('image_path'),'diagnostics':record['diagnostics'],
-                'next_step':'Read the owned screenshot or snapshot, or reconcile direct user confirmation. Do not replay Submit in this attempt. A new user application request can start a fresh attempt.'}
+                'next_step':'Inspect the current screenshot, fields, verification and confirmation evidence. Continue using the current controls, including another explicit Submit when appropriate. A previous click does not disable edits, mailbox access, reload or restart.'}
     finally:
         if aid:owned('action_end',action_id=aid,status='failed')
         remove()
@@ -218,7 +236,7 @@ class _EmbeddedEvidence:
         else:frames=list(router.frames.values())
         previous={item['frame_id']:item for item in self.record['frames']}
         for frame in frames:
-            if self.already_issued and frame.frame_id not in previous:continue
+            if self.already_issued and previous and frame.frame_id not in previous:continue
             await frame.validate()
             saved=previous.get(frame.frame_id,{})
             item={'frame_id':frame.frame_id,'url':saved.get('url',frame.url),

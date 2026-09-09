@@ -1,7 +1,7 @@
 # Shared application request and retry policy
 
 This is the authoritative policy adopted September 9, 2026 after the user
-rejected the previous cross-attempt submission-uncertainty restrictions. It
+rejected blanket submission-uncertainty, same-job and account-use restrictions. It
 applies to every portal, including Greenhouse, Workday and proprietary forms.
 Login requirements do not affect whether another attempt can start.
 
@@ -18,7 +18,7 @@ an application request. An existing job may have any number of attempts.
 | Earlier Submit may have executed, with no recorded success | Preserve that uncertainty and allow a new requested attempt. |
 | Recorded successful submission, including accepted confirmation evidence | Report already applied; suppress an ordinary duplicate. |
 | Repeated call belonging to the same request | Return that request's existing session. |
-| New request while a prior request has an active browser | Stop that owned browser, then start the new attempt. |
+| New request while a prior request has an active browser | Use another configured workspace if available; otherwise report capacity. The posting itself has no exclusive owner. |
 
 There is no `confirmed_not_submitted` prerequisite, no operator unblock flag,
 no portal-specific retry exception and no automatic rewrite of old outcomes.
@@ -35,15 +35,18 @@ the same session. A later application request has a different request identity.
 
 Portable callers can provide `--request-id`. Without it, repeated starts reuse
 the same driver's running, preparing or capacity-wait session; after it ends,
-another start creates a new session. Starting a paused or finishing session
-closes it and starts fresh. `retry <session-id>` explicitly requests a new attempt. A different
+another start creates a new session. A paused or finishing session is not reused
+by an unkeyed start. `retry <session-id>` stops that particular session and explicitly requests a new attempt. A different
 conversation uses its own driver identity. The native caller updates its session
 binding from the returned handle so subsequent browser calls use the new attempt.
 
 Browser control is separate from retry eligibility. Shared `control_session`
-performs the existing stop/pause lifecycle for ordinary control and fresh starts.
-It stops actual owned activity before the new browser is assigned; a pending
-stop returns continuation guidance rather than a permanent job restriction.
+performs explicit stop/pause and replacement of the particular session named by
+`retry`. An ordinary new request does not stop another request for the same job.
+Two browser sessions can work on the same posting or sign into the same account.
+Operations on one physical workspace are queued by the host; another in-flight
+call no longer causes `session_operation_busy` after five seconds. Distinct
+Chrome profile directories/endpoints still require distinct workspaces.
 Heartbeat age is activity telemetry, not a submission result or a job ban. The
 host owns process cleanup. This change does not introduce a heartbeat timeout.
 
@@ -65,16 +68,33 @@ and form interaction may vary by portal; this retry decision does not.
 can remain pending even after that attempt stops. A new attempt starts with its
 own empty submission intent and independent browser state.
 
-Within one active attempt, the submission helper still records its click and
-does not automatically replay an uncertain dispatch. Fresh captured employer
-rejection still supports correction in that same session. These observations
-are not prerequisites for a later user-requested attempt. Do not reinterpret
-an old Submit as not executed merely to permit retry, and do not invent employer
-confirmation or rejection evidence.
+Within an active attempt, click history is evidence, not permission. Form edits,
+private verification, answers, reload/restart, pause/resume and another explicit
+Submit remain available. The shared helper reads retained/current confirmation
+before a newly requested click and activates at most once per call. A targetless
+`browser submit` observes only. Workday follows its current page on another
+advance call instead of always entering a confirmation-only branch.
+
+The ordinary form inventory reports unfinished required fields and private
+verification completeness without exposing values. Before dispatch, unfinished
+fields return `application_incomplete`; after dispatch, validation feedback also
+returns this continuation. Optional fields and an empty file input after upload
+do not trigger this check. Unknown widget values are not assumed missing answers.
+No special rejection proof is required to edit or continue. The legacy rejection
+endpoint remains for compatibility and truthful historical resolution, not as an
+unlock step. Do not relabel old clicks as not executed or invent confirmation.
+Evidence files retain earlier dispatch records when a new cycle starts, including
+a replacement target after browser recovery.
+
+The older Hermes worker also permits form operations and a new explicit Submit
+after a click. It no longer requires its own resume-upload receipt. Recorded
+success still prevents ordinary duplicate applications. With concurrent attempts,
+a later failure cannot erase successful posting status; another active attempt
+keeps an unfinished posting running.
 
 Browser leases are released on acknowledged quiescence independently of the
-submission outcome. An actually active owner remains a lifecycle matter to
-stop; a historical `submission_unknown` job status is not ownership evidence.
+submission outcome. An active browser is a resource to control, not an exclusive
+claim on a posting; historical uncertainty is not ownership evidence.
 
 ## Implementation and callers
 
@@ -83,14 +103,20 @@ stop; a historical `submission_unknown` job status is not ownership evidence.
 | `managed_identity.py` and `Service.intake` | Match URL aliases/requisitions to the existing durable job. |
 | `managed_events._submission_state` | Read the existing per-attempt evidence projection. |
 | `Service._assert_not_suppressed` | Suppress only recorded success, including retained accepted evidence. |
-| `Service._assert_no_owner`, `_eligible`, `retry` | Separate actual ownership and configured eligibility from historical attempt outcomes; queue an unfinished job without reconciliation. |
-| `application_runtime.start` | Resolve request identity, reuse the same request or stop an older request, and enter the shared session startup path. |
-| `application_runtime.control_session` | Reuse one stop/pause implementation for control, new starts and retry. |
+| `Service._eligible`, `retry`, `_complete` | Apply configured eligibility and recorded success, allow concurrent attempts, and aggregate posting status. The job-owner veto was removed. |
+| `application_runtime.start` | Resolve request identity, reuse the same request or allocate an independent workspace, and enter the shared session startup path. |
+| `application_runtime.control_session` | Reuse one stop/pause implementation for explicit control and retry of a particular session. |
 | `application_runtime.session_call` | Route explicit retry through ordinary start with a new attempt. |
 | `managed_sessions.reserve_session` | Record first-attempt/reattempt classification and existing history-derived storage cleanup. |
 | `hermes_plugin._handle_local` | Supply observed request-turn metadata and retain the returned current session ID. |
 | `application_runtime.history_matches` | Read legacy history for recorded successful submissions only. |
 | `managed_questions.queue_answer_retries` and dashboard | Apply the same success-only history suppression to saved-answer retries. |
+
+Migration 17 removes `uq_managed_active_job` and `one_local_job` and narrows the
+legacy reservation trigger to physical browser profiles. Account coordination
+returns the portal namespace without excluding another session. The shared
+`browser_controls.remaining_submission_work` reader feeds the submission helper;
+`submission_pending` remains a reporting projection, never a permission switch.
 
 Removed restrictions include the old pending-attempt scan in job suppression,
 the `verify_exact_submission_before_retry` refusal, historical interrupted/unknown
@@ -115,3 +141,15 @@ were removed, along with obsolete retry-blocking assertions in two broader tests
 No replacement tests were added. Earlier passing suite counts do not validate
 this follow-up. Source/diff review is the verification basis; no live application
 or production-history reconciliation is performed as an engineering fixture.
+
+## Same-session continuation follow-up
+
+The same-session changes remove an obsolete Workday never-resubmit test and
+conflicting assertions, and adjust existing fixture expectations. No new test
+cases were added and no regressions were run, as explicitly requested. Source,
+diff and syntax review are the verification basis. Earlier passing suite counts
+do not validate this change. Attempt 46 was separately corrected at the user's
+request using retained employer-page evidence; that operational correction is
+not a fixture or proof of live acceptance of the new code. See
+[the research handoff](GUARDRAIL_RESEARCH_HANDOFF.md) for concrete changes and
+remaining areas requiring a complete source audit.

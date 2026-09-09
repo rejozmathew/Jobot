@@ -77,7 +77,6 @@ class QuestionServices:
         key=question_key(data)
         with self.tx() as db:
             attempt=self._owner(db,attempt_id,worker_id,fence)
-            if self._submission_pending(db,attempt):raise ProtocolError('submission_pending_read_only')
             siblings=self._questions(db,attempt['job_id'],attempt['identity_id'])
             for old in siblings:
                 if old['field']==field and old['context']==data['context'] and old['question_key']!=key:
@@ -109,7 +108,6 @@ class QuestionServices:
     def park_questions(self,attempt_id,*,worker_id,fence):
         with self.tx() as db:
             attempt=self._owner(db,attempt_id,worker_id,fence)
-            if self._submission_pending(db,attempt):raise ProtocolError('submission_pending_read_only')
             pending=[q for q in self._questions(db,attempt['job_id'],attempt['identity_id']) if q['state']=='pending']
             if not pending:raise ProtocolError('no_pending_questions')
         result=self.finish(attempt_id,worker_id=worker_id,fence=fence,outcome='blocked',
@@ -162,7 +160,6 @@ class QuestionServices:
         """Live harness bridge. A reply is data; the next browser call rechecks refs."""
         with self.tx() as db:
             attempt=self._owner(db,attempt_id,worker_id,fence)
-            if self._submission_pending(db,attempt):raise ProtocolError('submission_pending_read_only')
             allowed={q['id'] for q in self._questions(db,attempt['job_id'],attempt['identity_id'])}
             if not isinstance(answers,list) or any(not isinstance(a,dict) or a.get('question_id') not in allowed for a in answers):
                 raise ProtocolError('question_context_mismatch')
@@ -198,14 +195,14 @@ class QuestionServices:
             for job_id in job_ids:
                 questions=self._questions(db,job_id,identity_id)
                 if not questions or any(q['state']=='pending' for q in questions):raise ProtocolError('unanswered_questions')
-                self._assert_not_suppressed(db,job_id);self._assert_no_owner(db,job_id)
+                self._assert_not_suppressed(db,job_id)
                 if db.execute('SELECT 1 FROM job_archives WHERE job_id=?',(job_id,)).fetchone():raise ProtocolError('job_archived')
                 old=db.execute("SELECT * FROM answer_retry_requests WHERE job_id=? AND identity_id=? AND state='queued'",(job_id,identity_id)).fetchone()
                 if old:requests.append(dict(old));continue
                 identifier=uid();now=self.now()
                 db.execute("INSERT INTO answer_retry_requests(id,job_id,identity_id,state,requested_at) VALUES (?,?,?,'queued',?)",
                     (identifier,job_id,identity_id,now))
-                db.execute("UPDATE jobs SET status='queued',updated_at=? WHERE id=?",(now,job_id))
+                db.execute("UPDATE jobs SET status='queued',updated_at=? WHERE id=? AND status!='running'",(now,job_id))
                 requests.append(dict(self._get(db,'answer_retry_requests',identifier)))
             return {'requests':requests,'instruction':'The next application harness can pick up these requests. Browser startup still verifies ownership, history and the configured profile.'}
 
@@ -218,7 +215,7 @@ class QuestionServices:
             requests=[]
             for row in rows:
                 if any(q['state']=='pending' for q in self._questions(db,row['job_id'],row['identity_id'])):continue
-                try:self._assert_not_suppressed(db,row['job_id']);self._assert_no_owner(db,row['job_id'])
+                try:self._assert_not_suppressed(db,row['job_id'])
                 except ProtocolError:continue
                 requests.append(dict(row,request_id='answer-retry:'+row['id']))
             return {'requests':requests}

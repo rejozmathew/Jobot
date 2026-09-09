@@ -207,7 +207,18 @@ def migration_16(db):
     db.execute("CREATE UNIQUE INDEX one_queued_answer_retry ON answer_retry_requests(job_id,identity_id) WHERE state='queued'")
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16)]
+def migration_17(db):
+    # Requests may share a posting. Browser profile allocation is independent.
+    db.execute('DROP INDEX IF EXISTS uq_managed_active_job')
+    db.execute('DROP INDEX IF EXISTS one_local_job')
+    db.execute('DROP TRIGGER IF EXISTS local_reserved_attempt')
+    db.execute('''CREATE TRIGGER local_reserved_attempt BEFORE INSERT ON application_attempts
+        WHEN NEW.workflow != 'local-session-v1' AND EXISTS (
+            SELECT 1 FROM workspace_profile_aliases WHERE profile=NEW.browser_profile)
+        BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17)]
 
 
 def migrate(path):

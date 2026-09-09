@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.7
+version: 0.5.8
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -39,7 +39,7 @@ the user's permissions, then return that choice to the helper or scoped browser.
 Spend additional time on a plausible recovery and record its timing so later
 engineering can improve the slow path. Ask the user only for information or
 verification actually requiring them. Real ownership, writer settlement,
-eligibility and the current attempt's submission-dispatch boundaries still apply. A helper's
+eligibility and truthful submission evidence still apply. A helper's
 inability alone is never evidence that the application cannot proceed.
 User corrections are instructions to adjust and continue the authorized task.
 An apology or discovery of an executor mistake is not a stop request. Stop only
@@ -250,11 +250,16 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    a request to audit the completed application.
 8. Use `finish` with the truthful outcome, evidence and observed quiescence.
    The host isolates its browser before making the workspace available again.
-   A missing post-click confirmation is `submission_unknown`; do not replay that
-   click in the same attempt. A new user request can start a fresh attempt.
+   A missing post-click confirmation is `submission_unknown`, an observation
+   rather than a restriction on continuing the application.
 
-After an uncertain click, use owned screenshot, snapshot and confirmation
-observation. The session stays open until completion, Stop, or an explicitly
+After an uncertain click, inspect the current screenshot, fields, verification
+and confirmation. Complete unfinished work using the existing form and private
+mailbox operations, then submit the current form when appropriate. `browser
+submit` without a target observes confirmation only. A targeted submit or another
+Workday advance can follow the current page; each call activates Submit at most
+once. A previous click does not disable edits, answers, credentials, reload,
+restart, pause or resume. The session stays open until completion, Stop, or an explicitly
 configured maximum runtime. A proven `not_executed` Submit returns recovery,
 not submission uncertainty: refresh the control and continue in the same attempt.
 An intent with a missing dispatch result remains uncertain. `stop` closes
@@ -265,22 +270,20 @@ session before correction and preserves the original attempt duration. Portable:
 `application_runtime reconcile <session-id> --outcome applied --source user_reported --evidence "<actual confirmation>"`.
 Reconciliation never submits or creates a retry. Cross-job URLs are not proof.
 
-`submission_rejected` with `submission_pending:false` means the shared capture
-recorded a fresh, explicit employer form rejection tied to that Submit action,
-document and frame. Correct the rejected field or request a fresh email code,
-then use `browser submit` again in the same session; it records a new authorized
-intent. The previous click remains recorded as executed. A stale error, failed
-helper, absent confirmation or a reconciliation label of `failed` cannot unlock
-another click in this same attempt. They do not block a separately requested
-fresh attempt. Do not manufacture rejection events from a screenshot or arbitrary label;
-unresolved or contradictory acceptance evidence stays protected.
+`application_incomplete` includes observed remaining fields, verification or
+validation feedback. Continue that work in this session. It is not a final
+outcome and needs no special rejection proof or operator unblock. The helper
+uses the existing field inventory, skips optional fields and does not require
+an internal resume-upload receipt. Historical clicks remain recorded. Only
+accepted confirmation establishes success; never invent confirmation or label
+an old click as not executed merely to justify continuing.
 
 Headed sessions start maximized. Obscured clicks return viewport/covering metadata
 and use only an uncovered point on the actual control. Inspect and use an observed
 panel collapse control if needed; never force through an overlay. Completed workspaces retire their owned background host;
 parallel sessions retain their independent hosts and browser processes.
 
-For a broken page before submission, recover it instead of finishing blocked.
+For a broken page, recover it instead of finishing blocked.
 This applies to Workday, iCIMS, Greenhouse and proprietary portals alike. A
 missing Simplify panel is also a recovery case: inspect the current page and
 whether it is still loading, then refresh if the extension did not initialize.
@@ -305,9 +308,9 @@ parameters. The host stops its owned browser and reopens the assigned job with
 the same profile, session and attempt. Read status until connected, inspect the
 page, recover sign-in/form progress and continue. A helper's automatic recovery
 limit hands the decision back to the executor; it does not forbid another
-evidence-based recovery. Reload/restart never authorize repeating a possibly
-submitted application. Pending submission remains observation/reconciliation
-within that attempt; a new user application request follows the shared retry policy.
+evidence-based recovery. Inspect actual submission evidence as part of choosing
+the next operation; historical click uncertainty never locks the browser. New
+user application requests follow the shared retry policy.
 
 `finish` parameters are `{"outcome":"blocked","evidence":"<observed reason>",
 "quiescent":true}` (or another supported truthful outcome). Do not add invented
@@ -435,7 +438,9 @@ Native start calls use the observed user turn as request identity when available
 Repeated calls in that request reuse its session. Portable callers may supply
 `--request-id` for a distinct request; `retry` explicitly requests a fresh attempt.
 Without a request ID, start reuses this driver's active session and creates a new
-one once it ends. A new conversation starts its own attempt. For all ATS types, a new session on a previously
+one once it ends. A new conversation starts its own attempt. Distinct requests
+can use distinct configured browser workspaces for the same posting or account;
+an ordinary new request does not stop another request. For all ATS types, a new session on a previously
 attempted job clears the assigned employer origin's cookies and site storage
 before opening it. This also applies to a new request/conversation and queued
 answer retries. Simplify's separate login and extension state remain; the
@@ -493,8 +498,9 @@ executor inspects and performs a bounded supported recovery, then return to the
 fast runner/Simplify. If image capability is unavailable, report that limitation
 and use the fresh DOM snapshot where sufficient. Never claim visual inspection
 without seeing the image. Record the observed mismatch and recovery for a later
-helper update; do not edit the helper during the application or repeat a pending
-creation/submission to discover whether it worked.
+helper update; do not edit the helper during the application. Inspect an uncertain
+account-creation action before choosing account recovery. Application submission
+follows the shared current-form continuation policy above.
 
 Use `event`/native `milestone` for real activities, with `event_id`, `event_type`,
 UTC `observed_at`, and a concise non-secret payload. Navigation/field/account

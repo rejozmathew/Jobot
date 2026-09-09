@@ -130,25 +130,16 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     sync_answer_policy(config,service)
     if not request_id and (metadata or {}).get('request_turn_id'):
         request_id=hashlib.sha256(json.dumps([driver,identity_id,job['id'],metadata['request_turn_id']]).encode()).hexdigest()
-    # A fresh request may restart an unfinished job from any conversation.
-    # Reserve still reuses this driver's active session; explicit request IDs
-    # retain transport idempotency. Ended sessions do not trap future starts.
+    # Reuse this request, not every other application for the same posting.
+    # Distinct requests can use distinct configured browser workspaces.
     from .managed_identity import RELATED
     with service.tx() as db:
         replay=db.execute('SELECT id FROM application_sessions WHERE request_id=?',(request_id,)).fetchone() if request_id else None
         if not replay:service._assert_not_suppressed(db,job['id'])
-        previous=None if replay else db.execute(RELATED+'''SELECT s.* FROM related r JOIN application_sessions s ON s.job_id=r.id
-            WHERE s.ended_at IS NULL ORDER BY s.requested_at DESC LIMIT 1''',(job['id'],)).fetchone()
-    same_request=previous and not request_id and previous['driver_id']==driver and previous['identity_id']==identity_id and previous['state'] not in ('paused','finishing')
-    if previous and not same_request:
-        stopped=control_session(config,service,dict(previous),'stop')
-        if not stopped.get('ended_at'):
-            continuation={'job_id':job['id'],'wait_seconds':0}
-            if request_id:continuation['request_id']=request_id
-            stopped['next_operation']={'operation':'start','parameters':continuation,
-                'instruction':'The previous browser is stopping. Continue this new application request after it closes.'}
-            return stopped
-    requested=request_id or (previous['request_id'] if same_request else uid())
+        previous=None if request_id else db.execute(RELATED+'''SELECT s.* FROM related r JOIN application_sessions s ON s.job_id=r.id
+            WHERE s.ended_at IS NULL AND s.driver_id=? AND s.identity_id=?
+            AND s.state NOT IN ('paused','finishing') ORDER BY s.requested_at DESC LIMIT 1''',(job['id'],driver,identity_id)).fetchone()
+    requested=request_id or (previous['request_id'] if previous else uid())
     from .managed_versions import code_evidence
     evidence=code_evidence()
     meta={**(metadata or {}),'requested_model':config.get('application_model',config.get('model')),
@@ -279,7 +270,7 @@ def session_call(config, session_id, operation, parameters=None, driver_id=None)
                     'instruction':'The previous browser is stopping. Continue retry after it closes.'}
                 return stopped
         job=service.job(session['job_id'])
-        return start(config,job_id=job['id'],driver_id=driver)
+        return start(config,job_id=job['id'],driver_id=driver,request_id=uid())
     if operation=='attach':
         session=service.attach_session(session_id,driver)
         from .workspace_host import ensure_host
@@ -360,7 +351,8 @@ def browser_action(config,client,ownership,package,target_id,params):
                     submission_control=info.get('submission_control') is True
             if method=='submit' or submission_control:
                 from .submission import submit
-                if not pending and params.get('source')!='simplify':
+                confirmation_only=not target and params.get('source')!='simplify'
+                if not confirmation_only and params.get('source')!='simplify':
                     info=await inspect_control(page,target) if target else {}
                     if not info.get('submission_control'):raise ProtocolError('observed_submit_control_required')
                 async def activate():
@@ -375,8 +367,8 @@ def browser_action(config,client,ownership,package,target_id,params):
                             'url':observed['url'],'page_ref':observed.get('page_ref')})
                     if not target:raise ProtocolError('observed_submit_control_required')
                     return await click_control(page,target)
-                return await submit(page,client.call,package,ownership,config,target_id,activate,application_control=target)
-            if pending and not reads:raise ProtocolError('submission_pending_read_only')
+                return await submit(page,client.call,package,ownership,config,target_id,activate,
+                    confirmation_only=confirmation_only,application_control=target)
             if not reads and method!='reload':
                 gate=await asyncio.to_thread(client.call,'browser_observe',**ownership,target_id=target_id,cdp_url=config['cdp_url'])
                 extension_action=method=='simplify' or (method=='click' and params.get('source')=='simplify')
@@ -411,11 +403,10 @@ def browser_action(config,client,ownership,package,target_id,params):
                 return {'image_path':str(path),'mime_type':'image/png','url':public_url(url),'target_id':target_id,'identity':identity,
                     'instruction':'Inspect this owned-page image; snapshot supplies observed selectors.'}
             if method=='snapshot':
-                if pending or identity['status']!='same_job':
+                if identity['status']!='same_job':
                     result={'url':public_url(url),'target_id':target_id,'submission_pending':pending,
                             'identity':identity,'recovery_only':identity['status']!='same_job',
-                            'instruction':'Confirmation observation only. Do not submit again.'}
-                    if not pending:result['instruction']='Inspect this owned tab or navigate back to the assigned job before form writes.'
+                            'instruction':'Inspect this owned tab or navigate back to the assigned job before form writes.'}
                 else:
                     observed=await observe(page,package)
                     metadata=observed.get('job_metadata')

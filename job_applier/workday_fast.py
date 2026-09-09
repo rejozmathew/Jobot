@@ -116,9 +116,9 @@ def screen_inventory(observed,package):
     return {'screen_key':key,'page_signature':observed.get('page_signature'),'url':observed.get('url'),
         'step':observed.get('step'),'auth':observed.get('auth'),'auth_ui':observed.get('auth_ui'),
         'native':observed.get('inventory',[]),'errors':observed.get('blocking_errors',[]),'refresh_error':observed.get('refresh_error',False),
-        'browser_recovery':{'available':not package['attempt'].get('submission_pending',bool(package['attempt'].get('submit_intent_at'))),
+        'browser_recovery':{'available':True,
             'reload':{'operation':'browser','parameters':{'method':'reload'}},'restart':{'operation':'restart','parameters':{}},
-            'instruction':'On any portal, inspect a broken page or missing Simplify panel and allow actual loading before recovery. After reload, use the fresh screen: once the page has usable controls or progresses, continue without another reload/restart for the old error. A new observed failure can support further recovery. Unknown extension state does not forbid cancellation; pending submission permits observation only.'},
+            'instruction':'On any portal, inspect a broken page or missing Simplify panel and allow actual loading before recovery. After reload, use the fresh screen: once the page has usable controls or progresses, continue without another reload/restart for the old error. A new observed failure can support further recovery. Inspect submission evidence when relevant; a previous click does not disable recovery.'},
         'simplify':{'enabled':settings.get('autofill','simplify')=='simplify','status':observed.get('status'),'panel':observed.get('panel'),
                     'login_kind':observed.get('login_kind'),'controls':observed.get('simplify_inventory',[]),
                     'text':observed.get('panel_text',''),'credential_use':'unverified'},
@@ -374,10 +374,6 @@ class FastRunner:
         start=self.clock(); deadline=start+seconds
         metrics=self.state.setdefault('metrics',{'polls':0,'clicks':0,'wait_seconds':0,'elapsed_seconds':0})
         try:
-            if self.state['submit_intent']:
-                from .submission import submit
-                return await submit(self.page,self.call,self.package,self.owner,self.config,self.target,
-                    lambda:None,seconds=min(seconds,15),confirmation_only=True)
             if recovery is not None:
                 if isinstance(recovery,dict) and 'source_choice' in recovery:
                     if set(recovery)!={'screen_key','source_choice'} or not isinstance(recovery['source_choice'],str) or not recovery['source_choice'].strip():
@@ -403,11 +399,11 @@ class FastRunner:
                     if gate.get('quiescent') and pulse.get('control') in ('stop_requested','pause_requested'):
                         self.owned('ack_control',quiescent=True)
                     return self.report(pulse.get('control','control_unknown'),observed)
-                if observed.get('refresh_error') and not self.state['submit_intent'] and not observed.get('confirmation_surface'):
+                if observed.get('refresh_error') and not observed.get('confirmation_surface'):
                     recovered=await self.recover_error_page(observed)
                     if recovered is not None:return recovered
                     continue
-                if self.state.get('page_recovery',{}).get('awaiting_page') and not self.state['submit_intent']:
+                if self.state.get('page_recovery',{}).get('awaiting_page'):
                     recovered=await self.wait_after_reload()
                     if recovered is not None:return recovered
                     observed=await self.observe()

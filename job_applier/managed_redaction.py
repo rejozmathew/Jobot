@@ -41,6 +41,13 @@ def safe_payload(payload):
             continue
         if not isinstance(value,str): continue
         for secret in secrets: value=value.replace(secret,'[REDACTED]')
+        # Correlation IDs are structured identifiers, not prose or mailbox codes.
+        # Masking numeric UUID segments breaks linkage between the captured
+        # browser dispatch and its event. Other strings still use redaction.
+        if key in ('dispatch_id','document_id','frame_id') and re.fullmatch(
+                r'(?:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9a-fA-F]{16,64}|root)',value):
+            result[key]=value
+            continue
         result[key]=safe_text(value)
     return result
 

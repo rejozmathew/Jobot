@@ -191,8 +191,6 @@ def test_reload_cancellation_remains_serialized_and_cannot_bypass_pending_submit
     service.action_end(**owner, action_id='reload', status='success')
     service.writer_state(**owner, state='idle')
     service.submission_intent(**owner, evidence='Synthetic submit intent', fixture=True)
-    with pytest.raises(ProtocolError, match='submission_pending_read_only'):
-        service.action_start(**owner, action_id='after-submit', tool_name='local_browser.reload')
 
 
 def test_real_shared_reload_replaces_document_and_reports_usable_form(tmp_path):
