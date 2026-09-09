@@ -104,6 +104,12 @@ Python/JavaScript syntax and diff checks passed. Regression tests remain deferre
 under the user's prior instruction; no new live application was run for this
 checkpoint. The Greenhouse follow-up is a separate planning task.
 
+The saved [Greenhouse recovery and application progress plan](GREENHOUSE_RECOVERY_PLAN.md)
+investigates attempt 45 and the portal's missing company labels. It proposes
+shared dropdown verification, prompt private email verification, explicit
+employer-rejection recovery, metadata persistence, and meaningful stage/task
+progress with collapsed debug details. It is a plan, not implemented behavior.
+
 ## Before and after
 
 ```text
