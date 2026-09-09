@@ -66,8 +66,18 @@ portal namespace. `creation_pending` records dispatch intent; it does not prove
 that an account exists. A creation click proven `not_executed` by the owned browser
 can move its own attempt's pending account to `creation_not_executed`, retaining
 the dispatch reason and allowing bounded recovery. Uncertain dispatch remains
-pending for reconciliation; employer evidence establishes `created_unverified`
-or `confirmed`. Screen handoffs include state, timestamps and last attempt ID.
+pending for reconciliation. Workday uses a bounded retained-credential sign-in
+check for pending creation, including a prior attempt, without recreating the
+account. The native email chooser can recur once after creation. Employer
+evidence establishes `created_unverified` or `confirmed`. Screen handoffs include
+state, timestamps and last attempt ID.
+
+`target_job_mismatch` protects the assigned application's URL scope in addition
+to target/session ownership. Browser observation validates the full owned URL
+before and after reading the page. Display URLs intentionally omit queries;
+they cannot validate a Workday login whose query carries the requisition redirect.
+Only a redirect to the same application is accepted, and navigation during
+observation prevents quiescence. Full authentication URLs are not added to output.
 
 ## Actual startup and call sequence
 
@@ -204,7 +214,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js | Existing dashboard, parallel session/process/driver/model/progress and independent controls |
 
-Common policy is job-apply v0.4.6; Workday policy is workday-simplify v0.3.4, in
+Common policy is job-apply v0.4.7; Workday policy is workday-simplify v0.3.5, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision

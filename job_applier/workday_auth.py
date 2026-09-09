@@ -214,17 +214,22 @@ async def advance_auth(r,observed):
     if account.get('action')=='operator_required':return result('account_requires_operator')
     tried=state.setdefault('tried',[])
     mode=ui.get('mode')
+    if mode=='email_chooser' and state.get('submitted')=='sign_in':
+        return result(status='waiting') if r.clock()-state.get('submitted_at',r.clock())<5 else result('workday_sign_in_unconfirmed')
     if state.get('submitted')==mode:
         if ui.get('account_exists') and mode=='create_account':pass
         elif r.clock()-state.get('submitted_at',r.clock())<5:return result(status='waiting')
         else:return result('workday_'+mode+'_unconfirmed')
-    if mode not in ('create_account','sign_in'):return result('workday_auth_controls_unrecognized')
-    if account.get('action')=='reconcile' and not ui.get('account_exists') and not (
+    if mode not in ('create_account','sign_in','email_chooser'):return result('workday_auth_controls_unrecognized')
+    # Sign-in checks a pending creation without creating again or claiming success.
+    # This also applies when another attempt sent the creation click.
+    pending_creation=account.get('state')=='creation_pending' and bool(account.get('credential_ref'))
+    if account.get('action')=='reconcile' and not pending_creation and not ui.get('account_exists') and not (
         mode=='sign_in' and state.get('submitted')=='create_account' and state.get('last_dispatch',{}).get('execution')=='clicked'):
         return result('account_creation_outcome_unconfirmed')
     if state.get('not_executed',{}).get(mode,0)>=2:return result('account_click_recovery_limit')
-    existing=account.get('action') in ('sign_in','verify') or ui.get('account_exists')
-    action='auth_submit'
+    existing=account.get('action') in ('sign_in','verify') or pending_creation or ui.get('account_exists')
+    action='auth_sign_in_email' if mode=='email_chooser' else 'auth_submit'
     if mode=='create_account' and existing and not (state.get('submitted')=='create_account' and not ui.get('account_exists')):
         action='auth_switch_sign_in'
     elif mode=='sign_in' and account.get('action') in ('unknown','create_account') and not state.get('submitted'):
@@ -232,6 +237,9 @@ async def advance_auth(r,observed):
     elif mode=='create_account' and observed.get('native',{}).get('auth_consent'):
         action='auth_consent'
     key=mode+':'+action
+    # Creation may return to the same email chooser once. A submitted sign-in
+    # above cannot loop back through it, even on a later helper call.
+    if mode=='email_chooser' and state.get('submitted')=='create_account':key+=':after_create'
     if key in tried:return result('workday_auth_action_already_attempted')
     control=observed.get('native',{}).get(action,{})
     if not control.get('ref') or (action!='auth_submit' and not control.get('enabled')):
@@ -251,6 +259,7 @@ async def advance_auth(r,observed):
         r.event('phase_changed',{'phase':'authentication','activity':{
             'auth_submit':'Submitting Workday '+mode.replace('_',' '),
             'auth_consent':'Accepting the required Workday account privacy/terms checkbox',
+            'auth_sign_in_email':'Opening Workday email sign-in with retained credentials',
             'auth_switch_sign_in':'Opening Sign In for the recorded or employer-reported account',
             'auth_switch_create_account':'Opening Create Account for this unrecorded portal'}[action],
             'next_step':'Verify the employer response before another account action','source':'Workday helper'})

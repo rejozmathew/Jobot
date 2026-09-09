@@ -18,7 +18,7 @@ def choose(observed, state):
     enabled = lambda key: controls.get(key, {}).get('enabled', False)
     if observed.get('status') not in ('ready', 'complete', 'needs_review'):
         return 'blocked'
-    if (observed.get('step')=='unknown' and state.get('account_action')=='sign_in' and
+    if (observed.get('step')=='unknown' and (state.get('account_action') in ('sign_in','verify') or state.get('account_state')=='creation_pending') and
         not state.get('account_entry_attempted') and native.get('sign_in',{}).get('enabled')):
         return 'native_sign_in'
     if observed.get('step') == 'review' and (enabled('submit') or native.get('submit', {}).get('enabled')):
@@ -231,6 +231,7 @@ class FastRunner:
                         page_state['failure_fingerprint']=observed.get('fingerprint')
                     self.pending=None
                 page_state['account_action']=(self.package.get('account') or {}).get('action')
+                page_state['account_state']=(self.package.get('account') or {}).get('state')
                 action=choose(observed,dict(page_state,submit_intent=self.state['submit_intent']))
                 if observed.get('status')=='unknown' and not observed.get('auth'):
                     gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
@@ -241,7 +242,7 @@ class FastRunner:
                 if self.state.get('reported_activity')!=activity_key:
                     labels={'wait':'Waiting for Simplify to settle','confirm_only':'Checking employer submission confirmation',
                             'authentication_required':'Checking the employer account and authentication form','blocked':'Inspecting required form blockers',
-                            'native_sign_in':'Opening Sign In for the confirmed portal account',
+                            'native_sign_in':'Opening Sign In for the recorded portal account',
                             'continue':'Continuing through Simplify','native_continue':'Continuing with the employer control',
                             'start':'Starting the Simplify application flow','autofill':'Starting Simplify autofill',
                             'autofill_skills':'Responding to the enabled Simplify skills prompt',

@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.4.6
+version: 0.4.7
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -86,7 +86,11 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    is dispatch intent, not proof of an existing account. Only a proven
    `not_executed` creation click from the owning attempt can become
    `creation_not_executed` and permit bounded creation recovery. A lost or
-   possibly dispatched response still requires reconciliation. Account scope is
+   possibly dispatched response still requires reconciliation. For Workday,
+   continue with one bounded sign-in using the retained credential, including
+   the email chooser; a pending record from an earlier attempt supports this
+   check. Keep it pending until authenticated application UI confirms success.
+   Account scope is
    candidate plus verified portal namespace, not the individual job URL.
    `record_account_event` takes `namespace`, `state`, `credential_ref`,
    `request_id` and non-secret `evidence`. Use `account_lock` with `release:true`

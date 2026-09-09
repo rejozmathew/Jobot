@@ -151,7 +151,8 @@ class RuntimeServices:
             browser=await CDPBrowser.connect(endpoint_url,target_id=target['target_id'],expected_mode=settings.get('browser_mode','headed'))
             try:
                 page=await browser.get_current_page()
-                verify_url(await page.evaluate('location.href'))
+                before_url=await page.evaluate('location.href')
+                verify_url(before_url)
                 boundary=SimplifyBoundary(page,budget_seconds=5)
                 before=await boundary.observe()
                 # Only a native exact-requisition confirmation can settle a submit
@@ -166,11 +167,13 @@ class RuntimeServices:
                 confirmed_before=await native_confirmation() if not before.get('panel') else False
                 await asyncio.sleep(0.15)
                 after=await boundary.observe()
-                verify_url(after['url'])
-                verify_url(await page.evaluate('location.href'))
+                # The observer deliberately omits query parameters from its public
+                # URL. Workday login ownership depends on the full job redirect.
+                after_url=await page.evaluate('location.href')
+                verify_url(after_url)
                 if settings.get('mode')=='pilot' and after.get('source')=='fixture':
                     raise ProtocolError('official_extension_observation_required')
-                stable=all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
+                stable=before_url==after_url and all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
                 confirmed=confirmed_before and not after.get('panel') and await native_confirmation()
                 return after,stable,browser.observed_mode,confirmed
             finally:

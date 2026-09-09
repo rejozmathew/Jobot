@@ -1,5 +1,28 @@
 # Runtime simplification implementation log
 
+## Gartner login redirect and pending sign-in — 2026-09-08
+
+Attempt 28 dispatched Create Account and returned to Workday's email sign-in
+chooser. Creation was not confirmed. Both executor recovery clicks were blocked
+by a local `target_job_mismatch`: the full browser URL contained a valid redirect
+to the same requisition, but the shared observer revalidated its queryless display
+URL. This defect predates the previous speed checkpoint.
+
+Observation now validates the full owned URL before and after the read, retains
+queryless output, and requires stable full URLs before declaring quiescence.
+Unrelated job redirects remain blocked. Workday recognizes the native email
+chooser and handles its return after creation. A saved pending creation, even
+from an earlier attempt, can use retained credentials for bounded sign-in;
+the registry remains pending until authentication succeeds. Rejected credentials,
+verification challenges and repeated uncertain sign-in still return precise
+exceptions. The canonical skills describe this flow and distinguish chooser
+navigation from credential submission.
+
+Validation: four focused regression cases failed before the fix; all 63 selected
+observation, authentication, mapped-recovery, advancement and URL-scope checks
+passed afterward (9.53 seconds). No broad suite, new browser fixture or live
+application was run. The Gartner pending record and attempt history were retained.
+
 ## Magellan successful run and review overhead — 2026-09-08
 
 The user repeated the application with Luna Medium. Attempt 27 executed Submit

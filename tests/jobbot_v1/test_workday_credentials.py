@@ -171,6 +171,47 @@ def test_uncertain_account_does_not_choose_sign_in_as_if_confirmed(tmp_path):
     assert response['reason']=='account_creation_outcome_unconfirmed' and not h.clicks
 
 
+@pytest.mark.parametrize('mode',['create_account','sign_in'])
+def test_prior_attempt_pending_creation_uses_retained_sign_in(tmp_path,monkeypatch,mode):
+    from job_applier import workday_auth
+    h=AuthHarness(tmp_path,'reconcile')
+    reference='credential:profile/accounts/default'
+    h.package['account'].update(state='creation_pending',credential_ref=reference,last_attempt_id=0)
+    h.observation=h.auth(mode)
+    async def fill(config,package,page,refs):
+        assert package['account']['credential_ref']==reference
+        return {'values_committed':True,'credential_ref':reference}
+    monkeypatch.setattr(workday_auth,'fill_page_credentials',fill)
+    assert asyncio.run(workday_auth.advance_auth(h.runner,h.observation))['status']=='progress'
+    assert h.clicks==['native_auth_switch_sign_in' if mode=='create_account' else 'native_auth_submit']
+    assert not any(op=='record_account_event' for op,_ in h.calls)
+    assert h.package['account']['state']=='creation_pending'
+    if mode=='sign_in':
+        h.now=10
+        assert asyncio.run(workday_auth.advance_auth(h.runner,h.observation))['reason']=='workday_sign_in_unconfirmed'
+        assert len(h.clicks)==1
+        asyncio.run(workday_auth.confirm_authenticated(h.runner,{'auth':False,'step':'my_information'}))
+        assert h.package['account']['state']=='confirmed'
+
+
+def test_email_chooser_before_and_after_creation_then_sign_in_is_bounded(tmp_path,monkeypatch):
+    from job_applier import workday_auth
+    from job_applier.workday_fast import choose
+    h=AuthHarness(tmp_path)
+    chooser=h.auth('email_chooser');chooser['status']='missing'
+    chooser['native']={'auth_sign_in_email':{'enabled':True,'ref':'email'}}
+    async def fill(*a):return {'values_committed':True,'credential_ref':'credential:profile/accounts/default'}
+    monkeypatch.setattr(workday_auth,'fill_page_credentials',fill)
+    assert choose(chooser,{})=='authentication_required'
+    for observed in (chooser,h.auth('create_account'),chooser,h.auth('sign_in')):
+        h.observation=observed
+        assert asyncio.run(workday_auth.advance_auth(h.runner,observed))['status']=='progress'
+    assert h.clicks==['native_auth_sign_in_email','native_auth_submit','native_auth_sign_in_email','native_auth_submit']
+    h.observation=chooser;h.now=10
+    assert asyncio.run(workday_auth.advance_auth(h.runner,chooser))['reason']=='workday_sign_in_unconfirmed'
+    assert len(h.clicks)==4
+
+
 def test_stalled_creation_is_not_replayed_across_helper_calls(tmp_path,monkeypatch):
     from job_applier import workday_auth
     h=AuthHarness(tmp_path)

@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.4
+version: 0.3.5
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -36,8 +36,11 @@ runner contains no model and retains one CDP connection during its bounded call.
    privacy/terms checkbox, fill privately, and recheck the enabled submit control.
    It records creation pending before clicking, saves employer-confirmed creation,
    and confirms sign-in only when the application form actually opens. It then
-   returns to Simplify. Later calls sign in for a confirmed/created account;
-   pending creation is uncertainty, not evidence that the account exists.
+   returns to Simplify. Later calls sign in for a confirmed/created account.
+   For pending creation, including an earlier attempt, use retained credentials
+   for a bounded sign-in check. Workday may return to Sign In without a creation
+   confirmation. Keep the account pending until authentication is verified;
+   do not attempt creation again.
    A proven undispatched click retains its reason and becomes
    `creation_not_executed`, permitting at most two undispatched attempts per
    auth mode in this session. A possibly dispatched action is not replayed.
@@ -51,7 +54,10 @@ runner contains no model and retains one CDP connection during its bounded call.
    to the executor without closing the application. Never reset counters or
    create again while the previous account outcome is unknown.
    If the employer first offers Apple/Google/LinkedIn and **Sign in with email**,
-   select the observed email option, then use the resulting native account form.
+   the runner selects the unique observed email option, then uses the native
+   account form. It handles the chooser returning once after creation. For a
+   mapped chooser fallback, omit `account_mode` and `credentials`: this control
+   opens the password form and does not submit credentials.
    A same-site `/login?redirect=...` is supported only when the decoded redirect
    leads back to this exact requisition. Native clicks use browser pointer input;
    a dispatched click is not employer acceptance. Report account creation/sign-in

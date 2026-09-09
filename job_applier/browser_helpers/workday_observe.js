@@ -51,7 +51,10 @@
     (e.type==='text'&&/^e[- ]?mail(?: address)?\s*\*?$/i.test(accessible(e).trim())));
   const selector=e=>e&&e.id?'[id='+JSON.stringify(e.id)+']':null;
   const auth_refs={email_ref:email.length===1?selector(email[0]):null,password_ref:pw.length>=1?selector(pw[0]):null,confirmation_ref:pw.length===2?selector(pw[1]):null};
-  const mode=pw.length===2?'create_account':pw.length===1?'sign_in':'unknown';
+  const emailEntry=all('button,a,[role="button"]').filter(e=>
+    e.getAttribute('data-automation-id')==='SignInWithEmailButton'||
+    /^sign in with (?:e-mail|email)$/i.test((accessible(e)||text(e)).trim()));
+  const mode=pw.length===2?'create_account':pw.length===1?'sign_in':emailEntry.length===1?'email_chooser':'unknown';
   const authRoot=pw[0]&&(pw[0].closest('form,[role="dialog"]')||document);
   const authButtons=authRoot?all('button,a,[role="button"]').filter(e=>authRoot.contains(e)):[];
   const authControl=(kind,matches)=>{
@@ -59,6 +62,7 @@
     const e=matches[0];scope.controls.set(kind,e);
     controls[kind]={ref:kind,enabled:!e.disabled&&e.getAttribute('aria-disabled')!=='true'};
   };
+  if(mode==='email_chooser')authControl('auth_sign_in_email',emailEntry);
   const label=mode==='create_account'?'create account':'sign in';
   const submitButtons=authButtons.filter(e=>text(e).toLowerCase()===label&&e.tagName==='BUTTON');
   // Workday can place a labelled click_filter over its visible submit button.
@@ -101,5 +105,5 @@
   const resume_attached=!!args.resume_name&&attachments.some(e=>text(e).includes(args.resume_name)&&(/uploaded/i.test(text(e))||e.tagName==='A'||/file/i.test(e.getAttribute('data-automation-id')||'')));
   const email_inputs=all('input[type="email"]');
   const identity_mismatch=!!args.expected_email&&email_inputs.some(e=>e.value&&e.value.toLowerCase()!==args.expected_email.toLowerCase());
-  return {step,native:controls,inventory,blocking_errors:[...new Set(errors)],auth:pw.length>0||auth_ui.challenge,auth_refs,auth_ui,submitted,resume_attached,identity_mismatch};
+  return {step,native:controls,inventory,blocking_errors:[...new Set(errors)],auth:pw.length>0||mode==='email_chooser'||auth_ui.challenge,auth_refs,auth_ui,submitted,resume_attached,identity_mismatch};
 }
