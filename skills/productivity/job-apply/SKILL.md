@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.4.4
+version: 0.4.5
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -82,7 +82,12 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    Record `creation_pending` before the create action, `created_unverified` on
    employer-confirmed creation, and `confirmed` after verified sign-in. Persist
    the non-secret `credential_ref` returned by the filler; never invent one.
-   Account creation must survive a later application failure.
+   Account creation must survive a later application failure. A pending record
+   is dispatch intent, not proof of an existing account. Only a proven
+   `not_executed` creation click from the owning attempt can become
+   `creation_not_executed` and permit bounded creation recovery. A lost or
+   possibly dispatched response still requires reconciliation. Account scope is
+   candidate plus verified portal namespace, not the individual job URL.
    `record_account_event` takes `namespace`, `state`, `credential_ref`,
    `request_id` and non-secret `evidence`. Use `account_lock` with `release:true`
    after a completed/rejected authentication step. Never repeatedly create an

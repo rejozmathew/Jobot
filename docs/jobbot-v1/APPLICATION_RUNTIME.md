@@ -61,6 +61,14 @@ handling remains in the shared connection layer.
 | Heartbeat | Driver activity telemetry, with no authorization expiry |
 | Fast checkpoint/lock | Private counters plus OS lock for competing calls; not an outcome store; crash releases lock |
 
+Account lookup precedes authentication and is scoped to candidate plus verified
+portal namespace. `creation_pending` records dispatch intent; it does not prove
+that an account exists. A creation click proven `not_executed` by the owned browser
+can move its own attempt's pending account to `creation_not_executed`, retaining
+the dispatch reason and allowing bounded recovery. Uncertain dispatch remains
+pending for reconciliation; employer evidence establishes `created_unverified`
+or `confirmed`. Screen handoffs include state, timestamps and last attempt ID.
+
 ## Actual startup and call sequence
 
 Configuration selection is `--config`, then `JOBBOT_CONFIG`, then the ignored
@@ -196,7 +204,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js | Existing dashboard, parallel session/process/driver/model/progress and independent controls |
 
-Common policy is job-apply v0.4.4; Workday policy is workday-simplify v0.3.2, in
+Common policy is job-apply v0.4.5; Workday policy is workday-simplify v0.3.3, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision

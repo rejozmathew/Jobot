@@ -87,7 +87,7 @@ class AccountServices:
                 state=state,credential_ref=credential_ref,request_id=request_id,evidence=evidence)
 
     def _account_update(self,db,*,namespace,identity_id,state,credential_ref,request_id,evidence,attempt_id=None,allow_mutation=True):
-        if state not in ('creation_pending','created_unverified','confirmed','verified','recovery_required','reconciliation_required','locked','disabled'):raise ProtocolError('invalid_account_state')
+        if state not in ('creation_pending','creation_not_executed','created_unverified','confirmed','verified','recovery_required','reconciliation_required','locked','disabled'):raise ProtocolError('invalid_account_state')
         if not request_id or not re.fullmatch(r'(?:vault|keyring|credential):[A-Za-z0-9._/-]+',credential_ref or ''):raise ProtocolError('credential_reference_required')
         evidence=safe_text(evidence)
         if state in ('confirmed','verified') and not evidence:raise ProtocolError('evidence_required')
@@ -99,8 +99,12 @@ class AccountServices:
             return json.loads(prior['response_json'])
         if not allow_mutation:raise ProtocolError('account_observation_requires_reconciliation')
         old=self._account_for_namespace(db,namespace,identity_id)
+        if state=='creation_not_executed':
+            latest=db.execute('SELECT attempt_id FROM account_requests WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 1',(old['id'],)).fetchone() if old else None
+            if attempt_id is None or not old or old['status']!='creation_pending' or not latest or latest['attempt_id']!=attempt_id or not evidence:
+                raise ProtocolError('matching_creation_attempt_required')
         if old:
-            if state=='creation_pending':raise ProtocolError('reconciliation_required')
+            if state=='creation_pending' and old['status']!='creation_not_executed':raise ProtocolError('reconciliation_required')
             db.execute('UPDATE company_portal_accounts SET status=?,credential_ref=?,notes=?,updated_at=? WHERE id=?',(state,credential_ref,evidence,self.now(),old['id']))
             account_id=old['id']
         else:
@@ -125,8 +129,12 @@ class AccountServices:
             if candidate['state']!='active':return {'action':'operator_required','reason':'identity_inactive'}
             row=self._account_for_namespace(db,namespace,identity_id)
             if not row:return {'action':'unknown','namespace':namespace,'identity_id':identity_id}
-            action={'confirmed':'sign_in','verified':'sign_in','created_unverified':'verify','creation_pending':'reconcile','recovery_required':'reconcile','reconciliation_required':'reconcile','locked':'operator_required','disabled':'operator_required'}.get(row['status'],'operator_required')
-            return {'action':action,'namespace':namespace,'identity_id':identity_id,'account_id':row['id'],'credential_ref':row['credential_ref']}
+            action={'confirmed':'sign_in','verified':'sign_in','created_unverified':'verify','creation_pending':'reconcile','creation_not_executed':'create_account','recovery_required':'reconcile','reconciliation_required':'reconcile','locked':'operator_required','disabled':'operator_required'}.get(row['status'],'operator_required')
+            latest=db.execute('SELECT attempt_id,created_at FROM account_requests WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 1',(row['id'],)).fetchone()
+            return {'action':action,'namespace':namespace,'identity_id':identity_id,'account_id':row['id'],'credential_ref':row['credential_ref'],
+                    'state':row['status'],'created_at':row['created_at'],'last_attempt_id':latest['attempt_id'] if latest else None,
+                    'last_action_at':latest['created_at'] if latest else None,
+                    'creation_confirmed':row['status'] in ('created_unverified','confirmed','verified')}
 
     def mail_request(self, *, identity_id, namespace, purpose, requested_at, expected_sender):
         with self.tx() as db:

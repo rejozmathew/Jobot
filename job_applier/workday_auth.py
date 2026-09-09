@@ -9,6 +9,43 @@ def result(reason=None,status='authentication_required'):
     return {'status':status,'reason':reason}
 
 
+def arm_account(r,mode,reference):
+    state=r.state.setdefault('authentication',{})
+    if state.get('not_executed',{}).get(mode,0)>=2:raise ValueError('account_click_recovery_limit')
+    if mode=='create_account':
+        record(r,'creation_pending',reference,'Account creation dispatch intent; employer creation is not yet confirmed')
+    state.update(credential_ref=reference,pending_mode=mode,
+                 last_dispatch={'mode':mode,'execution':'possibly_executed','reason':'dispatch_pending'})
+    state.pop('complete',None);r.persist()
+
+
+def settle_account(r,mode,click):
+    state=r.state.setdefault('authentication',{});execution=click.get('execution','possibly_executed')
+    state['last_dispatch']=dict(click,mode=mode)
+    if execution=='not_executed':
+        if mode=='create_account':
+            record(r,'creation_not_executed',state['credential_ref'],
+                   'Owned creation click was not dispatched: '+str(click.get('reason','control_unavailable')))
+        if state.get('submitted')==mode:state.pop('submitted',None);state.pop('submitted_at',None)
+        counts=state.setdefault('not_executed',{});counts[mode]=counts.get(mode,0)+1
+        key=mode+':auth_submit'
+        if key in state.get('tried',[]):state['tried'].remove(key)
+    else:state.update(submitted=mode,submitted_at=r.clock())
+    state.pop('pending_mode',None);r.persist()
+
+
+async def activate(r,action,observed):
+    # A missing response is uncertain; only the CDP validator can prove no dispatch.
+    r.last_click_result=None;r.last_click_execution='possibly_executed'
+    try:
+        success=await r.click(action,observed)
+        click=getattr(r,'last_click_result',None) or {'clicked':success,
+            'execution':'clicked' if success else getattr(r,'last_click_execution','possibly_executed')}
+    except Exception as exc:
+        success=False;click={'clicked':False,'execution':'possibly_executed','reason':'click_exception_'+type(exc).__name__}
+    return success,click
+
+
 def recovery_handoff(reason,observed):
     """A changed site is a possibility, not an inferred fact or a close command."""
     if reason=='workday_verification_required':kind='verification_required'
@@ -72,7 +109,9 @@ async def recover_screen(r,mapping):
         account=r.package.get('account') or {}
         if account.get('action')=='operator_required':return stopped('account_requires_operator')
         if mode=='create_account' and account.get('action') in ('sign_in','reconcile','verify'):
-            return stopped('reconcile_existing_account_before_creation')
+            return stopped('account_creation_outcome_unconfirmed' if account['action']=='reconcile' else 'account_creation_confirmed_use_sign_in')
+        if mode and r.state.get('authentication',{}).get('not_executed',{}).get(mode,0)>=2:
+            return stopped('account_click_recovery_limit')
     if fields:
         validation=await r.page.evaluate_function(WORKDAY_CLICK,{'step':observed['step'],'page_signature':observed['page_signature'],
             'ref':ref if source=='native' else None,'fields':fields,'validate_only':True})
@@ -82,7 +121,7 @@ async def recover_screen(r,mapping):
     r.state['page_decisions']=r.state.get('page_decisions',0)+1
     r.event('recovery',{'phase':observed.get('step','unknown'),'activity':'Executing one mapped screen decision',
         'next_step':'Private fill, verify, act and observe; resume routine Simplify','source':'Hermes executor'})
-    previous_auth=dict(r.state.get('authentication',{}))
+    dispatched_mode=None
     try:
         if credentials is not None:
             filled=await fill_page_credentials(r.config,r.package,r.page,credentials)
@@ -97,10 +136,7 @@ async def recover_screen(r,mapping):
         if fresh.get('page_signature')!=observed.get('page_signature') or fresh.get('status')=='active':
             return result(status='progress')
         if mode and mode==ui.get('mode'):
-            state=r.state.setdefault('authentication',{})
-            state.update(credential_ref=filled['credential_ref'],submitted=mode,submitted_at=r.clock())
-            state.pop('complete',None)
-            if mode=='create_account':record(r,'creation_pending',filled['credential_ref'],'Mapped account creation with retained credentials; employer confirmation pending')
+            arm_account(r,mode,filled['credential_ref']);dispatched_mode=mode
         # Persist uncertainty BEFORE the browser call; a lost response is not replayed.
         steps[key]='possibly_executed';r.persist();execution='possibly_executed'
         if source=='simplify':
@@ -110,16 +146,19 @@ async def recover_screen(r,mapping):
             success=execution=='clicked'
         else:
             fresh.setdefault('native',{})['mapped']={'ref':ref,'enabled':True}
-            success=await r.click('native_mapped',fresh)
-            execution='clicked' if success else getattr(r,'last_click_execution','possibly_executed')
+            success,response=await activate(r,'native_mapped',fresh)
+            execution=response.get('execution','possibly_executed')
+        if dispatched_mode:
+            settle_account(r,dispatched_mode,response);dispatched_mode=None
         steps[key]=execution
         if execution=='not_executed':
-            del steps[key];r.state['authentication']=previous_auth
+            del steps[key]
         r.persist()
-        return result(status='progress') if success else stopped('mapped_action_'+execution,execution)
+        return result(status='progress') if success else dict(stopped('mapped_action_'+execution,execution),click=response)
     except Exception as exc:
         return stopped('mapped_step_'+type(exc).__name__,execution)
     finally:
+        if dispatched_mode:settle_account(r,dispatched_mode,{'execution':'possibly_executed','reason':'mapped_response_lost'})
         r.owned('action_end',action_id=aid,status='success' if success else 'failed',duration_seconds=r.clock()-started)
         r.persist()
 
@@ -127,6 +166,7 @@ async def recover_screen(r,mapping):
 def record(r,state,reference,evidence):
     r.owned('record_account_event',namespace=r.package['namespace'],state=state,
         credential_ref=reference,request_id=str(uuid.uuid4()),evidence=evidence)
+    r.package=r.call('application_context',attempt_id=r.owner['attempt_id'],worker_id=r.owner['worker_id'])
     r.event('account_verified' if state=='confirmed' else 'phase_changed',{
         'phase':'authentication','activity':evidence,'status':state,'source':'Workday helper'})
 
@@ -174,11 +214,15 @@ async def advance_auth(r,observed):
         elif r.clock()-state.get('submitted_at',r.clock())<5:return result(status='waiting')
         else:return result('workday_'+mode+'_unconfirmed')
     if mode not in ('create_account','sign_in'):return result('workday_auth_controls_unrecognized')
-    existing=account.get('action') in ('sign_in','reconcile','verify') or ui.get('account_exists')
+    if account.get('action')=='reconcile' and not ui.get('account_exists') and not (
+        mode=='sign_in' and state.get('submitted')=='create_account' and state.get('last_dispatch',{}).get('execution')=='clicked'):
+        return result('account_creation_outcome_unconfirmed')
+    if state.get('not_executed',{}).get(mode,0)>=2:return result('account_click_recovery_limit')
+    existing=account.get('action') in ('sign_in','verify') or ui.get('account_exists')
     action='auth_submit'
     if mode=='create_account' and existing and not (state.get('submitted')=='create_account' and not ui.get('account_exists')):
         action='auth_switch_sign_in'
-    elif mode=='sign_in' and account.get('action')=='unknown' and not state.get('submitted'):
+    elif mode=='sign_in' and account.get('action') in ('unknown','create_account') and not state.get('submitted'):
         action='auth_switch_create_account'
     elif mode=='create_account' and observed.get('native',{}).get('auth_consent'):
         action='auth_consent'
@@ -187,7 +231,7 @@ async def advance_auth(r,observed):
     control=observed.get('native',{}).get(action,{})
     if not control.get('ref') or (action!='auth_submit' and not control.get('enabled')):
         return result('workday_'+action+'_unavailable')
-    aid=str(uuid.uuid4());started=r.clock();success=False
+    aid=str(uuid.uuid4());started=r.clock();success=False;dispatched_mode=None
     r.owned('action_start',action_id=aid,tool_name='workday_auth.'+action)
     try:
         if action=='auth_submit':
@@ -197,18 +241,19 @@ async def advance_auth(r,observed):
             if observed.get('auth_ui',{}).get('mode')!=mode:return result('workday_auth_page_changed_during_fill')
             if not observed.get('native',{}).get(action,{}).get('enabled'):
                 return result('workday_auth_submit_disabled_after_fill')
-            state['credential_ref']=filled['credential_ref']
-            if mode=='create_account':
-                record(r,'creation_pending',filled['credential_ref'],'Creating the Workday account with the retained configured credential; employer confirmation pending')
-            state['submitted']=mode;state['submitted_at']=r.clock()
+            arm_account(r,mode,filled['credential_ref']);dispatched_mode=mode
         tried.append(key);r.persist()
         r.event('phase_changed',{'phase':'authentication','activity':{
             'auth_submit':'Submitting Workday '+mode.replace('_',' '),
             'auth_consent':'Accepting the required Workday account privacy/terms checkbox',
-            'auth_switch_sign_in':'Opening Sign In for the existing or uncertain account',
+            'auth_switch_sign_in':'Opening Sign In for the recorded or employer-reported account',
             'auth_switch_create_account':'Opening Create Account for this unrecorded portal'}[action],
             'next_step':'Verify the employer response before another account action','source':'Workday helper'})
-        success=await r.click('native_'+action,observed)
-        return result(status='progress') if success else result('workday_auth_click_unconfirmed')
+        success,click=await activate(r,'native_'+action,observed)
+        if dispatched_mode:
+            settle_account(r,dispatched_mode,click);dispatched_mode=None
+        return result(status='progress') if success else dict(result('workday_auth_click_'+click.get('execution','possibly_executed')),
+            execution=click.get('execution'),click=click)
     finally:
+        if dispatched_mode:settle_account(r,dispatched_mode,{'execution':'possibly_executed','reason':'auth_response_lost'})
         r.owned('action_end',action_id=aid,status='success' if success else 'failed',duration_seconds=r.clock()-started)

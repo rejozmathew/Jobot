@@ -1,5 +1,32 @@
 # Runtime simplification implementation log
 
+## Magellan authentication dispatch correction — 2026-09-08
+
+Attempt 26 had no prior Magellan account. Its own creation intent became a
+pending account before the Create Account submit failed. Recovery then treated
+that pending record as an existing-account reason to switch to Sign In. The
+first click's exact failure was discarded; a later sign-in click was explicitly
+blocked by Workday's labelled `click_filter`, and clicking that observed wrapper
+worked. The pending-state guard predates the WEX checkpoint.
+
+The bounded fix preserves structured click results and distinguishes proven
+non-dispatch from uncertain dispatch. Only the owning attempt can clear its
+pending intent to `creation_not_executed`; recovery can then retry without
+inventing an existing account. Created/confirmed accounts choose Sign In, and
+uncertain creation remains a reconciliation case. Workday auth recognition can
+select its matching same-form click wrapper while retaining normal hit testing.
+Account handoffs expose status, timing and attempt provenance. The user will
+repeat the same application in a new conversation as the live acceptance check.
+
+Validation: the focused credential, mapped-recovery and account tests passed
+(25 tests, 4.02s); Python and JavaScript syntax passed. No broad suite or new
+browser fixture was run. The generic skill validator rejects the existing Hermes
+frontmatter extensions; those supported repository fields were preserved.
+At the user's request, the selected private database was backed up, the
+unconfirmed Magellan account and its single request were removed, and the job
+was queued for retry. Failed attempt 26 and its diagnostic history were retained.
+This operator reset was separate from validation and made no employer-side change.
+
 ## WEX execution checkpoint — 2026-09-08
 
 The user authorized a checkpoint in the existing checkout and asked to iterate

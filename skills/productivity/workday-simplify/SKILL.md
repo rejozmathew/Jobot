@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.2
+version: 0.3.3
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -36,7 +36,12 @@ runner contains no model and retains one CDP connection during its bounded call.
    privacy/terms checkbox, fill privately, and recheck the enabled submit control.
    It records creation pending before clicking, saves employer-confirmed creation,
    and confirms sign-in only when the application form actually opens. It then
-   returns to Simplify. A later call reads the durable account and signs in.
+   returns to Simplify. Later calls sign in for a confirmed/created account;
+   pending creation is uncertainty, not evidence that the account exists.
+   A proven undispatched click retains its reason and becomes
+   `creation_not_executed`, permitting at most two undispatched attempts per
+   auth mode in this session. A possibly dispatched action is not replayed.
+   The screen account includes its state, timestamp and last attempt ID.
    Counters prevent repeating an uncertain create/sign-in action. Optional
    marketing consent is not selected. No generated password is silently lost.
    `authentication_required` now means a specific exception: inspect its reason

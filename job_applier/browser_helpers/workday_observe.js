@@ -60,7 +60,21 @@
     controls[kind]={ref:kind,enabled:!e.disabled&&e.getAttribute('aria-disabled')!=='true'};
   };
   const label=mode==='create_account'?'create account':'sign in';
-  authControl('auth_submit',authButtons.filter(e=>text(e).toLowerCase()===label&&(e.tagName==='BUTTON'||e.getAttribute('role')==='button')));
+  const submitButtons=authButtons.filter(e=>text(e).toLowerCase()===label&&e.tagName==='BUTTON');
+  // Workday can place a labelled click_filter over its visible submit button.
+  // Select that actual control only when it belongs to the same auth form and
+  // covers the matching button's center. Unrelated overlays remain blockers.
+  const wrappers=submitButtons.length===1?authButtons.filter(e=>
+    e.getAttribute('data-automation-id')==='click_filter'&&e.getAttribute('role')==='button'&&
+    (e.getAttribute('aria-label')||'').trim().toLowerCase()===label&&(()=>{
+      const b=submitButtons[0].getBoundingClientRect(),w=e.getBoundingClientRect();
+      const x=b.left+b.width/2,y=b.top+b.height/2;
+      return w.left<=x&&w.right>=x&&w.top<=y&&w.bottom>=y;
+    })()):[];
+  const fallback=authButtons.filter(e=>text(e).toLowerCase()===label&&(e.tagName==='BUTTON'||e.getAttribute('role')==='button'));
+  authControl('auth_submit',wrappers.length===1?wrappers:fallback);
+  if(wrappers.length===1)controls.auth_submit.enabled=controls.auth_submit.enabled&&
+    !submitButtons[0].disabled&&submitButtons[0].getAttribute('aria-disabled')!=='true';
   const accountNavigation=all('button,a,[role="button"]');
   authControl('auth_switch_sign_in',mode==='create_account'?accountNavigation.filter(e=>text(e).toLowerCase()==='sign in'):[]);
   authControl('auth_switch_create_account',mode==='sign_in'?accountNavigation.filter(e=>text(e).toLowerCase()==='create account'):[]);

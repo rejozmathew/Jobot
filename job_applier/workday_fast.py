@@ -18,6 +18,9 @@ def choose(observed, state):
     enabled = lambda key: controls.get(key, {}).get('enabled', False)
     if observed.get('status') not in ('ready', 'complete', 'needs_review'):
         return 'blocked'
+    if (observed.get('step')=='unknown' and state.get('account_action')=='sign_in' and
+        not state.get('account_entry_attempted') and native.get('sign_in',{}).get('enabled')):
+        return 'native_sign_in'
     if observed.get('step') == 'review' and (enabled('submit') or native.get('submit', {}).get('enabled')):
         return 'blocked' if observed.get('blocking_errors') else 'submit'
     if enabled('autofill_skills'):
@@ -89,7 +92,7 @@ def screen_inventory(observed,package):
         'simplify':{'enabled':settings.get('autofill','simplify')=='simplify','status':observed.get('status'),'panel':observed.get('panel'),
                     'login_kind':observed.get('login_kind'),'controls':observed.get('simplify_inventory',[]),
                     'text':observed.get('panel_text',''),'credential_use':'unverified'},
-        'account':{k:account.get(k) for k in ('action','namespace','credential_ref')},
+        'account':{k:account.get(k) for k in ('action','namespace','credential_ref','state','created_at','last_attempt_id','last_action_at','creation_confirmed')},
         'instruction':'Map this logical screen once. Call fast_forward with recovery:{screen_key, credentials:{email_ref,password_ref,confirmation_ref?}, fields:[{ref,value}], action:{source:native|simplify,ref}, account_mode:sign_in|create_account if submitting auth}. Omit unused fields. All refs come from this inventory. A Simplify employer sign-in also needs credential_evidence establishing retained credential use. Never send secrets or use recovery for final Submit.'}
 
 
@@ -134,6 +137,7 @@ class FastRunner:
 
     async def click(self,action,observed):
         self.last_click_execution='not_executed'
+        self.last_click_result={'clicked':False,'execution':'not_executed','reason':'control_unavailable'}
         operation='autofill' if action=='retry' else action
         native=operation.startswith('native_') or (operation=='submit' and not observed.get('controls',{}).get('submit',{}).get('enabled'))
         operation=operation.removeprefix('native_')
@@ -143,6 +147,7 @@ class FastRunner:
             'ref':control['ref'],'url':observed['url'],'page_ref':observed.get('page_ref'),'operation':operation}
         result=await self.page.click_observed(WORKDAY_CLICK,args) if native else await self.page.evaluate_function(CLICK,args)
         self.last_click_execution=result.get('execution','possibly_executed') if isinstance(result,dict) else 'possibly_executed'
+        self.last_click_result=result if isinstance(result,dict) else {'execution':'possibly_executed','reason':'click_result_unavailable'}
         return isinstance(result,dict) and (result.get('clicked') is True if native else result.get('status')=='clicked')
 
     def report(self,status,observed=None,reason=None):
@@ -223,6 +228,7 @@ class FastRunner:
                         page_state['advance_failed']=True
                         page_state['failure_fingerprint']=observed.get('fingerprint')
                     self.pending=None
+                page_state['account_action']=(self.package.get('account') or {}).get('action')
                 action=choose(observed,dict(page_state,submit_intent=self.state['submit_intent']))
                 if observed.get('status')=='unknown' and not observed.get('auth'):
                     gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
@@ -232,7 +238,8 @@ class FastRunner:
                 activity_key=[step,action]
                 if self.state.get('reported_activity')!=activity_key:
                     labels={'wait':'Waiting for Simplify to settle','confirm_only':'Checking employer submission confirmation',
-                            'authentication_required':'Employer sign-in is required','blocked':'Inspecting required form blockers',
+                            'authentication_required':'Checking the employer account and authentication form','blocked':'Inspecting required form blockers',
+                            'native_sign_in':'Opening Sign In for the confirmed portal account',
                             'continue':'Continuing through Simplify','native_continue':'Continuing with the employer control',
                             'start':'Starting the Simplify application flow','autofill':'Starting Simplify autofill',
                             'autofill_skills':'Responding to the enabled Simplify skills prompt',
@@ -256,6 +263,7 @@ class FastRunner:
                             'source':'Workday helper'})
                         self.state['auth_recovery_reason']=reason
                     report=self.report('authentication_required',observed,reason)
+                    if auth.get('click'):report['click']=auth['click'];report['execution']=auth.get('execution')
                     report['recovery']=handoff;return report
                 if action in ('blocked','continue','native_continue'):
                     from .application_answers import apply_policy
@@ -307,6 +315,7 @@ class FastRunner:
                                observed_at=datetime.now(timezone.utc).isoformat())
                 if not success:return self.report('submission_unknown' if self.state['submit_intent'] else 'blocked',fresh,'click_unconfirmed')
                 metrics['clicks']+=1
+                if action=='native_sign_in':page_state['account_entry_attempted']=True
                 if action in ('autofill','retry'):
                     page_state['fills']=page_state.get('fills',0)+1; page_state['advance_failed']=False
                 if action=='autofill_skills':

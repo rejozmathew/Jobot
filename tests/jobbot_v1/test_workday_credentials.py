@@ -77,7 +77,7 @@ class AuthHarness:
         if op=='browser_observe':return {'quiescent':True}
         if op=='application_context':return self.package
         if op=='record_account_event':
-            self.package['account'].update(action={'confirmed':'sign_in','creation_pending':'reconcile','created_unverified':'verify'}[kw['state']],credential_ref=kw['credential_ref'])
+            self.package['account'].update(action={'confirmed':'sign_in','creation_pending':'reconcile','creation_not_executed':'create_account','created_unverified':'verify'}[kw['state']],state=kw['state'],credential_ref=kw['credential_ref'])
         return {}
 
     async def click(self,action,observed):self.clicks.append(action);return True
@@ -109,6 +109,30 @@ def test_private_screenshot_restores_mask_after_capture_error(tmp_path):
     assert calls==[MASK_CREDENTIALS,UNMASK_CREDENTIALS]
 
 
+def test_creation_not_dispatched_can_recover_without_switching_to_sign_in(tmp_path,monkeypatch):
+    from job_applier import workday_auth
+    from job_applier.workday_fast import screen_inventory
+    h=AuthHarness(tmp_path)
+    h.observation.update(page_signature='create',inventory=[{'ref':'wd:create','text':'Create Account','enabled':True}])
+    async def fill(*a):return {'values_committed':True,'credential_ref':'credential:profile/accounts/default'}
+    async def click(action,observed):
+        h.clicks.append(action)
+        first=len(h.clicks)==1
+        h.runner.last_click_execution='not_executed' if first else 'clicked'
+        h.runner.last_click_result={'execution':h.runner.last_click_execution,'clicked':not first,'reason':'control_obscured' if first else None}
+        return not first
+    monkeypatch.setattr(workday_auth,'fill_page_credentials',fill);h.runner.click=click
+    failed=asyncio.run(workday_auth.advance_auth(h.runner,h.observation))
+    assert failed['execution']=='not_executed' and failed['click']['reason']=='control_obscured'
+    assert h.package['account']['state']=='creation_not_executed'
+    assert not h.runner.state['authentication'].get('submitted')
+    mapping={'screen_key':screen_inventory(h.observation,h.package)['screen_key'],'account_mode':'create_account',
+        'credentials':h.observation['auth_refs'],'action':{'source':'native','ref':'wd:create'}}
+    assert asyncio.run(workday_auth.recover_screen(h.runner,mapping))['status']=='progress'
+    assert h.clicks==['native_auth_submit','native_mapped']
+    assert [kw['state'] for op,kw in h.calls if op=='record_account_event']==['creation_pending','creation_not_executed','creation_pending']
+
+
 def test_new_account_records_pending_before_click_then_confirms_sign_in(tmp_path,monkeypatch):
     from job_applier import workday_auth
     h=AuthHarness(tmp_path)
@@ -130,14 +154,21 @@ def test_new_account_records_pending_before_click_then_confirms_sign_in(tmp_path
     assert h.calls[-1]==('lock',{'release':True})
 
 
-@pytest.mark.parametrize('action',['sign_in','reconcile','verify'])
-def test_existing_or_uncertain_account_switches_to_sign_in_without_creation(tmp_path,action):
+@pytest.mark.parametrize('action',['sign_in','verify'])
+def test_confirmed_or_created_account_switches_to_sign_in_without_creation(tmp_path,action):
     from job_applier.workday_auth import advance_auth
     h=AuthHarness(tmp_path,action)
     result=asyncio.run(advance_auth(h.runner,h.observation))
     assert result['status']=='progress'
     assert h.clicks==['native_auth_switch_sign_in']
     assert not any(op=='record_account_event' for op,_ in h.calls)
+
+
+def test_uncertain_account_does_not_choose_sign_in_as_if_confirmed(tmp_path):
+    from job_applier.workday_auth import advance_auth
+    h=AuthHarness(tmp_path,'reconcile')
+    response=asyncio.run(advance_auth(h.runner,h.observation))
+    assert response['reason']=='account_creation_outcome_unconfirmed' and not h.clicks
 
 
 def test_stalled_creation_is_not_replayed_across_helper_calls(tmp_path,monkeypatch):
