@@ -25,18 +25,15 @@ def test_retry_detection_survives_a_new_conversation_or_failed_start(tmp_path, p
     assert json.loads(retried['metadata_json']).get('fresh_employer_storage') is True
 
 
-@pytest.mark.parametrize('job_url', [
-    'https://tenant.wd1.myworkdayjobs.com/Careers/job/City/Role_R1',
-    'https://job-boards.greenhouse.io/example/jobs/12345',
-    'https://careers-example.icims.com/jobs/12345/role/job',
-    'https://careers.example.test:8443/opportunities/role',
-])
 @pytest.mark.parametrize('reset,attempt_id,fail_on', [
     (False, None, None), (True, None, None), (True, 17, None),
     (True, None, 'Storage.clearDataForOrigin'), (True, None, 'Target.closeTarget'),
 ])
-def test_cleanup_precedes_navigation_and_does_not_clear_on_attach(tmp_path, monkeypatch, reset, attempt_id, fail_on, job_url):
+def test_cleanup_precedes_navigation_and_does_not_clear_on_attach(tmp_path, monkeypatch, reset, attempt_id, fail_on):
     events = []
+    # The host is ATS-neutral. Exercise each lifecycle condition once against a
+    # custom origin, including its port, rather than repeating an ATS URL matrix.
+    job_url = 'https://careers.example.test:8443/opportunities/role'
     parsed = urlsplit(job_url)
     origin = parsed.scheme + '://' + parsed.netloc
 

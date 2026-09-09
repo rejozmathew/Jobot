@@ -217,6 +217,15 @@ are independent of browser storage and are never reset by retry.
 This is an origin-scoped reset, not a new empty browser profile: unrelated origins,
 including separate third-party identity-provider origins, are preserved.
 
+Validation passed all 694 managed cases before removing 15 redundant ATS URL
+combinations. The suite now collects 679 cases; the eight retained retry cases
+passed again after that test-only pruning. Browser lifecycle fixtures now wait
+for actual pause acknowledgement and continue a normal authentication `waiting`
+response, retaining their account-count, ownership and confirmation assertions.
+The primary engineering agent ran these checks. Routine delegated validation uses
+the existing authenticated Antigravity Gemini 3.8 Flash Medium workflow; a requested
+Antigravity rerun has not occurred while its launch awaits approval.
+
 The two Workday entry dialogs are separate from cookie cleanup. The fast runner
 can select the posting's Sign In control for a recorded account or pending
 creation; Apply opens the application-method chooser. Clearing cookies does not

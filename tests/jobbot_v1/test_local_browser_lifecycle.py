@@ -100,6 +100,11 @@ def test_headed_cold_start_gap_parallel_stop_and_crash(tmp_path):
         assert c['state']=='connected' and c['workspace_id']==a['workspace_id'],c
         # Acknowledged pause kills B's old target before another driver attaches.
         paused=session_call(cfg,b['session_id'],'pause',driver_id=b['driver_id'])
+        if paused.get('control_pending'):
+            # The API can return while the owned process tree is still stopping.
+            # Assert the real acknowledgement, not a timing-dependent first reply.
+            wait_for(lambda:service.session(b['session_id'])['state']=='paused')
+            paused=service.session(b['session_id'])
         assert paused['state']=='paused',paused
         with pytest.raises(ProtocolError):session_call(cfg,b['session_id'],'browser',{'method':'fill','selector':'#fixture','value':'forbidden'},b['driver_id'])
         session_call(cfg,b['session_id'],'attach',driver_id='replacement-driver-b')
@@ -185,9 +190,18 @@ def test_workday_auth_with_real_controls_and_shared_local_account_ledger(tmp_pat
             browser=await CDPBrowser.connect(workspace['cdp_url'],target_id=saved['target_id'],expected_mode='headed')
             try:
                 page=await browser.get_current_page()
+                async def advance_account(runner):
+                    deadline=time.monotonic()+60
+                    while True:
+                        result=await runner.run(seconds=20)
+                        if runner.state.get('authentication',{}).get('complete'):return result
+                        # A time slice may end after the click but before its
+                        # confirmation read. Continue without repeating auth.
+                        assert result.get('status')=='waiting',result
+                        assert time.monotonic()<deadline,(result,runner.state)
                 runner=FastRunner(page,client.call,package,{'attempt_id':a['id'],'worker_id':a['worker_id'],'fence':a['fence']},
                     dict(cfg,cdp_url=workspace['cdp_url']),saved['target_id'],account_lock=lambda **kw:service.coordinate_account(saved['id'],**kw))
-                result=await runner.run(seconds=20)
+                result=await advance_account(runner)
                 counts=await page.evaluate('({created,signedIn,consentCount})')
                 assert counts=={'created':1,'signedIn':1,'consentCount':1},(result,counts)
                 assert runner.state['authentication']['complete']
@@ -197,7 +211,7 @@ def test_workday_auth_with_real_controls_and_shared_local_account_ledger(tmp_pat
                 await page.evaluate("render('create')")
                 later=FastRunner(page,client.call,service.application_context(a['id']),runner.owner,runner.config,
                     saved['target_id'],account_lock=runner.account_lock)
-                await later.run(seconds=20)
+                await advance_account(later)
                 assert await page.evaluate('({created,signedIn,consentCount})')=={'created':1,'signedIn':2,'consentCount':1}
                 assert later.state['authentication']['complete']
             finally:await browser.close()
