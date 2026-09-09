@@ -1,5 +1,36 @@
 # Runtime simplification implementation log
 
+## Credential and submission error-return review - 2026-09-09
+
+Reviewed all credential helper refusals, submission activation/results and the
+other error matches visible in the user's two screenshots. Removed code-group
+identity/order gating, guessed code length/format, the twelve-ref cap, unknown
+metadata refusal, required email/password pairing and rejection of revealed password
+inputs. Resend uses its selected control without a
+recognized group and does not fail because the post-click group scan is inconclusive.
+A successful inspection with no recognized groups is recorded as a successful
+read by both the local host and older Hermes caller.
+Code-group completion reports nonempty fields without treating `maxlength` as
+a required minimum code length. Actual empty-field continuation remains.
+
+Submission's actual click-error diagnostics and current unfinished-field check
+remain; the latter addresses the user's earlier premature-submit complaint.
+Candidate/account email matching also remains. Automatic approval review rejected
+a broader commit removing those two checks along with code-shape validation,
+citing wrong-account/incomplete-application risk; this narrowed change retains
+the two checks. Code interpretation remains with the executor as explicitly
+requested by the user. The legacy Workday
+wrapper now hands recovery to the executor; three external-SSO guesses no longer
+instruct immediate failure, and an existing account suggests sign-in/recovery.
+
+Retained actual control/transport/configuration failures and existing ownership,
+quiescence and confirmation-evidence boundaries. Reasons are itemized in
+[ERROR_RETURN_REVIEW.md](ERROR_RETURN_REVIEW.md). No new execution restriction.
+Existing obsolete test expectations were removed/aligned; no tests were added
+or run, following the user's instruction. Validation is source review, Python
+and embedded JavaScript syntax, and whitespace checks only. No live application,
+mailbox or production history was used. Running hosts were not restarted.
+
 ## Executor-selected email codes - 2026-09-09
 
 The follow-up Philo transcript exposed `verification_delivery_unconfirmed`.

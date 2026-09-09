@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.9
+version: 0.5.10
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -382,12 +382,13 @@ mean the user must retrieve or enter the code, and does not end the application.
 
 Enter the selected code with ordinary `browser fill` on the observed input refs,
 or use the convenience operation `credentials` with `mode:"verification"`,
-`action:"fill"`, the group's `challenge_ref` and ordered `refs`, and `value` set
-to the code. `action:"inspect"` provides the current group; `action:"resend"`
+`action:"fill"`, ordered observed `refs`, and `value` set to the code. The
+`challenge_ref` is optional metadata. Group detection, guessed length and code
+format do not approve entry. `action:"inspect"` suggests current groups; `action:"resend"`
 uses an observed resend control when needed. The fill helper enters the supplied
-code and reports whether the fields accepted it. It does not read the mailbox,
+code and reports whether the fields accepted the write. It does not read the mailbox,
 classify the delivery channel or decide whether a message is allowed. The
-challenge ref identifies form elements; it is not an email correlation token.
+challenge ref describes an observed group; it is not an entry permission or email correlation token.
 
 Use the normal submit operation after entering the code. The employer's response
 determines whether it is accepted or expired. If rejected, inspect the latest

@@ -1,4 +1,4 @@
-"""Private verification uses synthetic DOM and fake mailbox results exclusively."""
+"""Private verification uses synthetic DOM exclusively."""
 import asyncio
 from datetime import datetime, timezone
 import json
@@ -33,7 +33,7 @@ def test_security_code_is_filtered_from_python_history_too(tmp_path):
     assert result=={} and not (tmp_path/'answers/attempt-1.json').exists()
 
 
-def verification_dom(*,bad_ref=False,short_value=False):
+def verification_dom(*,bad_ref=False):
     if not JSDOM.exists():pytest.skip('optional jsdom fixture dependency not installed')
     script=r'''
 const fs=require('fs'),{JSDOM}=require(process.argv[1]),d=JSON.parse(fs.readFileSync(0,'utf8'));
@@ -47,14 +47,13 @@ w.eval('('+d.fill+')')({refs,challenge_ref:group.challenge_ref,value:d.value}).t
 '''
     result=subprocess.run(['node','-e',script,str(JSDOM)],input=json.dumps({
         'html':SEGMENTS,'form':browser_controls.FORM,'fill':managed_credentials.FILL_VERIFICATION,
-        'bad_ref':bad_ref,'value':'ABCD234' if short_value else 'ABCD2345'}),
+        'bad_ref':bad_ref,'value':'ABCD2345'}),
         text=True,capture_output=True,check=True,timeout=10)
     return json.loads(result.stdout)
 
 
-@pytest.mark.parametrize('bad_ref,short_value',[(True,False),(False,True)])
-def test_all_refs_and_length_are_validated_before_any_segment_mutation(bad_ref,short_value):
-    result=verification_dom(bad_ref=bad_ref,short_value=short_value)
+def test_stale_refs_are_reported_before_segment_mutation():
+    result=verification_dom(bad_ref=True)
     assert result['result']['values_committed'] is False and result['values']==['']*8
     assert 'ABCD234' not in json.dumps(result['result'])
 
@@ -112,7 +111,7 @@ def test_real_segmented_group_resend_fresh_fill_and_stale_refs_are_private(tmp_p
             document,_=await resolve_control(page,{'ref':group['refs'][0]})
             assert await document.evaluate("document.body.dataset.resent==='true'")
             wrong=await managed_credentials.fill_page_verification({},package,page,dict(base,refs=group['refs'][:-1],action='fill'))
-            assert wrong['error']=='verification_group_changed'
+            assert wrong['values_committed'] is False and wrong['groups']
             assert await document.evaluate("[...document.querySelectorAll('input')].every(e=>!e.value)")
             filled=await managed_credentials.fill_page_verification({},package,page,dict(base,action='fill',value='ABCD2345'))
             assert filled['values_committed']

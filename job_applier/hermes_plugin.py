@@ -213,7 +213,7 @@ class PluginController:
                         result=handle_credentials(cfg,package,params)
                     finally:
                         adapter.client.call('action_end',**context,action_id=action_id,
-                            status='success' if result.get('values_committed') or result.get('resend_requested') or params.get('action')=='inspect' and result.get('groups') else 'failed',
+                            status='success' if result.get('values_committed') or result.get('resend_requested') or params.get('action')=='inspect' and 'groups' in result else 'failed',
                             duration_seconds=time.monotonic()-started,observed_at=datetime.now(timezone.utc).isoformat())
                         credential_progress(adapter.client.call,context,params,result=result,action_id=action_id)
                 elif op=='context':

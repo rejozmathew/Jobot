@@ -65,7 +65,7 @@
   }),requested_at=scope.verificationRequests.get(challenge_ref)||null;
   const surface=root.closest('form,[role="dialog"]')||root.parentElement||root;
   const resend=nodes().filter(e=>surface.contains(e)&&/^(?:resend(?: (?:security |verification )?(?:code|email))?|send (?:a |new |another )?(?:code|email)|request (?:a )?new code)$/i.test(text(e)));
-  const complete=members.every(e=>!!e.value.trim())&&(!length||members.map(e=>e.value.trim()).join('').length>=length);
+  const complete=members.every(e=>!!e.value.trim());
   const group={challenge_ref,kind,length,refs,requested_at,complete,...(resend.length===1?{resend_ref:remember(resend[0])}:{})};groups.push(group);
   scope.verificationRecords.set(challenge_ref,{...group,root,elements:members});
  }

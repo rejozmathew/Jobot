@@ -150,9 +150,13 @@ no automatic message-selection or verification algorithm. The Google client
 library used by that script is included in repository requirements.
 
 The executor enters its chosen code through ordinary browser fill, or supplies
-`value` to `credentials` mode `verification` with the observed group refs. The
+`value` to `credentials` mode `verification` with observed input refs. The
 helper fills the fields and returns commitment without a mailbox lookup or
-email-eligibility decision. It does not require an `email_code` classification.
+email-eligibility decision. Group/challenge matching, guessed length/format and
+the twelve-field limit are removed. An observed resend control can be activated
+without a recognized group; successful activation remains successful if the
+next group is absent or ambiguous. It does not require an `email_code` classification.
+Group completion reports nonempty fields; `maxlength` is not a minimum code length.
 Optional message/timing metadata records the executor's selection. Code fields
 remain masked in screenshots and excluded from saved answers. Employer feedback
 establishes acceptance or expiry; a helper miss is a continuation, not an outcome.
@@ -506,7 +510,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | browser_helpers/workday_source.js | Workday-only recruiting-source field/menu association, live option inventory and virtualized-menu scrolling; workday_fast drives pointer actions and verifies commitment |
-| managed_credentials.py / managed_documents.py / hermes_gmail.py | Account filling, executor-supplied code entry, existing Hermes Gmail CLI wrapper, code screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |
+| managed_credentials.py / managed_documents.py / hermes_gmail.py | Selected account-field filling, executor-supplied code entry without group/format permission, existing Hermes Gmail CLI wrapper, code screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |
 | managed_shared.py / managed_events.py / managed.py | Common submission resolution, strict evidence ledger, progress convenience, existing job metadata enrichment and previewable backfill |
 | managed_reports.py / managed_sessions.py / managed_views.py | Stage/task projection from the same events and actions, explicit waits/action overlap, shared labels and first-Autofill timing |
 | hermes_plugin.py / integration entry | Convenience, actual conversation/model and observed request-turn identity, current session binding after retry, optional messaging capability metadata and observed human-reply provenance; no alternative form logic |
@@ -824,6 +828,13 @@ credential_account_keys maps a saved reference to another account key in that
 same configured private file. An unavailable saved reference fails specifically;
 it never silently borrows the default password. No credential values enter the
 managed DB, events, helper checkpoint or model output.
+
+Selected sign-in controls may contain email only, password only, or the whole
+form. A revealed password input is supported. Existing candidate/account identity
+matching remains. Actual missing controls, unavailable saved
+credentials and browser failures remain reported; they are helper diagnostics,
+not application outcomes. The [error-return review](ERROR_RETURN_REVIEW.md)
+records these removals and the retained checks with their reasons.
 
 For local Workday sessions the fast runner supplies the existing session account
 coordination callback to workday_auth. It performs one fresh observed action at

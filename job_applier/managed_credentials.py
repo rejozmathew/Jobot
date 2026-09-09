@@ -14,13 +14,13 @@ def credential_progress(call,ownership,params,*,result=None,action_id=None):
     verification=params.get('mode')=='verification'
     action=params.get('action','fill')
     activity=({'inspect':'Inspect email verification','resend':'Request a fresh verification email',
-        'fill':'Retrieve verification email and enter its code'}.get(action,'Verify email') if verification else 'Enter employer sign-in details')
-    completed=result is not None and (result.get('values_committed') or result.get('resend_requested') or action=='inspect' and result.get('groups'))
+        'fill':'Enter the executor-selected verification code'}.get(action,'Verify email') if verification else 'Enter employer sign-in details')
+    completed=result is not None and (result.get('values_committed') or result.get('resend_requested') or action=='inspect' and 'groups' in result)
     payload={'stage_id':'email_verification' if verification else 'authentication',
         'task_id':'email-code' if verification else 'sign-in-details','activity':activity,
         'task_state':'in_progress' if result is None else 'completed' if completed else 'recovering',
         'source':'private_credentials','handler':'private_credentials'}
-    if completed:payload['evidence']='Observed resend control activated' if result.get('resend_requested') else 'Private fields verified' if result.get('values_committed') else 'Observed current verification group'
+    if completed:payload['evidence']='Observed resend control activated' if result.get('resend_requested') else 'Private fields verified' if result.get('values_committed') else 'Inspected current verification fields'
     if result is not None:payload['verification_result']='committed' if result.get('values_committed') else 'not_verified'
     try:call('event',**ownership,event_id=uid(),action_id=action_id,event_type='checkpoint',
              observed_at=datetime.now(timezone.utc).isoformat(),payload=payload)
@@ -80,8 +80,7 @@ FILL_SELECTED = r"""async (args) => {
  const selected=[];
  for(const [role,ref] of [['email',args.email_ref],['password',args.password_ref],
                          ['confirmation',args.confirmation_ref]]) {
-   if(role==='confirmation'&&!ref)continue;
-   if(!ref)return {...result,error:'missing_'+role+'_ref'};
+   if(!ref)continue;
    let matches;
    try {
     const inventoryRef=ref.startsWith('wd:')||ref.startsWith('form:');
@@ -92,11 +91,12 @@ FILL_SELECTED = r"""async (args) => {
    const e=matches[0],r=e.getBoundingClientRect();
    if(e.tagName!=='INPUT'||!e.isConnected||!r.width||!r.height||getComputedStyle(e).visibility==='hidden'||e.disabled||e.readOnly)
      return {...result,error:'unavailable_'+role+'_control'};
-   if((role!=='email'&&e.type!=='password')||(role==='email'&&!['email','text'].includes(e.type)))
+   if((role!=='email'&&!['password','text'].includes(e.type))||(role==='email'&&!['email','text'].includes(e.type)))
      return {...result,error:'incorrect_'+role+'_control_type'};
    if(selected.some(x=>x.e===e))return {...result,error:'duplicate_control_ref'};
    selected.push({role,e,value:role==='email'?args.email:args.password});
  }
+ if(!selected.length)return {...result,error:'missing_email_ref'};
  const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
  for(const {e,value} of selected){
    e.focus();setter.call(e,value);
@@ -121,8 +121,8 @@ FILL_SELECTED = r"""async (args) => {
    // approved values after observation, ledger writes and pointer hover. Values
    // remain in this closure; only an opaque token and booleans leave the page.
    const token=crypto.randomUUID(),url=location.href;
-   const password=selected.find(x=>x.role==='password').e;
-   const root=password.closest('[role="dialog"]')||password.closest('form')||document;
+   const anchor=(selected.find(x=>x.role==='password')||selected[0]).e;
+   const root=anchor.closest('[role="dialog"]')||anchor.closest('form')||document;
    const matches=({role,e,value})=>e.isConnected&&(role==='email'?e.value.toLowerCase()===value.toLowerCase():e.value===value);
    let refilled=false;
    window.__jobbotCredentialReceipt={token,verify(control){
@@ -151,25 +151,30 @@ DEFAULT_CREDENTIAL_REF='credential:profile/accounts/default'
 
 
 FILL_VERIFICATION = r"""async args => {
- const scope=window.__jobbotFormScope,group=scope?.verificationRecords?.get(args.challenge_ref);
+ const scope=window.__jobbotFormScope;
  const fail=error=>({values_committed:false,error});
- if(!group||!Array.isArray(args.refs)||args.refs.length!==group.refs.length||new Set(args.refs).size!==args.refs.length)
-   return fail('verification_group_changed');
- if(typeof args.value!=='string'||args.value.length!==group.length||!/^\w+$/.test(args.value))
-   return fail('verification_length_mismatch');
  const elements=[];
- for(let i=0;i<args.refs.length;i++){
-  const el=scope.inventory.get(args.refs[i]);
-  if(args.refs[i]!==group.refs[i]||el!==group.elements[i])return fail('verification_refs_changed');
+ for(const ref of args.refs){
+  let matches;
+  try {
+   const mapped=ref.startsWith('wd:')?window.__jobbotWorkdayScope?.inventory?.get(ref):scope?.inventory?.get(ref);
+   matches=ref.startsWith('wd:')||ref.startsWith('form:')?(mapped?[mapped]:[]):document.querySelectorAll(ref);
+  }catch{return fail('verification_refs_changed');}
+  if(matches.length!==1)return fail('verification_refs_changed');
+  const el=matches[0];
   const box=el.getBoundingClientRect();
   if(!el.isConnected||el.tagName!=='INPUT'||el.disabled||el.readOnly||!box.width||!box.height||getComputedStyle(el).visibility==='hidden')
    return fail('verification_control_unavailable');
   if(elements.includes(el))return fail('duplicate_verification_control');
   elements.push(el);
  }
- const values=elements.length===1?[args.value]:[...args.value];
+ const value=String(args.value),values=[];let offset=0;
+ for(let i=0;i<elements.length;i++){
+  const size=i===elements.length-1?value.length-offset:Math.max(elements[i].maxLength,1);
+  values.push(value.slice(offset,offset+size));offset+=size;
+ }
  const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
- // All references and the full group are checked before any input changes.
+ // Resolve the selected controls before writing; code validity belongs to the employer.
  elements.forEach((el,i)=>setter.call(el,values[i]));
  elements.forEach(el=>{el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});
  await new Promise(resolve=>setTimeout(resolve,150));
@@ -184,13 +189,12 @@ async def fill_page_verification(config,package,page,params):
     from .browser_controls import FORM,click_control
     from .browser_frames import resolve_control,FramePage
     from .hermes_gmail import mailbox_handoff
-    allowed={'target_id','mode','action','refs','challenge_ref','requested_at','resend_ref','message_id','received_at','value'}
-    if set(params)-allowed:return {'values_committed':False,'error':'invalid_verification_parameters'}
     if not is_same_application_scope(package['job']['url'],await page.evaluate('location.href')):
         return {'values_committed':False,'error':'verification_target_scope_mismatch'}
     page.application_package=package
-    refs=params.get('refs',[])
-    if not isinstance(refs,list) or len(refs)>12 or any(not isinstance(ref,str) for ref in refs):
+    action=params.get('action','fill')
+    refs=[] if action=='resend' else params.get('refs',[])
+    if not isinstance(refs,list) or any(not isinstance(ref,str) for ref in refs):
         return {'values_committed':False,'error':'observed_verification_refs_required'}
     document=None;local_refs=[]
     for ref in refs:
@@ -199,43 +203,41 @@ async def fill_page_verification(config,package,page,params):
             return {'values_committed':False,'error':'verification_controls_must_share_document'}
         document=current;local_refs.append(local['ref'])
     document=document or page
-    observed=await document.evaluate_function(FORM,{'method':'verification'})
-    public_groups=[dict(g,refs=[document.wrap(ref) for ref in g['refs']],
-        **({'resend_ref':document.wrap(g['resend_ref'])} if g.get('resend_ref') else {})) if isinstance(document,FramePage) else g
-        for g in observed['groups']]
-    handoff={'groups':public_groups,'mailbox':mailbox_handoff(config),
-             'instruction':'Read the email with the existing Hermes Gmail skill. Choose the relevant code closest to the request timestamp and pass it as value with these refs, or fill the observed code fields with browser fill. Recheck delayed mail in this same application. This helper only enters the selected code; it does not verify email eligibility. Do not finalize blocked or ask for manual entry merely because a helper did not recognize the message.'}
-    action=params.get('action','fill')
-    if action=='inspect':return dict(handoff,values_committed=False)
-    group=next((g for g in observed['groups'] if g['challenge_ref']==params.get('challenge_ref')),None)
-    if not group or group['refs']!=local_refs:return dict(handoff,values_committed=False,error='verification_group_changed')
+    async def handoff():
+        observed=await document.evaluate_function(FORM,{'method':'verification'})
+        groups=[dict(g,refs=[document.wrap(ref) for ref in g['refs']],
+            **({'resend_ref':document.wrap(g['resend_ref'])} if g.get('resend_ref') else {})) if isinstance(document,FramePage) else g
+            for g in observed['groups']]
+        return {'values_committed':False,'groups':groups,'mailbox':mailbox_handoff(config),
+            'instruction':'Read the email with Hermes Gmail, choose the relevant code closest to the request timestamp, and enter it with browser fill or pass value and the selected refs here. Groups are suggestions; no matching group or challenge token is needed. Recheck delayed mail and continue in this application.'}
+    if action=='inspect':return await handoff()
     if action=='resend':
-        current,local=await resolve_control(page,{'ref':params.get('resend_ref','')})
-        if current is not document or not group.get('resend_ref') or local['ref']!=group['resend_ref']:
-            return dict(handoff,values_committed=False,error='observed_resend_control_required')
+        if not params.get('resend_ref'):
+            return dict(await handoff(),error='observed_resend_control_required')
+        document,_=await resolve_control(page,{'ref':params['resend_ref']})
         requested=datetime.now(timezone.utc).isoformat()
         result=await click_control(page,{'ref':params['resend_ref']})
-        if not result.get('clicked'):return dict(handoff,values_committed=False,error='verification_resend_unconfirmed')
+        if not result.get('clicked'):
+            return {'values_committed':False,'error':'verification_resend_unconfirmed','click':result,
+                'instruction':'Inspect the current resend control or use an ordinary browser click and continue.'}
         await asyncio.sleep(.2)
-        fresh=await document.evaluate_function(FORM,{'method':'verification'})
-        if len(fresh['groups'])!=1:return {'values_committed':False,'resend_requested':True,'requested_at':requested,'error':'verification_group_changed'}
-        current_group=fresh['groups'][0]
-        await document.evaluate_function('(a)=>{window.__jobbotFormScope.verificationRequests.set(a.ref,a.time);return true;}',
-            {'ref':current_group['challenge_ref'],'time':requested})
-        current_group=dict(current_group,requested_at=requested)
-        if isinstance(document,FramePage):
-            current_group['refs']=[document.wrap(ref) for ref in current_group['refs']]
-            if current_group.get('resend_ref'):current_group['resend_ref']=document.wrap(current_group['resend_ref'])
-        return {'values_committed':False,'resend_requested':True,'requested_at':requested,'group':current_group}
+        response={'values_committed':False,'resend_requested':True,'requested_at':requested}
+        try:
+            fresh=await handoff()
+            for group in fresh['groups']:group['requested_at']=requested
+            response['groups']=fresh['groups']
+            if len(fresh['groups'])==1:response['group']=fresh['groups'][0]
+        except Exception:
+            pass  # Successful resend does not depend on recognizing the next form.
+        return response
     if action!='fill':return {'values_committed':False,'error':'invalid_verification_action'}
-    if 'value' not in params:return dict(handoff,values_committed=False)
-    result=await document.evaluate_function(FILL_VERIFICATION,{
-        'refs':local_refs,'challenge_ref':group['challenge_ref'],'value':params['value']})
+    if 'value' not in params or not local_refs:return await handoff()
+    result=await document.evaluate_function(FILL_VERIFICATION,{'refs':local_refs,'value':params['value']})
     # `value` is intentionally never copied out of this private call.
-    return dict(result,challenge_ref=group['challenge_ref'],message_id=params.get('message_id'),
-                requested_at=group.get('requested_at') or params.get('requested_at'),received_at=params.get('received_at'),
-                instruction='Submit promptly using the existing authorized submission boundary.' if result.get('values_committed') else
-                'Reinspect the current verification group before recovery; no input value is returned.')
+    return dict(result,challenge_ref=params.get('challenge_ref'),message_id=params.get('message_id'),
+                requested_at=params.get('requested_at'),received_at=params.get('received_at'),
+                instruction='Submit the current form and follow the employer response.' if result.get('values_committed') else
+                'Inspect the current controls and retry entry here or with browser fill; no input value is returned.')
 
 
 def resolve_employer_credential(config, package):
@@ -264,8 +266,6 @@ async def fill_page_credentials(config, package, page, params):
     if params.get('mode')=='verification':
         try:return await fill_page_verification(config,package,page,params)
         except Exception as exc:return {'error':'verification_transport_failed','error_type':type(exc).__name__,'values_committed':False}
-    if set(params)-{'target_id','email_ref','password_ref','confirmation_ref'}:
-        return {'error':'invalid_credential_parameters','values_committed':False}
     try:
         account=resolve_employer_credential(config,package)
         url=await page.evaluate('location.href')
@@ -302,8 +302,11 @@ async def fill_credentials(config, package, params):
 
 def handle_credentials(config, package, params):
     try:
-        return asyncio.run(fill_credentials(config, package, params))
+        result=asyncio.run(fill_credentials(config, package, params))
     except Exception as exc:
         # Browser/transport exceptions can contain the evaluation arguments.
-        return {'error': 'credential_transport_failed', 'error_type': type(exc).__name__,
+        result={'error': 'credential_transport_failed', 'error_type': type(exc).__name__,
                 'values_committed': False}
+    if result.get('error'):
+        result.setdefault('instruction','Inspect the current controls and the reported problem, refresh references or recover the browser as needed, then continue in this session. This helper result does not end the application.')
+    return result

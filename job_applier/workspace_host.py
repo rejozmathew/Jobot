@@ -353,7 +353,7 @@ class WorkspaceHost:
                 client.call('action_start',**own,action_id=action,tool_name='credentials')
                 try:result=handle_credentials(cfg,package,dict(params,target_id=session['target_id']));return result
                 finally:
-                    client.call('action_end',**own,action_id=action,status='success' if result.get('values_committed') or result.get('resend_requested') or params.get('action')=='inspect' and result.get('groups') else 'failed',duration_seconds=time.monotonic()-started)
+                    client.call('action_end',**own,action_id=action,status='success' if result.get('values_committed') or result.get('resend_requested') or params.get('action')=='inspect' and 'groups' in result else 'failed',duration_seconds=time.monotonic()-started)
                     credential_progress(client.call,own,params,result=result,action_id=action)
             from .application_runtime import browser_action
             return browser_action(cfg,client,own,package,session['target_id'],params)
