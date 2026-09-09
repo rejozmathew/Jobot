@@ -135,6 +135,11 @@ async def recover_screen(r,mapping):
         fresh=await r.observe()
         if fresh.get('page_signature')!=observed.get('page_signature') or fresh.get('status')=='active':
             return result(status='progress')
+        if not fresh.get('auth'):
+            from .application_answers import capture_answers
+            history=await capture_answers(r.page,r.config,r.package,r.owner,page=fresh.get('step','form'),source='mapped_recovery')
+            if history.get('answers_added'):
+                r.event('checkpoint',{'operation':'answer_history','page':fresh.get('step','form'),'source':'mapped_recovery','evidence':history['answer_history_path']})
         if mode and mode==ui.get('mode'):
             arm_account(r,mode,filled['credential_ref']);dispatched_mode=mode
         # Persist uncertainty BEFORE the browser call; a lost response is not replayed.

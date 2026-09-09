@@ -21,6 +21,11 @@ def test_continue_before_review_warning():
     assert m.choose(snapshot(review_count=3), {}) == 'continue'
 
 
+def test_native_continue_skips_simplify_review_of_already_filled_fields():
+    s=snapshot(review_count=2);s['native']={'continue':{'enabled':True}}
+    assert module().choose(s,{})=='native_continue'
+
+
 @pytest.mark.parametrize('status', ['active', 'unknown'])
 def test_unknown_or_active_writer_never_advanced(status):
     m=module()
@@ -139,11 +144,12 @@ def test_runner_records_meaningful_step_and_decision_without_poll_spam():
     assert result['status']=='waiting' and not h.clicks
 
 
-def test_runner_missing_resume_blocks_submit_not_reconstructs_pdf():
+def test_runner_submits_review_without_a_second_resume_audit(monkeypatch):
     s=snapshot(step='review'); s['controls']={'submit':{'enabled':True}}
+    async def capture(*args,**kwargs):return {'status':'applied'}
+    monkeypatch.setattr('job_applier.submission.submit',capture)
     h=Harness([s]); result=asyncio.run(h.runner().run(seconds=4))
-    assert h.clicks==[]
-    assert result['reason']=='approved_resume_not_observed'
+    assert result['status']=='applied'
 
 
 def test_runner_accepts_real_simplify_click_protocol():

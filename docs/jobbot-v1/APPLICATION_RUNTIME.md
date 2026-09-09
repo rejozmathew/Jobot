@@ -195,7 +195,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
 | browser_controls.py / browser_helpers/form_controls.js | Shared native form inventory, verified text/select/check/keyboard exceptions; Workday retains its site-specific inventory |
-| application_answers.py | Interprets allowlisted candidate profile salary/privacy preferences for the shared browser operation and Workday runner; contains no personal answer defaults |
+| application_answers.py | Interprets profile salary/privacy preferences and retains private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | Shared one-click boundary, transient native/Simplify confirmation capture, scoped redirect inspection, private evidence and truthful outcome |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
@@ -204,7 +204,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js | Existing dashboard, parallel session/process/driver/model/progress and independent controls |
 
-Common policy is job-apply v0.4.5; Workday policy is workday-simplify v0.3.3, in
+Common policy is job-apply v0.4.6; Workday policy is workday-simplify v0.3.4, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision
@@ -237,9 +237,32 @@ observation, while real unfinished helper writes remain exclusive. Native
 takeover remains separate from extension input permission. Shared form helpers
 verify values and return ambiguous menu/coverage evidence instead of guessing.
 
-Follow-up work: correlate application-confirmation email through the existing
-Hermes Gmail adapter (employer, requisition/title, recipient and attempt time;
-deduplicate old mail; never treat delayed mail as failure). Add a candidate profile
+In `needs_review`, Workday prefers enabled native Continue so that a populated
+source answer such as LinkedIn does not reopen Simplify's review menu. At authorized
+Review it submits without another resume or field audit. Missing attachment
+evidence is not a final-submit gate. The same-portal
+`jobTasks/completed/application` route is a read-only confirmation surface;
+fresh approved Simplify success is sufficient without waiting for employer mail.
+
+The existing private spool stores `answers/attempt-<id>.json`, captured during
+filling and advancement. It includes company, ATS, portal namespace, job identity,
+attempt/session, full question and answer, timestamp, source and available answer
+basis. Repeated read-back is deduplicated; changes remain in history. Missing basis
+is explicit, not inferred from a favorable answer or promoted into profile facts.
+Credential, verification-code and financial-identifier controls are excluded.
+Timeline checkpoints and browser results link the artifact; this does not add
+another database or a final-review pass. Audit errors are reported separately
+and never imply that an executed form action is safe to replay.
+
+Follow-up work: schedule confirmation-email correlation about 30 minutes after
+submission through the existing Hermes Gmail adapter (employer, requisition/title,
+recipient and attempt time; deduplicate by message ID and never treat delayed mail
+as failure). Keep accepted on-page success final without waiting for this follow-up.
+Later extend the same correlation to rejection, interview and recruiter-response
+updates, retaining each message's source/time separately from the original
+submission outcome. Ambiguous mail should await classification, never update a
+different requisition. These email automations are deferred, not implemented here.
+Add a candidate profile
 editor exposing advertised minimum/maximum choice, fallback amount, currency,
 period and routine consent; keep preferences in editable data and snapshot the
 chosen policy for each run. Minimum-range selection is a future option; this

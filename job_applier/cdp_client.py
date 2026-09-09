@@ -244,7 +244,7 @@ async def _press_key(session, key: str, vk: int = 0) -> None:
         modifiers|=bit
     name={'Space':' ','Spacebar':' ','Esc':'Escape','Return':'Enter'}.get(parts[-1],parts[-1])
     codes={'Tab':9,'Enter':13,'Escape':27,' ':32,'ArrowLeft':37,'ArrowUp':38,
-           'ArrowRight':39,'ArrowDown':40,'Home':36,'End':35,'Backspace':8,'Delete':46}
+           'ArrowRight':39,'ArrowDown':40,'Home':36,'End':35,'PageUp':33,'PageDown':34,'Backspace':8,'Delete':46}
     code=vk or codes.get(name) or (ord(name.upper()) if len(name)==1 else 0)
     if not code:raise ValueError('unsupported_form_key')
     params={'key':name,'windowsVirtualKeyCode':code,'modifiers':modifiers}

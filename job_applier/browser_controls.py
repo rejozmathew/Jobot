@@ -64,6 +64,9 @@ async def form_action(page, params):
     if method!='select':raise ValueError('unsupported_form_operation')
     supplied={k:params[k] for k in ('value','label') if k in params}
     if not supplied or any(not isinstance(v,str) for v in supplied.values()):raise ValueError('exact_option_required')
+    wanted=params.get('label',params.get('value'))
+    if before.get('expanded')!='true' and wanted in (before.get('value'),before.get('label')):
+        return {'committed':True,'unchanged':True,'value':before.get('value'),'label':before.get('label')}
     if before['tag']=='SELECT':
         result=await command('select_native',**supplied)
         if not result.get('committed'):return result
@@ -75,7 +78,6 @@ async def form_action(page, params):
     if before.get('expanded')!='true':
         activated=await click()
         if not activated.get('clicked'):return activated
-    wanted=params.get('label',params.get('value'))
     for attempt in range(8):
         options=await command('select_options')
         matches=[o for o in options.get('options',[]) if o['enabled'] and

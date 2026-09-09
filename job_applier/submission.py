@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import time
 import uuid
+from urllib.parse import urlsplit,urlunsplit
 
 from .managed_identity import is_post_submit_scope,is_same_application_scope
 from .managed_redaction import safe_text
@@ -75,7 +76,7 @@ async def submit(page,call,package,ownership,config,target_id,activate,*,seconds
                 return {'status':'inspection_required','reason':'writer_activity_unconfirmed','attempt_id':ownership['attempt_id']}
             aid=str(uuid.uuid4());owned('action_start',action_id=aid,tool_name='browser.submit')
             if not attempt.get('submit_intent_at'):
-                owned('submission_intent',evidence='Observed final submit control for the owned application; selected attachment verified during filling')
+                owned('submission_intent',evidence='Observed enabled final submit control for the owned application in authorized submit mode')
             event('submission_click','possibly_executed','Confirmation capture armed before the single submit')
             await page.evaluate_function(SCRIPT,{'name':name,'operation':'start'})
             try:
@@ -94,6 +95,8 @@ async def submit(page,call,package,ownership,config,target_id,activate,*,seconds
             if any(r['source'] in allowed for r in record['observations']):break
             try:
                 url=await page.evaluate('location.href')
+                parts=urlsplit(url)
+                record['last_url']=urlunsplit((parts.scheme,parts.netloc,parts.path,'',''))
                 if is_post_submit_scope(package['job']['url'],url):
                     for item in await page.evaluate_function(SCRIPT,{'name':name,'operation':'read'}):
                         receive({'name':binding,'payload':json.dumps(item)})

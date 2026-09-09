@@ -6,7 +6,7 @@
  const label=e=>e.getAttribute('aria-label')||[...(e.labels||[])].map(text).join(' ')||
   (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)).filter(Boolean).map(text).join(' ')||
   e.getAttribute('placeholder')||text(e.closest('label'))||'';
- const nodes=()=>[...document.querySelectorAll('input:not([type="hidden"]),textarea,select,button,a,[role="button"],[role="checkbox"],[role="combobox"]')].filter(e=>visible(e)&&native(e));
+ const nodes=()=>[...document.querySelectorAll('input:not([type="hidden"]),textarea,select,button,a,[role="button"],[role="checkbox"],[role="radio"],[role="combobox"]')].filter(e=>visible(e)&&native(e));
  const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
  const checked=e=>e.getAttribute('role')==='checkbox'?e.getAttribute('aria-checked')==='true':!!e.checked;
  const descriptor=e=>({tag:e.tagName,type:e.type||'',role:e.getAttribute('role')||'',name:e.name||'',
@@ -43,6 +43,53 @@
   return {step:'form',native:controls,inventory,blocking_errors:errors,auth:nodes().some(e=>e.type==='password'),
     page_signature:scope.page_signature};
  }
+ if(args.method==='answers'){
+  const currentPage=window.__jobbotWorkdayScope?.step||args.page;
+  const questionnaire=['application_questions','voluntary_disclosures','self_identify'].includes(currentPage);
+  const answers=[];
+  for(const e of nodes()){
+   const type=e.type||'',role=e.getAttribute('role')||'';
+   if(e.closest('form,[role="dialog"]')?.querySelector('input[type="password"]'))continue;
+   if(['password','hidden','file','email','tel','submit'].includes(type))continue;
+   const input=/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName);
+   const choice=['checkbox','radio','combobox'].includes(role)||['listbox','menu','true'].includes(e.getAttribute('aria-haspopup'));
+   if(!input&&!choice)continue;
+   if((type==='radio'||role==='radio')&&!e.checked&&e.getAttribute('aria-checked')!=='true')continue;
+   const ids=(e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)).filter(Boolean);
+   const group=e.closest('fieldset,[role="radiogroup"]');
+   const field=e.closest('[data-automation-id^="formField"],[data-automation-id="question"],[role="group"]');
+   const fieldLabel=field?.querySelector('label,[data-automation-id="richText"],[data-automation-id="questionLabel"]');
+   let question=(group?.querySelector('legend')&&text(group.querySelector('legend')))||
+    group?.getAttribute('aria-label')||text(fieldLabel)||ids.map(text).join(' ')||[...(e.labels||[])].map(text).join(' ')||label(e);
+   const identity=question+' '+(e.name||'')+' '+(e.autocomplete||'');
+   if(/password|passwd|\botp\b|token|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card|e.?mail|phone|postal|street.?address/i.test(identity))continue;
+   if(!questionnaire&&!/\?|\b(?:salary|sponsorship|work authorization|consent|privacy|veteran|disability)\b/i.test(question))continue;
+   let answer;
+   if(type==='checkbox'||role==='checkbox')answer=checked(e)?'Yes':'No';
+   else if(type==='radio'||role==='radio')answer=label(e)||e.value||text(e);
+   else if(e.tagName==='SELECT')answer=e.selectedOptions[0]?.text||'';
+   else answer=/^(INPUT|TEXTAREA)$/.test(e.tagName)?e.value:text(e);
+   answer=(answer||'').trim();
+   if(!answer||/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(answer))continue;
+   question=question.replace(/\s+Required\s*$/i,'').replace(/\s*\*$/,'').trim();
+   if(!['checkbox','radio'].includes(type)&&!['checkbox','radio'].includes(role)&&question.endsWith(' '+answer))
+    question=question.slice(0,-answer.length).trim();
+   if(question&&question!==answer&&!/^(?:select one|yes|no)$/i.test(question))
+    answers.push({field:e.name||e.id||question,question,answer,page:currentPage||'form'});
+  }
+  const cards=new Map();
+  for(const host of document.querySelectorAll('.simplify-jobs-shadow-root')){
+   for(const e of (host.shadowRoot||host).querySelectorAll('button,[role="button"]')){
+    if(!visible(e))continue;
+    const lines=(e.innerText||e.textContent||'').split(/\r?\n/).map(t=>t.trim()).filter(Boolean);
+    if(lines.length>=2&&/\s[·•]\s*Updated on\b/i.test(lines[1])){
+     const company=lines[1].split(/\s[·•]\s*Updated on\b/i)[0].trim();
+     cards.set(lines[0]+'|'+company,{job_title:lines[0],company,source:'simplify_job_card'});
+    }
+   }
+  }
+  return {answers,context:cards.size===1?[...cards.values()][0]:{}};
+ }
  let owner=args.ref?.startsWith('form:')?scope:window.__jobbotWorkdayScope;
  let el;
  if(args.selector){const found=document.querySelectorAll(args.selector);if(found.length===1)el=found[0];}
@@ -57,7 +104,7 @@
  if(el.type==='password'||/otp|one.?time|verification.?code/i.test((el.name||'')+' '+(el.autocomplete||'')+' '+label(el)))
   return {committed:false,reason:'use_private_credentials_helper',execution:'not_executed'};
  const value=()=>el.tagName==='SELECT'?{value:el.value,label:el.selectedOptions[0]?.text||''}:
-  {value:el.value??text(el),label:el.value??text(el)};
+  {value:/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el),label:/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el)};
  if(args.method==='inspect'){
   scope.beforeMenus=[...document.querySelectorAll('[role="listbox"],[role="menu"]')].filter(visible);
   return {...describe(el),...value(),checked:checked(el),submission_control:

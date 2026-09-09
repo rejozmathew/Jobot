@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.4.5
+version: 0.4.6
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -128,18 +128,30 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    or `value`; it supports native selects and associated ARIA menus, and verifies
    selection. `check` accepts boolean `value` and never toggles an already correct
    box. `fill` and `press` also accept refs; keys include Tab, Shift+Tab, Space,
-   Escape, Enter and Control+A. Unassociated or ambiguous options return evidence.
+   Escape, Enter, PageUp, PageDown and Control+A. Unassociated or ambiguous options return evidence.
+   Keep a populated "How did you hear about us?" answer such as LinkedIn even
+   when Simplify marks it for review. Prefer enabled native Continue to opening
+   a filled field's review menu; repair only an actual employer validation error.
+   Shared form writes and advancement retain observed application questions and
+   answers in the private spool's `answers/attempt-<id>.json`; changed answers
+   remain in history. `answer_history_path` and timeline checkpoints locate it.
+   For a manual answer, optional `answer_basis` identifies the actual approved
+   profile fact or user instruction. Missing provenance is recorded as such.
+   Answer factual questions from approved facts; do not choose yes/no merely
+   because it sounds favorable. This history is an audit, not new profile facts.
    `apply_policy` uses the attempt's approved `application_answer_policy` for
    salary expectations and routine privacy consent. Use the applicable advertised
    range maximum when configured; use the configured absolute amount only when
    no applicable range is available. An explicit observed range can be supplied
    as `salary_range:{min,max,currency}`. Do not use the candidate's desired range
    as the job's range. Routine privacy consent excludes marketing and job alerts.
-6. Verify the approved resume attachment using actual employer controls. Retain
-   a correct verified attachment; do not reupload it unnecessarily. If needed,
-   `browser upload` hash-checks only the selected asset and records the attempt.
-   After observing successful attachment use `report_upload` with `asset_id`,
-   `status:"upload_confirmed"`, and evidence. No in-run PDF extraction, resume
+6. Use the configured approved resume through Simplify during filling. Handle an
+   actual required-upload error with `browser upload` and the selected asset.
+   Report only uploads performed through that helper; do not manufacture an
+   upload event for an attachment Simplify supplied. At Review, proceed directly
+   to the enabled Submit control: no attachment search, scrolling audit, re-upload,
+   or requirement for resume evidence in the internal ledger. Missing attachment
+   evidence alone does not block submission. No in-run PDF extraction, resume
    hunts, or reconstruction of career/education fields on any ATS.
 7. Continue every page. In configured submit mode use `browser submit` with the
    observed native `ref` or `selector`, or `source:simplify` for its final action.
@@ -148,7 +160,10 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    Simplify confirmation messages, source, time and a private screenshot before
    finishing. Accepted sources come from the profile; employer is the default.
    Simplify evidence remains labelled Simplify, never employer evidence. Do not
-   add a human review checkpoint or repeat submission after `applied`.
+   add a human review checkpoint or repeat submission after `applied`. An accepted
+   Simplify "Application Submitted!" message is sufficient; do not then seek a
+   second employer confirmation or wait for email. Review is a submit step, not
+   a request to audit the completed application.
 8. Use `finish` with the truthful outcome, evidence and observed quiescence.
    The host isolates its browser before making the workspace available again.
    A missing post-click confirmation is `submission_unknown`; never click again.

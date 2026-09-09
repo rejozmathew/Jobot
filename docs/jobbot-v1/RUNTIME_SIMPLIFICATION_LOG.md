@@ -1,5 +1,42 @@
 # Runtime simplification implementation log
 
+## Magellan successful run and review overhead — 2026-09-08
+
+The user repeated the application with Luna Medium. Attempt 27 executed Submit
+once, and the user observed Simplify success and received employer confirmation
+email. Reported end-to-end time was 541.08 seconds including 6.47 seconds of
+startup; the managed attempt duration was 534.70 seconds. Native dropdown
+recovery and authentication worked. The remaining confirmation failure was local:
+the exact same-portal `jobTasks/completed/application` destination was excluded
+from observation scope, so the collector could not read Simplify's installed
+"Application Submitted!" message. The route now permits confirmation reads only,
+and private evidence retains the last post-submit URL for future diagnosis.
+
+Review-to-submit took about 77 seconds because the runner demanded resume
+evidence, followed by an upload-ledger lookup for a Simplify-supplied attachment.
+The user explicitly removed that final review requirement: authorized Review
+submits without a resume/field audit. In `needs_review`, enabled native Continue
+preserves populated source answers such as LinkedIn instead of reopening
+Simplify's review menu. Already-selected closed dropdowns return without a click.
+The observed PageDown helper gap is also fixed.
+
+Questions and observed answers are retained during filling/advancement in the
+existing private spool, with company, portal, ATS, job, attempt/session, timestamp,
+source and any recorded answer basis. This reuses shared form controls and does
+not infer new profile facts or run an additional final review. The 13 application
+questions from attempt 27 were recovered into a readable private history with
+retrospective provenance. The outcome was reconciled as `applied` from the user's
+report, preserving timing and original diagnostic events. Email confirmation
+checks around 30 minutes later, and subsequent rejection/interview/recruiter
+status updates, remain documented follow-up work.
+
+Validation: 51 focused scope, advancement, answer-history, authentication and
+mapped-recovery checks passed (2.93 seconds), plus Python/JavaScript syntax,
+PageUp/PageDown dispatch and canonical skill metadata checks. No broad managed
+suite, new browser fixture or live employer execution was run for this change.
+The next ordinary application will measure the actual time savings and verify
+automatic answer capture against its live controls.
+
 ## Magellan authentication dispatch correction — 2026-09-08
 
 Attempt 26 had no prior Magellan account. Its own creation intent became a

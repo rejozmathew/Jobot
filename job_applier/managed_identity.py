@@ -190,6 +190,7 @@ def is_post_submit_scope(job_url: str, candidate_url: str) -> bool:
             if a and _LOCALE_RE.fullmatch(a[0]):a=a[1:]
             if b and _LOCALE_RE.fullmatch(b[0]):b=b[1:]
             if not a or not b or a[0].casefold()!=b[0].casefold():return False
+            if [part.casefold() for part in b[1:]]==['jobtasks','completed','application']:return not current.query
             # A different requisition on the same career site is never evidence.
             if 'job' in b:
                 i=b.index('job');j=a.index('job') if 'job' in a else -1

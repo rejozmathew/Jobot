@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.3
+version: 0.3.4
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -105,12 +105,20 @@ runner contains no model and retains one CDP connection during its bounded call.
    continuing. Use shared `browser select` for native or ARIA dropdown recovery.
 6. A review count does not defeat enabled Continue after quiescence. Same URL does
    not imply same step; the runner observes Workday's actual section/stepper.
-7. At authorized Review, observe the correct approved attachment. The runner
-   arms the shared confirmation collector, records intent and submits once.
+   Keep populated source answers such as LinkedIn. In `needs_review`, prefer
+   native Continue and let actual employer validation identify missing answers.
+   Question/answer history is captured during filling and advancement.
+7. At authorized Review, submit immediately through the shared boundary. Do not
+   search for or verify the resume again, even if attachment evidence is absent
+   from the runner or upload ledger. The runner arms confirmation capture,
+   records intent and submits once.
    It captures native and Simplify confirmation with the actual source and applies
    the profile's accepted sources. Valid post-submit routes can be inspected even
    after Workday's form step disappears. Follow the shared bounded inspection and
-   reconciliation procedure when evidence remains uncertain.
+   reconciliation procedure when evidence remains uncertain. Same-site
+   `jobTasks/completed/application` is an accepted read-only completion route.
+   Fresh Simplify "Application Submitted!" is sufficient when its source is
+   authorized; finish without another review or email wait.
 8. `applied`: read the report; do not submit or finish again. `already_applied`
    requires exact native evidence and no new submit. `submission_unknown` allows
    observation/reconciliation only. `ready_for_review` applies only in review mode.

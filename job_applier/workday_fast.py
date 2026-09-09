@@ -30,6 +30,8 @@ def choose(observed, state):
         if enabled('autofill') and state.get('fills', 0) < 2:
             return 'retry' if state.get('fills', 0) else 'autofill'
         return 'blocked'
+    if observed.get('status')=='needs_review' and native.get('continue',{}).get('enabled'):
+        return 'native_continue'
     if enabled('continue'):
         return 'continue'
     if native.get('continue', {}).get('enabled'):
@@ -285,8 +287,6 @@ class FastRunner:
                 if action=='submit':
                     if self.settings.get('submission_mode')!='submit':
                         return self.report('ready_for_review',observed,'submission_not_authorized')
-                    if not self.state.get('resume_attached'):
-                        return self.report('blocked',observed,'approved_resume_not_observed')
                     from .submission import submit
                     async def activate():
                         fresh=await self.observe()
@@ -305,6 +305,13 @@ class FastRunner:
                 fresh=await self.observe()
                 if fresh.get('step')!=step or choose(fresh,dict(page_state,submit_intent=self.state['submit_intent']))!=action:
                     self.last=None; continue
+                if action in ('continue','native_continue'):
+                    from .application_answers import capture_answers
+                    history=await capture_answers(self.page,self.config,self.package,self.owner,page=step)
+                    if history.get('answers_added'):
+                        self.event('checkpoint',{'operation':'answer_history','page':step,'source':'employer_form','evidence':history['answer_history_path']})
+                    if history.get('answer_history_error'):
+                        self.event('recovery',{'operation':'answer_history','error_type':history['answer_history_error'],'evidence':'Answer history capture failed; form action has not been replayed'})
                 aid=str(uuid.uuid4()); t0=self.clock(); success=False
                 self.owned('action_start',action_id=aid,tool_name='workday_fast.'+action)
                 try:

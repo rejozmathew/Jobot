@@ -3,6 +3,7 @@
 No model lives here. The dashboard and external HTTP integration are optional.
 """
 from contextlib import closing
+from datetime import datetime,timezone
 import json
 from pathlib import Path
 import re
@@ -253,6 +254,13 @@ def browser_action(config,client,ownership,package,target_id,params):
         browser=await CDPBrowser.connect(config['cdp_url'],target_id=target_id,expected_mode=config.get('browser_mode','headed'))
         try:
             page=await browser.get_current_page();url=await page.evaluate('location.href')
+            async def remember_answers(page_name='form',source='employer_form'):
+                from .application_answers import capture_answers
+                history=await capture_answers(page,config,package,ownership,page=page_name,source=source,basis=params.get('answer_basis'))
+                if history.get('answers_added'):
+                    client.call('event',**ownership,event_id=uid(),event_type='checkpoint',observed_at=datetime.now(timezone.utc).isoformat(),
+                        payload={'operation':'answer_history','source':source,'page':page_name,'evidence':history['answer_history_path']})
+                return history
             pending=bool(package['attempt'].get('submit_intent_at'))
             if not is_same_application_scope(package['job']['url'],url) and not (
                 (reads or method=='submit') and ((pending and is_post_submit_scope(package['job']['url'],url)) or is_workday_candidate_home(package['job']['url'],url))):
@@ -320,7 +328,9 @@ def browser_action(config,client,ownership,package,target_id,params):
                 await page.press_key(params['key']);succeeded=True;return {'pressed':True}
             if method in ('fill','select','check','press'):
                 result=await form_action(page,params)
-                succeeded=bool(result.get('committed') or result.get('pressed'));return result
+                succeeded=bool(result.get('committed') or result.get('pressed'))
+                if succeeded and method!='press':result.update(await remember_answers(source='executor_'+method))
+                return result
             if method=='apply_policy':
                 from .application_answers import apply_policy
                 result=await apply_policy(page,package,await observe(page,package),posted_range=params.get('salary_range'))
@@ -335,18 +345,26 @@ def browser_action(config,client,ownership,package,target_id,params):
                 from .simplify_boundary import CLICK
                 observed=await observe(page,package)
                 if params.get('page_signature')!=observed.get('page_signature'):return {'execution':'not_executed','reason':'stale_screen'}
+                if not observed.get('auth'):
+                    await remember_answers(page_name=observed.get('step','form'))
                 if params.get('source')=='simplify':
                     control=next((c for c in observed.get('simplify_inventory',[]) if c['ref']==params['ref']),None)
                     if not control:return {'execution':'not_executed','reason':'stale_control'}
                     if control['operation']=='sign_in':return {'execution':'not_executed','reason':'use_scoped_simplify_sign_in_with_credential_evidence'}
                     result=await page.evaluate_function(CLICK,{'ref':control['ref'],'operation':control['operation'],'url':observed['url'],'page_ref':observed.get('page_ref')})
                 else:result=await page.click_observed(POINTER,{'ref':params['ref'],'step':observed['step'],'page_signature':observed['page_signature']})
-                succeeded=bool(result.get('clicked') or result.get('status')=='clicked');return result
+                succeeded=bool(result.get('clicked') or result.get('status')=='clicked')
+                if succeeded and params.get('source')!='simplify' and not observed.get('auth'):
+                    result.update(await remember_answers(page_name=observed.get('step','form'),source='executor_click'))
+                return result
             selector=params.get('selector')
             if not isinstance(selector,str) or not selector:raise ProtocolError('observed_selector_required')
             if method=='click':
+                await remember_answers()
                 result=await page.click_observed(POINTER,{'selector':selector,'expected_url':url})
-                succeeded=result.get('clicked') is True;return result
+                succeeded=result.get('clicked') is True
+                if succeeded:result.update(await remember_answers(source='executor_click'))
+                return result
             if method=='upload':
                 from .managed_documents import local_asset_path
                 asset=next((a for a in package['documents']['assets'] if a['id']==params['asset_id']),None)

@@ -10,6 +10,15 @@ def test_candidate_home_is_read_scope_only():
     assert not identity.is_same_application_scope(JOB,'https://tenant.wd1.myworkdayjobs.com/en-US/Jobs/candidateHome')
 
 
+def test_completed_application_route_is_read_only_and_tenant_scoped():
+    completed='https://tenant.wd1.myworkdayjobs.com/en-US/Jobs/jobTasks/completed/application'
+    assert identity.is_post_submit_scope(JOB,completed)
+    assert not identity.is_same_application_scope(JOB,completed)
+    assert not identity.is_post_submit_scope(JOB,completed.replace('/Jobs/','/Other/'))
+    assert not identity.is_post_submit_scope(JOB,completed.replace('/completed/','/pending/'))
+    assert not identity.is_post_submit_scope(JOB,completed+'?access_token=secret')
+
+
 def test_other_site_host_and_sensitive_redirect_not_confirmation_scope():
     assert hasattr(identity,'is_workday_candidate_home')
     for url in ['https://tenant.wd1.myworkdayjobs.com/en-US/Other/candidateHome',

@@ -1,9 +1,66 @@
-"""Explicit candidate answer preferences shared by every ATS and executor."""
+"""Shared candidate answer preferences and private application answer history."""
 import json
 import math
 import re
+from datetime import datetime,timezone
+from pathlib import Path
+from urllib.parse import urlsplit
 
 POLICY_KEYS={'salary_expectation','routine_privacy_consent','submission_evidence_sources'}
+
+
+def save_answer_history(config,package,attempt_id,answers,*,page,source,basis=None):
+    """Private question/answer history, separate from redacted operational telemetry."""
+    from .managed_redaction import reject_secrets
+    if not config.get('spool_dir'):return {}
+    folder=Path(config['spool_dir'])/'answers'
+    if not folder.is_absolute():raise ValueError('absolute_spool_required')
+    path=folder/('attempt-'+str(int(attempt_id))+'.json')
+    job=package['job'];attempt=package.get('attempt',{})
+    history=json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {
+        'attempt_id':attempt_id,'session_id':attempt.get('local_session_id'),
+        'company':job.get('company'),'job_title':job.get('title'),'job_id':job.get('id'),
+        'job_url':job['url'],'platform':package.get('platform'),
+        'portal_namespace':package.get('namespace') or urlsplit(job['url']).hostname,'answers':[]}
+    if history['attempt_id']!=attempt_id or history['job_url']!=package['job']['url']:
+        raise ValueError('answer_history_scope_mismatch')
+    metadata_changed=False
+    for key,value in {'company':job.get('company'),'job_title':job.get('title'),
+                      'company_source':job.get('company_source'),'session_id':attempt.get('local_session_id')}.items():
+        if value and not history.get(key):history[key]=value;metadata_changed=True
+    added=0
+    for answer in answers:
+        row={key:answer.get(key,'') for key in ('field','question','answer')}
+        if any(not isinstance(v,str) or not v.strip() for v in row.values()):continue
+        if re.search(r'password|passwd|\botp\b|token|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card',row['question']+' '+row['field'],re.I):continue
+        row.update(page=answer.get('page') or page,source=source,answer_basis=basis or 'not_recorded')
+        try:reject_secrets(row)
+        except ValueError:continue
+        previous=next((r for r in reversed(history['answers']) if r['page']==row['page'] and r['field']==row['field'] and r['question']==row['question']),None)
+        if previous and previous['answer']==row['answer']:continue
+        row['observed_at']=datetime.now(timezone.utc).isoformat()
+        history['answers'].append(row);added+=1
+    if added or metadata_changed and path.is_file():
+        folder.mkdir(parents=True,exist_ok=True)
+        temporary=path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(history,indent=2,ensure_ascii=False),encoding='utf-8');temporary.replace(path)
+    return {'answer_history_path':str(path),'answers_added':added} if path.is_file() else {}
+
+
+async def capture_answers(browser_page,config,package,ownership,*,page='form',source='employer_form',basis=None):
+    # Called during filling/advancement, never as an extra final-review pass.
+    if not config.get('spool_dir'):return {}
+    from .browser_controls import FORM
+    try:
+        captured=await browser_page.evaluate_function(FORM,{'method':'answers','page':page})
+        context=captured.get('context',{});job=dict(package['job'])
+        if not job.get('company') and context.get('company'):
+            job.update(company=context['company'],company_source=context.get('source'))
+        if not job.get('title') and context.get('job_title'):job['title']=context['job_title']
+        return save_answer_history(config,dict(package,job=job),ownership['attempt_id'],captured['answers'],page=page,source=source,basis=basis)
+    except Exception as exc:
+        # An audit failure must not disguise an executed form write as retryable.
+        return {'answer_history_error':type(exc).__name__}
 
 
 def approved_policy(value):
