@@ -6,6 +6,9 @@
   const found=scope.controls.get(args.ref);
   if(!found || found.kind!==args.operation || !found.element.isConnected)
     return {status:'stale',reason:'control_changed',clicked:false};
+  if(scope.workday&&found.kind!=='stop'&&found.kind!=='other'&&
+      (scope.nativeAuthenticationRequired?.()||['sign_in','create_account','create_account_autofill'].includes(found.kind)))
+    return {status:'native_authentication_required',reason:'workday_native_authentication_required',clicked:false};
   // Click path root validation: control must be rooted in an active Simplify host
   const el=found.element;
   const rootNode=typeof el.getRootNode==='function'?el.getRootNode():found.root;

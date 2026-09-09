@@ -354,14 +354,17 @@ class CDPPage:
         await self._session.call('Input.dispatchMouseEvent', dict(type='mouseMoved', x=point['x'], y=point['y']))
         fresh = await self.evaluate_function(validator, prepared)
         if not isinstance(fresh, dict) or not fresh.get('pointer_ready') or any(fresh[k]!=point[k] for k in ('x','y')):
-            return {'clicked':False,'execution':'not_executed','reason':'control_changed_before_press'}
+            failed=fresh if isinstance(fresh,dict) else {}
+            return dict(failed,clicked=False,execution='not_executed',
+                reason=failed.get('reason','control_changed_before_press'))
         params = dict(x=point['x'], y=point['y'], button='left', clickCount=1)
         try:
             await self._session.call('Input.dispatchMouseEvent', dict(params, type='mousePressed', buttons=1))
             await self._session.call('Input.dispatchMouseEvent', dict(params, type='mouseReleased', buttons=0))
         except Exception:
             return {'clicked':False,'execution':'possibly_executed','reason':'pointer_dispatch_unconfirmed'}
-        return {'clicked':True,'execution':'clicked','activation':'browser_pointer','outcome_verified':False}
+        return {'clicked':True,'execution':'clicked','activation':'browser_pointer','outcome_verified':False,
+            **{key:fresh[key] for key in ('credentials_verified_before_click','credentials_refilled_before_click') if key in fresh}}
 
     async def query_selector_all(self, selector: str) -> list[CDPElement]:
         res = await self._session.call("Runtime.evaluate", {

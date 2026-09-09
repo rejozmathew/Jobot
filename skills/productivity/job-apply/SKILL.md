@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.4.9
+version: 0.5.0
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -86,6 +86,10 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    coordinates this candidate/portal account. Click the observed native action
    through `browser`. For Workday, the fast runner handles the normal account
    sequence automatically; use manual recovery only for its specific exception.
+   Workday creation/sign-in always use these native controls and the retained
+   credential filler. Resume Simplify once the application form opens. Its
+   account autofill can substitute a generated password; a credential reference
+   does not establish what Simplify will type.
    Record `creation_pending` before the create action, `created_unverified` on
    employer-confirmed creation, and `confirmed` after verified sign-in. Persist
    the non-secret `credential_ref` returned by the filler; never invent one.
@@ -135,7 +139,7 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    `snapshot` now combines native and official Simplify controls, their observed
    refs, account strategy and current activity/errors. For an observed button,
    `browser click` also accepts `source`, `ref`, and `page_signature` from that
-   inventory. No custom DOM-discovery code is needed. Simplify employer sign-in
+   inventory. No custom DOM-discovery code is needed. On other ATSs, Simplify employer sign-in
    uses `browser simplify` with `action:sign_in` and non-secret
    `credential_evidence` establishing retained credential use. An enabled button
    alone is not that evidence, and Simplify's own login is a separate operation.

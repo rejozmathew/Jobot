@@ -23,6 +23,12 @@ def arm_account(r,mode,reference):
 def settle_account(r,mode,click):
     state=r.state.setdefault('authentication',{});execution=click.get('execution','possibly_executed')
     state['last_dispatch']=dict(click,mode=mode)
+    if click.get('credentials_verified_before_click'):
+        r.event('field_verified',{'phase':'authentication','source':'Retained private credential',
+            'credential_ref':state.get('credential_ref'),
+            'activity':'Configured credentials rechecked immediately before native pointer dispatch',
+            'credentials_verified_before_click':True,
+            'credentials_refilled_before_click':click.get('credentials_refilled_before_click',False)})
     if execution=='not_executed':
         if mode=='create_account':
             record(r,'creation_not_executed',state['credential_ref'],
@@ -59,7 +65,7 @@ def recovery_handoff(reason,observed):
         'observed':{'auth_mode':observed.get('auth_ui',{}).get('mode','unknown'),
                     'native_controls':sorted(observed.get('native',{}))},
         'next_operation':{'operation':'browser','parameters':{'method':'screenshot'}},
-        'instruction':'Keep this session open. Use the returned combined screen inventory to map the whole logical screen once, then pass recovery to fast_forward. Its mapped private fill/action is authoritative and does not rerun the failed matcher. Inspect an owned screenshot only for remaining ambiguity. Use native sign-in with retained credentials, or Simplify employer sign-in only when its credential use is established. A helper recognition miss is not an employer blocker. Do not repeat an uncertain account action or edit helpers during this application.'}
+        'instruction':'Keep this session open. Use the returned combined screen inventory to map the whole logical screen once, then pass recovery to fast_forward. Its mapped private fill/action is authoritative and does not rerun the failed matcher. Inspect an owned screenshot only for remaining ambiguity. Use native sign-in with retained credentials, then resume Simplify on the application form. A credential reference does not establish which password Simplify uses. A helper recognition miss is not an employer blocker. Do not repeat an uncertain account action or edit helpers during this application.'}
 
 
 async def recover_screen(r,mapping):
@@ -105,10 +111,10 @@ async def recover_screen(r,mapping):
     if mode and not credentials:return stopped('mapped_private_credentials_required')
     if credentials and ui.get('credential_rejected'):return stopped('workday_credentials_rejected')
     if source=='simplify':
+        if observed.get('auth') or observed.get('native_authentication_required') or control.get('operation')=='sign_in':
+            return stopped('workday_native_authentication_required')
         if r.settings.get('autofill','simplify')!='simplify':return stopped('simplify_disabled_by_configuration')
         if control.get('operation') not in ('autofill','continue','start','sign_in'):return stopped('use_observed_browser_control')
-        if control.get('operation')=='sign_in' and (not credentials or not mapping.get('credential_evidence') or screen['simplify']['login_kind']!='employer'):
-            return stopped('retained_credential_use_unverified')
     if observed.get('auth'):
         if not r.account_lock:return stopped('workday_account_coordination_unavailable')
         r.account_lock()
@@ -147,6 +153,7 @@ async def recover_screen(r,mapping):
                 r.event('checkpoint',{'operation':'answer_history','page':fresh.get('step','form'),'source':'mapped_recovery','evidence':history['answer_history_path']})
         if mode and mode==ui.get('mode'):
             arm_account(r,mode,filled['credential_ref']);dispatched_mode=mode
+            fresh['credential_token']=filled.get('credential_token')
         # Persist uncertainty BEFORE the browser call; a lost response is not replayed.
         steps[key]='possibly_executed';r.persist();execution='possibly_executed'
         if source=='simplify':
@@ -204,6 +211,12 @@ async def advance_auth(r,observed):
     for flag,reason in (('challenge','workday_verification_required'),('credential_rejected','workday_credentials_rejected'),
                         ('unknown_required_consent','workday_consent_needs_inspection')):
         if ui.get(flag):return result(reason)
+    if ui.get('mode','unknown')=='unknown' and state.get('submitted') and not state.get('complete'):
+        # Creation can briefly replace the whole document with a blank login
+        # route. Keep that ordinary transition in native auth instead of
+        # handing a missing Simplify panel back as an application-form failure.
+        if r.clock()-state.get('submitted_at',float('-inf'))<5:return result(status='waiting')
+        return result('workday_auth_controls_unrecognized')
     if not r.account_lock:return result('workday_account_coordination_unavailable')
     if not r.config.get('credential_profile_path'):return result('configured_credentials_unavailable')
     gate=await asyncio.to_thread(r.owned,'browser_observe',target_id=r.target,cdp_url=r.config.get('cdp_url'))
@@ -258,6 +271,7 @@ async def advance_auth(r,observed):
             if observed.get('auth_ui',{}).get('mode')!=mode:return result('workday_auth_page_changed_during_fill')
             if not observed.get('native',{}).get(action,{}).get('enabled'):
                 return result('workday_auth_submit_disabled_after_fill')
+            observed['credential_token']=filled.get('credential_token')
             arm_account(r,mode,filled['credential_ref']);dispatched_mode=mode
         tried.append(key);r.persist()
         r.event('phase_changed',{'phase':'authentication','activity':{

@@ -8,7 +8,7 @@ checks and unresolved acceptance are in [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_
 The [first-principles stop-condition audit](STOP_CONDITION_AUDIT.md) challenges
 the necessity and placement of the restrictions described here. It distinguishes
 current behavior from proposed simplification and includes a source catalog and
-read-only historical incidence. Audit recommendations are not yet implementation.
+read-only historical incidence, followed by the implemented changes and validation.
 
 The existing runner connects native/extension observations to mapped recovery.
 Per-application outcomes and detailed diagnoses are retained in the managed
@@ -81,6 +81,28 @@ check for pending creation, including a prior attempt, without recreating the
 account. The native email chooser can recur once after creation. Employer
 evidence establishes `created_unverified` or `confirmed`. Screen handoffs include
 state, timestamps and last attempt ID.
+
+Workday account creation and sign-in use the native retained-credential routine.
+The shared Simplify observer/click boundary routes Workday authentication back to
+`fast_forward`; a `credential_evidence` string cannot authorize extension account
+filling. Stop/Cancel still settles an active extension operation. The runner keeps
+the short blank-page transition after account creation in authentication and
+returns application pages to Simplify after verified sign-in. This fixes the
+attempt-34 recovery path: the executor supplied a credential reference to
+Simplify's Sign In & Autofill, which does not establish the password it uses.
+The existing private filler also retains a document-local credential receipt.
+Routine and mapped Workday auth pass its opaque token to native activation.
+The shared pointer validator rechecks and, if necessary, restores the retained
+values after hover, immediately before the mouse press. The CDP result, account
+checkpoint, helper report and timeline retain only match/refill booleans. No
+password, password hash or reusable credential value enters those records.
+This closes a reproduced late-autofill gap; it does not prove that Simplify
+overwrote the password in the historical attempt.
+Synthetic regressions cover native creation/sign-in across a blank transition,
+rejection of extension credential references, a login form appearing between
+observation and click, and credential replacement after fill or hover while
+preserving case-insensitive email matching. Validation: 671 managed tests passed, with four dependency
+deprecation warnings; this does not establish live employer sign-in acceptance.
 
 Job identity and browser ownership are distinct. The shared Workday parser uses
 host, career site and the complete requisition (including suffixes such as
@@ -562,9 +584,11 @@ click helper accept those exact mappings. fast_forward recovery performs a bound
 mapped fill/verify/action/observe step in its existing connection, then resumes
 routine execution. Mapped decisions and possibly-executed actions persist in the
 existing private checkpoint; actual authenticated form access confirms the account.
-No new service, migration or execution framework is involved. Simplify sign-in is
-callable, distinguishes employer from extension login and requires separate
-evidence of retained credential use. Enabled controls alone do not establish it.
+No new service, migration or execution framework is involved. Workday sign-in
+uses native retained credentials; the shared Simplify click path rechecks for
+authentication before acting. Simplify account actions and a credential-reference
+string cannot replace that routine. The older Simplify sign-in interface remains
+for other ATSs and distinguishes employer from extension login.
 Settled unrecognized UI returns actionable context promptly; writer uncertainty
 remains an observation-only condition. Accepted mapped-step counts are recorded,
 but are not a measurement of every model interpretation outside this interface.

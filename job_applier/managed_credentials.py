@@ -48,6 +48,7 @@ async def capture_private_screenshot(page,path):
 
 
 FILL_SELECTED = r"""async (args) => {
+ delete window.__jobbotCredentialReceipt;
  const result={email_filled:false,passwords_filled_count:0,
    confirmation_present:!!args.confirmation_ref,values_committed:false,
    account_mode:args.confirmation_ref?'create-account':'sign-in',error:null};
@@ -90,6 +91,33 @@ FILL_SELECTED = r"""async (args) => {
  }
   result.values_committed=selected.every(({role,e,value})=>e.isConnected&&(role==='email'?e.value.toLowerCase()===value.toLowerCase():e.value===value));
  if(!result.values_committed)result.error='values_not_committed';
+ if(result.values_committed){
+   // A private, document-local receipt lets native activation recheck the same
+   // approved values after observation, ledger writes and pointer hover. Values
+   // remain in this closure; only an opaque token and booleans leave the page.
+   const token=crypto.randomUUID(),url=location.href;
+   const password=selected.find(x=>x.role==='password').e;
+   const root=password.closest('[role="dialog"]')||password.closest('form')||document;
+   const matches=({role,e,value})=>e.isConnected&&(role==='email'?e.value.toLowerCase()===value.toLowerCase():e.value===value);
+   let refilled=false;
+   window.__jobbotCredentialReceipt={token,verify(control){
+     const safe=location.href===url&&root.contains(control)&&selected.every(({e})=>
+       e.isConnected&&root.contains(e)&&!e.disabled&&!e.readOnly&&e.getBoundingClientRect().width&&
+       e.getBoundingClientRect().height&&getComputedStyle(e).visibility!=='hidden');
+     if(!safe)return {credentials_verified_before_click:false,reason:'credential_controls_changed_before_click'};
+     for(const item of selected){
+       if(matches(item))continue;
+       const {e,value}=item;
+       refilled=true;e.focus();setter.call(e,value);
+       e.dispatchEvent(new Event('input',{bubbles:true}));
+       e.dispatchEvent(new Event('change',{bubbles:true}));e.blur();
+     }
+     const matched=selected.every(matches);
+     return {credentials_verified_before_click:matched,credentials_refilled_before_click:refilled,
+       ...(matched?{}:{reason:'credential_values_changed_before_click'})};
+   }};
+   result.credential_token=token;
+ }
  return result;
 }"""
 

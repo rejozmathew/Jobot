@@ -31,6 +31,7 @@ class SimplifyBoundary:
         result.update(panel=raw.get('panel') is True,status=raw['status'],controls=controls,
             source='fixture' if raw.get('source')=='fixture' else 'observed_dom')
         result['login_kind']=raw.get('login_kind')
+        result['native_authentication_required']=raw.get('native_authentication_required') is True
         result['activity']=raw.get('activity') or {}
         if 'review_count' in raw and (raw['review_count'] is None or isinstance(raw['review_count'], int)):
             result['review_count']=raw['review_count']
@@ -46,6 +47,8 @@ class SimplifyBoundary:
     def decide(observation,already_attempted=False,*,fast=False):
         status=observation.get('status','unknown');controls=observation.get('controls') or {}
         if status=='active':return {'action':'wait','reason':'autofill_active'}
+        if observation.get('native_authentication_required'):
+            return {'action':'fallback','reason':'workday_native_authentication_required'}
         if status in ('unsupported','missing','login_required'):return {'action':'fallback','reason':status}
         if status=='unknown':return {'action':'fallback','reason':'controls_unavailable'}
         if controls.get('autofill_skills',{}).get('enabled'):
@@ -82,6 +85,11 @@ class SimplifyBoundary:
         self.execution='not_executed'
         self.deadline=self.clock()+self.budget
         before=await self.observe();current=before
+        if operation!='stop' and before.get('native_authentication_required'):
+            self.deadline=None
+            return dict(self._result(before,False,'unknown' if before['status'] in ('active','unknown') else 'idle',
+                'workday_native_authentication_required'),
+                instruction='Use fast_forward for native Workday authentication with the retained credential. Resume Simplify after the application form opens.')
         page_key=before.get('page_signature') or before['url']
         if operation=='autofill_skills':
             page_key=(page_key,operation,before['controls'][operation].get('label'))
@@ -137,6 +145,9 @@ class SimplifyBoundary:
                 result=await asyncio.wait_for(self.page.evaluate(CLICK,args),timeout=max(0.05,self.deadline-self.clock()))
                 if not isinstance(result,dict) or result.get('status') not in ('clicked','ok'):
                     if isinstance(result,dict) and result.get('clicked') is False:self.execution='not_executed'
+                    if isinstance(result,dict) and result.get('reason')=='workday_native_authentication_required':
+                        return dict(self._result(before,False,'idle',result['reason']),
+                            instruction='The Workday authentication form appeared. Use fast_forward to sign in natively with the retained credential.')
                     return self._result(before,False,'unknown','stale_or_unconfirmed_control')
                 clicked=True
                 self.execution='clicked'

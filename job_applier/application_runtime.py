@@ -420,7 +420,9 @@ def browser_action(config,client,ownership,package,target_id,params):
                 if params.get('source')=='simplify':
                     control=next((c for c in observed.get('simplify_inventory',[]) if c['ref']==params['ref']),None)
                     if not control:return {'execution':'not_executed','reason':'stale_control'}
-                    if control['operation']=='sign_in':return {'execution':'not_executed','reason':'use_scoped_simplify_sign_in_with_credential_evidence'}
+                    if control['operation']=='sign_in':
+                        return {'execution':'not_executed','reason':'workday_native_authentication_required' if observed.get('native_authentication_required') else
+                            'use_scoped_simplify_sign_in_with_credential_evidence'}
                     from .browser_controls import simplify_document
                     document,extension,local=await simplify_document(page,ref=control['ref'])
                     result=await document.evaluate_function(CLICK,{'ref':local['ref'],'operation':local['operation'],'url':extension['url'],'page_ref':extension.get('page_ref')})

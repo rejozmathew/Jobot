@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.7
+version: 0.3.9
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -38,6 +38,17 @@ runner contains no model and retains one CDP connection during its bounded call.
    It records creation pending before clicking, saves employer-confirmed creation,
    and confirms sign-in only when the application form actually opens. It then
    returns to Simplify. Later calls sign in for a confirmed/created account.
+   Workday account creation and sign-in use the native private credential filler
+   and native controls. Do not use Simplify's **Sign In & Autofill**, **Sign In**
+   or account autofill on those pages: it can substitute its generated password.
+   A saved `credential_ref` is only a lookup key, not evidence of Simplify's
+   password. After creation, let the login page load and call the runner again;
+   it fills the retained email/password and clicks native Sign In before resuming
+   Simplify on the application form.
+   Native activation rechecks those values after pointer hover and restores the
+   retained values if another filler replaced them. The returned `credential_check`
+   reports match/refill booleans without exposing passwords. These describe the
+   check immediately before dispatch; employer acceptance is separate evidence.
    For pending creation, including an earlier attempt, use retained credentials
    for a bounded sign-in check. Workday may return to Sign In without a creation
    confirmation. Keep the account pending until authentication is verified;
@@ -69,7 +80,7 @@ runner contains no model and retains one CDP connection during its bounded call.
    reconcile the account evidence; do not start another creation attempt.
    Follow the returned `recovery` handoff: inspect `browser screenshot` using
    the current executor's image capability, pair with `browser snapshot` for
-   observed selectors, and use supported native controls or settled Simplify.
+   observed selectors, and use the native authentication controls.
    Report possible changed/unsupported controls distinctly from rejected
    credentials or a verification challenge. After recovery, call the runner again;
    record the mismatch for a later helper update, never an in-run code patch.
@@ -90,10 +101,11 @@ runner contains no model and retains one CDP connection during its bounded call.
    action uncertainty before clicking and updates account/helper state on actual
    authentication. A lost click response does not authorize replay.
 
-   When Simplify is enabled, consider its current controls from authentication
-   onward. Use native sign-in with retained credentials unless Simplify's use of
-   those credentials is established. A mapped Simplify sign-in additionally needs
-   non-secret `credential_evidence`; Simplify login is distinct from employer login.
+   Resume Simplify after native authentication opens the application form.
+   `workday_native_authentication_required` directs the executor back to
+   `fast_forward` or mapped native credentials/sign-in on this same session;
+   it is not an application blocker. Simplify's Stop/Cancel remains available
+   to settle an accidentally started extension account step before native work.
    Inspect the installed extension's settings once: retain supervised page-by-page
    operation and never enable continuous execution that can submit outside the
    existing submission boundary. Do not turn settings inspection into a project.

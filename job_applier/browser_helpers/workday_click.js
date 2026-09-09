@@ -42,6 +42,15 @@
   return {values_committed:selected.every(({e,value})=>e.isConnected&&(['checkbox','radio'].includes(e.type)?e.checked:e.value)===value),execution:'fields_written'};
  }
  if(!el||!el.isConnected||el.disabled||el.getAttribute('aria-disabled')==='true')return {clicked:false,reason:'stale_control'};
+ let credentialCheck={};
+ if(args.credential_token){
+  const receipt=window.__jobbotCredentialReceipt;
+  if(!receipt||receipt.token!==args.credential_token)
+   return {clicked:false,execution:'not_executed',reason:'credential_receipt_unavailable'};
+  credentialCheck=receipt.verify(el);
+  if(!credentialCheck.credentials_verified_before_click)
+   return {...credentialCheck,clicked:false,execution:'not_executed'};
+ }
  if(args.prepare_pointer&&!args.recheck_pointer)el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
  const r=el.getBoundingClientRect();
  if(!r.width||!r.height)return {clicked:false,reason:'hidden_control'};
@@ -53,12 +62,12 @@
   let covering=null;
   for(const [fx,fy] of points){
    const x=left+(right-left)*fx,y=top+(bottom-top)*fy,hit=document.elementFromPoint(x,y);
-   if(hit&&(hit===el||el.contains(hit)))return {pointer_ready:true,x,y};
+   if(hit&&(hit===el||el.contains(hit)))return {pointer_ready:true,x,y,...credentialCheck};
    if(!covering&&hit)covering={tag:hit.tagName,role:hit.getAttribute('role'),
      simplify:!!hit.closest('.simplify-jobs-shadow-root,[id*="simplify"]')};
   }
   return {clicked:false,reason:'control_obscured',execution:'not_executed',
     bounds:{left:r.left,top:r.top,width:r.width,height:r.height},viewport:{width:innerWidth,height:innerHeight},covering};
  }
- el.click();return {clicked:true,execution:'clicked'};
+ el.click();return {clicked:true,execution:'clicked',...credentialCheck};
 }

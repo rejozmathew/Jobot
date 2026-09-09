@@ -2,12 +2,21 @@
 (async () => {
   const visible = el => { const r=el.getBoundingClientRect(); return r.width>0 && r.height>0 && getComputedStyle(el).visibility!=='hidden'; };
   const publicUrl=location.origin+location.pathname;
+  const workday=/^https:\/\/[^/]+\.myworkdayjobs\.com\//i.test(publicUrl);
   let hosts=Array.from(document.querySelectorAll('.simplify-jobs-shadow-root'));
   if(!hosts.length && document.querySelector('.simplify-jobs-shadow-root')) hosts=[document.querySelector('.simplify-jobs-shadow-root')];
   const roots=hosts.map(h=>h && (h.shadowRoot || (h.tagName ? h : null))).filter(Boolean);
   let scope=window.__jobbotSimplifyScope;
   if(!scope || scope.url!==location.href) scope=window.__jobbotSimplifyScope={url:location.href,id:crypto.randomUUID(),controls:new Map()};
   scope.controls=new Map();
+  // Employer credentials belong to the native Workday account routine. Recheck
+  // the live form at click time too: it can appear after an extension snapshot.
+  scope.workday=workday;
+  scope.nativeAuthenticationRequired=()=>workday&&(/\/login\/?$/i.test(location.pathname)||
+    [...document.querySelectorAll('input[type="password"],button,a,[role="button"]')].some(e=>
+      visible(e)&&!e.closest?.('.simplify-jobs-shadow-root,[hidden]')&&
+      (e.type==='password'||e.getAttribute('data-automation-id')==='SignInWithEmailButton'||
+       /^sign in with e-?mail$/i.test((e.getAttribute('aria-label')||e.textContent||'').trim()))));
   scope.referenceKeys=scope.referenceKeys||new Map();
   const reference=key=>{if(!scope.referenceKeys.has(key))scope.referenceKeys.set(key,crypto.randomUUID());return scope.referenceKeys.get(key);};
   scope.fieldValues=scope.fieldValues||new Map();
@@ -178,6 +187,8 @@
     if(declared && ['ready','active','complete','needs_review','unsupported','login_required'].includes(declared)) status=declared;
   }
   return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,inventory,login_kind,
+    native_authentication_required:scope.nativeAuthenticationRequired()||workday&&
+      ['sign_in','create_account','create_account_autofill'].some(k=>controls[k].enabled),
     panel_text:roots.map(getRenderedText).join(' ').replace(/\s+/g,' ').slice(0,2200),
     review_count:reviewCount,writer_safe:status!=='active'&&status!=='unknown',activity,
     source:fixture?'fixture':'observed_dom',field_summary:{visible:fields.length,required:fields.filter(x=>x.required).length,invalid:fields.filter(x=>x.invalid).length}};

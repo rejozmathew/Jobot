@@ -7,7 +7,8 @@ def choose(observed, state):
         return 'confirm_only'
     if observed.get('status') == 'active':
         return 'wait'
-    if observed.get('auth'):
+    if observed.get('auth') or observed.get('native_authentication_required') or (
+        state.get('authentication_pending') and observed.get('step','unknown')=='unknown'):
         return 'authentication_required'
     if observed.get('status') == 'unknown':
         return 'wait'
@@ -100,7 +101,7 @@ def screen_inventory(observed,package):
                     'login_kind':observed.get('login_kind'),'controls':observed.get('simplify_inventory',[]),
                     'text':observed.get('panel_text',''),'credential_use':'unverified'},
         'account':{k:account.get(k) for k in ('action','namespace','credential_ref','state','created_at','last_attempt_id','last_action_at','creation_confirmed')},
-        'instruction':'Map the required fields and next action together. Call fast_forward with recovery:{screen_key, credentials:{email_ref,password_ref,confirmation_ref?}, fields:[{ref,value}], action:{source:native|simplify,ref}, account_mode:sign_in|create_account if submitting auth}. Different observed controls can support further recovery on this screen. Omit unused fields. All refs come from this inventory. A Simplify employer sign-in also needs credential_evidence establishing retained credential use. Never send secrets or use recovery for final Submit.'}
+        'instruction':'Map the required fields and next action together. Call fast_forward with recovery:{screen_key, credentials:{email_ref,password_ref,confirmation_ref?}, fields:[{ref,value}], action:{source:native|simplify,ref}, account_mode:sign_in|create_account if submitting auth}. Workday authentication always uses native controls and the private retained credential filler; resume Simplify after the application form opens. Different observed controls can support further recovery on this screen. Omit unused fields. All refs come from this inventory. Never send secrets or use recovery for final Submit.'}
 
 
 class FastRunner:
@@ -156,6 +157,7 @@ class FastRunner:
         if not control.get('enabled') or not control.get('ref'):return False
         args={'ref':control['ref'],'step':observed['step']} if native else {
             'ref':control['ref'],'url':observed['url'],'page_ref':observed.get('page_ref'),'operation':operation}
+        if native and observed.get('credential_token'):args['credential_token']=observed['credential_token']
         result=await self.page.click_observed(WORKDAY_CLICK,args) if native else await self.page.evaluate_function(CLICK,args)
         self.last_click_execution=result.get('execution','possibly_executed') if isinstance(result,dict) else 'possibly_executed'
         self.last_click_result=result if isinstance(result,dict) else {'execution':'possibly_executed','reason':'click_result_unavailable'}
@@ -169,6 +171,9 @@ class FastRunner:
                 'blocking_errors':observed.get('blocking_errors',[]),
                 'auth_refs':observed.get('auth_refs',{}) if status=='authentication_required' else {},
                 'metrics':self.state.get('metrics',{}),'target_id':self.target,
+                'credential_check':{key:self.state.get('authentication',{}).get('last_dispatch',{}).get(key)
+                    for key in ('credentials_verified_before_click','credentials_refilled_before_click')
+                    if key in self.state.get('authentication',{}).get('last_dispatch',{})},
                 'page_decisions':self.state.get('page_decisions',0),
                 **({'diagnostic_error':self.state['diagnostic_error']} if self.state.get('diagnostic_error') else {}),
                 **({'screen':screen_inventory(observed,self.package)} if observed and status in ('authentication_required','blocked','inspection_required') else {}),
@@ -242,8 +247,10 @@ class FastRunner:
                     self.pending=None
                 page_state['account_action']=(self.package.get('account') or {}).get('action')
                 page_state['account_state']=(self.package.get('account') or {}).get('state')
+                authentication=self.state.get('authentication',{})
+                page_state['authentication_pending']=bool(authentication.get('submitted') and not authentication.get('complete'))
                 action=choose(observed,dict(page_state,submit_intent=self.state['submit_intent']))
-                if observed.get('status')=='unknown' and not observed.get('auth'):
+                if observed.get('status')=='unknown' and action!='authentication_required':
                     gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
                     if gate.get('quiescent'):
                         return self.report('inspection_required',observed,'settled_screen_unrecognized')
