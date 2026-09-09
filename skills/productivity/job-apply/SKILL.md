@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.0
+version: 0.5.1
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -288,7 +288,15 @@ Pause/stop acknowledgement means the host stopped its owned browser activity.
 Pending control is not acknowledgement. Attach by another driver requires that
 pause to finish, then starts a fresh owned target; it does not inherit the old
 page ID. Retry creates a new attempt only after scoped stop/reconciliation and
-no uncertain submission. Heartbeats report activity and never extend local
+no uncertain submission. For all ATS types, a new session on a previously
+attempted job clears the assigned employer origin's cookies and site storage
+before opening it. This also applies to a new request/conversation and queued
+answer retries. Simplify's separate login and extension state remain; the
+runtime does not create a completely empty profile or clear unrelated identity
+providers. Readiness records the cleared origin. A paused-attempt attach retains
+browser storage. Account, credential and submission history always survive.
+Changing conversations alone is not a separate browser-isolation mechanism.
+Heartbeats report activity and never extend local
 permission. A normal reasoning gap is allowed; stalled/disconnected activity is
 visible. No progress is inferred from a live host or recent heartbeat.
 

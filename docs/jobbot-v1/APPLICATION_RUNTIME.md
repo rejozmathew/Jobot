@@ -202,6 +202,27 @@ are never adopted or killed. Startup checks endpoint and OS command-line invento
 before launching against a profile. Old profile aliases consult legacy reservations;
 migration guards reject old-version acquisition of locally configured profiles.
 
+New sessions for previously attempted jobs reset the assigned employer origin's
+browser storage before navigating. Session reservation derives
+`fresh_employer_storage` from related job/attempt and stopped-session history, so
+retry commands, queued answer retries and new conversations follow the same rule.
+After verifying its owned browser/profile, the host closes restored page tabs and
+uses the page's [CDP Storage.clearDataForOrigin](https://chromedevtools.github.io/devtools-protocol/tot/Storage/#method-clearDataForOrigin)
+with `storageTypes:all` for the assigned job URL's origin. It records the cleared
+origin in readiness. Cleanup failure stops startup before employer navigation.
+This shared path has no ATS-specific branch; first attempts and paused-attempt
+attachments retain their storage. Simplify's extension and separate login origin
+remain authenticated. Account records, credentials, answers and submission history
+are independent of browser storage and are never reset by retry.
+This is an origin-scoped reset, not a new empty browser profile: unrelated origins,
+including separate third-party identity-provider origins, are preserved.
+
+The two Workday entry dialogs are separate from cookie cleanup. The fast runner
+can select the posting's Sign In control for a recorded account or pending
+creation; Apply opens the application-method chooser. Clearing cookies does not
+change that account strategy, confirm account creation or unlock an employer
+account that rejects manual sign-in.
+
 Pause/stop acknowledgement follows actual owned process-tree termination and
 abortion of active actions. Startup observes pending control before connecting.
 Explicit attach requires completed pause and creates a fresh target for the new
@@ -270,8 +291,8 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | Component | Scope and consumer |
 |---|---|
 | application_runtime.py | Shared high-level startup/control, scoped browser exceptions, history |
-| managed_sessions.py / migration 15 | Existing ledger session/workspace/account coordination and mixed-version guards |
-| workspace_host.py / workspace_process.py | Windows lifetime, readiness, scoped JSON dispatch; no model |
+| managed_sessions.py / migration 15 | Existing ledger session/workspace/account coordination, history-derived retry storage policy and mixed-version guards |
+| workspace_host.py / workspace_process.py | Windows lifetime, readiness, employer-origin cleanup before retry navigation, scoped JSON dispatch; no model |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
 | managed_identity.py | Shared Workday host/site/full-requisition parser, comparison identity, history equivalence, diagnostic match states and job_requisition for confirmation; no display-location/title/step allowlist |

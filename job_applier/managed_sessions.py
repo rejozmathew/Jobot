@@ -85,10 +85,17 @@ class SessionServices:
                 db.execute('UPDATE application_sessions SET workspace_id=?,state=?,reason=?,preparing_at=? WHERE id=?',
                            (selected,state,reason,now if selected else None,sid))
             else:
+                session_metadata=dict(metadata or {})
+                # A new conversation/request can retry the same job without using
+                # the retry command. Derive cleanup from history, not driver IDs.
+                session_metadata['fresh_employer_storage']=bool(db.execute(RELATED+'''SELECT 1 FROM related r
+                    WHERE EXISTS (SELECT 1 FROM application_attempts a WHERE a.job_id=r.id)
+                       OR EXISTS (SELECT 1 FROM application_sessions s WHERE s.job_id=r.id AND s.ended_at IS NOT NULL)
+                    LIMIT 1''',(job_id,)).fetchone())
                 db.execute('''INSERT INTO application_sessions(id,request_id,request_key,job_id,identity_id,
                     driver_id,workspace_id,state,reason,requested_at,preparing_at,driver_seen_at,metadata_json)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                    (sid,request_id,key,job_id,identity_id,driver_id,selected,state,reason,now,now if selected else None,now,dumps(metadata or {})))
+                    (sid,request_id,key,job_id,identity_id,driver_id,selected,state,reason,now,now if selected else None,now,dumps(session_metadata)))
             if selected:
                 run_id=uid();snapshot=dict(settings)
                 # Startup/model gaps are telemetry, not an authorization expiry.

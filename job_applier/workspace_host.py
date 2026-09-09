@@ -176,6 +176,21 @@ class WorkspaceHost:
         browser=await CDPBrowser.connect(endpoint,target_id=target,expected_mode=mode)
         try:
             page=await browser.get_current_page();job=self.service.job(session['job_id'])
+            employer_storage={'status':'retained'}
+            if not session.get('attempt_id') and json.loads(session.get('metadata_json') or '{}').get('fresh_employer_storage'):
+                parsed=urlsplit(job['url']);origin=parsed.scheme+'://'+parsed.netloc
+                try:
+                    # This host owns the entire process. Close restored page tabs
+                    # before clearing so an old application cannot repopulate data.
+                    targets=(await browser_command(endpoint,'Target.getTargets'))['targetInfos']
+                    for old in targets:
+                        if old['type']=='page' and old['targetId']!=target:
+                            closed=await browser_command(endpoint,'Target.closeTarget',{'targetId':old['targetId']})
+                            if not closed.get('success'):raise ProtocolError('restored_page_close_unconfirmed')
+                    await page._session.call('Storage.clearDataForOrigin',{'origin':origin,'storageTypes':'all'})
+                except Exception as exc:
+                    raise ProtocolError('employer_storage_cleanup_failed','Retry did not open the employer page; its prior browser data could not be cleared') from exc
+                employer_storage={'status':'cleared','origin':origin}
             window_state='headless'
             if mode=='headed':
                 try:
@@ -200,6 +215,7 @@ class WorkspaceHost:
                     'instruction':'The owned tab remains available. Inspect snapshot/screenshot, wait for loading, or navigate back to the assigned job.'}
             readiness={'profile_verified':True,'endpoint_verified':True,'target_operable':True,'browser_mode':mode,
                        'simplify':'unverified','observed_at':self.service.now(),'window_state':window_state,
+                       'employer_storage':employer_storage,
                        'viewport':await page.evaluate('({width:innerWidth,height:innerHeight})')}
             if self.config.get('require_simplify',True):
                 from .simplify_boundary import SimplifyBoundary

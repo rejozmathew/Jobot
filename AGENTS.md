@@ -15,5 +15,6 @@
 - Read `docs/jobbot-v1/APPLICATION_RUNTIME.md` for helper responsibilities, shared versus Workday scope, and data ownership before adding another helper.
 - Preserve dirty user changes. Never use live applications as fixtures or alter private production records to make tests pass.
 - Add a focused failing regression, implement the bounded fix, then run the relevant tests and one final suite. Standard managed-suite command: `python -m pytest tests/jobbot_v1 -q`.
+- Commit each completed, validated engineering change as a local Git checkpoint before reporting completion. Do not leave completed changes awaiting a separate commit request; pushing still requires authorization.
 - Keep profiles, credentials, databases, private screenshots/transcripts, lock/checkpoint files and node fixture dependencies out of Git. Use the ignored private artifacts area for deployment-specific configuration.
 - Update the helper map when adding/removing a caller or helper. A new fast path does not prove older helpers unused.
