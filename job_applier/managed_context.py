@@ -16,6 +16,7 @@ class ContextServices:
     def application_context(self,attempt_id,worker_id=None,platform=None,namespace=None):
         with self.tx() as db:
             attempt=dict(self._get(db,'application_attempts',attempt_id))
+            attempt['submission_pending']=self._submission_pending(db,attempt)
             if worker_id is not None and attempt['worker_id']!=worker_id:raise ProtocolError('attempt_forbidden')
             from .managed_sessions import local_session
             session=local_session(db,attempt_id)

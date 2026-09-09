@@ -77,7 +77,7 @@ class QuestionServices:
         key=question_key(data)
         with self.tx() as db:
             attempt=self._owner(db,attempt_id,worker_id,fence)
-            if attempt['submit_intent_at']:raise ProtocolError('submission_pending_read_only')
+            if self._submission_pending(db,attempt):raise ProtocolError('submission_pending_read_only')
             siblings=self._questions(db,attempt['job_id'],attempt['identity_id'])
             for old in siblings:
                 if old['field']==field and old['context']==data['context'] and old['question_key']!=key:
@@ -104,7 +104,7 @@ class QuestionServices:
     def park_questions(self,attempt_id,*,worker_id,fence):
         with self.tx() as db:
             attempt=self._owner(db,attempt_id,worker_id,fence)
-            if attempt['submit_intent_at']:raise ProtocolError('submission_pending_read_only')
+            if self._submission_pending(db,attempt):raise ProtocolError('submission_pending_read_only')
             pending=[q for q in self._questions(db,attempt['job_id'],attempt['identity_id']) if q['state']=='pending']
             if not pending:raise ProtocolError('no_pending_questions')
         result=self.finish(attempt_id,worker_id=worker_id,fence=fence,outcome='blocked',
@@ -157,7 +157,7 @@ class QuestionServices:
         """Live harness bridge. A reply is data; the next browser call rechecks refs."""
         with self.tx() as db:
             attempt=self._owner(db,attempt_id,worker_id,fence)
-            if attempt['submit_intent_at']:raise ProtocolError('submission_pending_read_only')
+            if self._submission_pending(db,attempt):raise ProtocolError('submission_pending_read_only')
             allowed={q['id'] for q in self._questions(db,attempt['job_id'],attempt['identity_id'])}
             if not isinstance(answers,list) or any(not isinstance(a,dict) or a.get('question_id') not in allowed for a in answers):
                 raise ProtocolError('question_context_mismatch')

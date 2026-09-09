@@ -57,6 +57,8 @@ def same_job_url(left, right):
         a, b = urlsplit(canonical_url(left)), urlsplit(canonical_url(right))
     except (ValueError, ProtocolError):
         return False
+    wd_left,wd_right=workday_identity(left),workday_identity(right)
+    if wd_left or wd_right:return bool(wd_left and wd_right and wd_left==wd_right)
     gh_left,gh_right=greenhouse_query_identity(left),greenhouse_query_identity(right)
     if gh_left and gh_right:return gh_left==gh_right
     if any(k=='gh_jid' for p in (a,b) for k,v in parse_qsl(p.query,keep_blank_values=True)):
@@ -79,110 +81,115 @@ def linked_jobs(db, job_id):
     return [r[0] for r in db.execute(RELATED+'SELECT id FROM related',(job_id,))]
 
 
-_ALLOWED_WORKDAY_CHILD_ROUTES = (
-    "",
-    "/apply",
-    "/apply/applyManually",
-    "/apply/autofillWithResume",
-    "/apply/useMyLastApplication",
-    "/apply/success",
-    "/confirmation",
-)
-
 _LOCALE_RE = re.compile(r"^[a-zA-Z]{2}(?:-[a-zA-Z0-9]{2,4})?$")
 
 
-def is_workday_application_scope(job_url: str, candidate_url: str) -> bool:
+def _workday_url(url):
+    """Parse the portal and requisition, never the display title or location."""
+    from urllib.parse import unquote
     try:
-        raw_cand = str(candidate_url).strip()
-        job_p = urlsplit(str(job_url).strip())
-        cand_p = urlsplit(raw_cand)
-        # Encoded separators in a path are ambiguous. In a login redirect query
-        # they are normal URL encoding and must be decoded and validated below.
-        if any(seq in cand_p.path.lower() for seq in ('%2f', '%2e', '%5c')):
-            return False
+        p = urlsplit(canonical_url(url))
+        if p.scheme != 'https' or not (p.hostname or '').endswith('.myworkdayjobs.com'):
+            return None
+        if any(x in p.path.lower() for x in ('%2f', '%2e', '%5c')) or '..' in p.path or '/.' in p.path:
+            return None
+        parts = [unquote(x).casefold() for x in p.path.strip('/').split('/') if x]
+        if parts and _LOCALE_RE.fullmatch(parts[0]) and parts[1:2] not in (['job'],['details'],['login']):parts = parts[1:]
+        return p, parts
+    except (ValueError, ProtocolError):return None
 
-        # HTTPS only on exact same host
-        if job_p.scheme.lower() != 'https' or cand_p.scheme.lower() != 'https':
-            return False
-        if job_p.netloc.lower() != cand_p.netloc.lower():
-            return False
-        if cand_p.username or cand_p.password:
-            return False
 
-        # Reject dot path tricks in candidate path
-        if '..' in cand_p.path or '/.' in cand_p.path:
-            return False
+def workday_identity(url):
+    parsed = _workday_url(url)
+    if not parsed:return None
+    p, parts = parsed
+    if parts[1:] == ['login']:
+        query = parse_qsl(p.query, keep_blank_values=True)
+        if len(query) != 1 or query[0][0].casefold() != 'redirect':return None
+        redirect = query[0][1]
+        if not redirect.startswith('/') or redirect.startswith('//') or '\\' in redirect:return None
+        destination = urlsplit(redirect)
+        if destination.query or destination.fragment:return None
+        route = urlunsplit((p.scheme, p.netloc, destination.path, '', ''))
+        parsed_destination = _workday_url(route)
+        if not parsed_destination or parsed_destination[1][1:2] not in (['job'], ['details']):return None
+        return workday_identity(route)
+    index = 3 if parts[1:2] == ['job'] else 2 if parts[1:2] == ['details'] else None
+    if index is None or len(parts) <= index or '_' not in parts[index]:return None
+    slug = parts[index]
+    # Preserve requisition suffixes such as R100_1; do not mistake its final 1
+    # for the entire requisition. Other Workday IDs use the final slug separator.
+    markers=list(re.finditer(r'_(?:jr|req|r)[-_]?\d',slug))
+    requisition = slug[markers[-1].start()+1:] if markers else slug.rsplit('_', 1)[-1]
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_.-]*', requisition):return None
+    for key, value in parse_qsl(p.query, keep_blank_values=True):
+        if key.casefold() in ('jobid', 'requisitionid', 'reqid') and value.casefold() != requisition:
+            return None
+    return ('workday', p.netloc, parts[0], requisition)
 
-        # Reject sensitive path segments
-        if any(s in cand_p.path.lower() for s in ('reset-password', 'password-reset', 'verify-email', 'oauth/', 'signin/callback')):
-            return False
 
-        # Reject sensitive query parameters
-        cand_query = parse_qsl(cand_p.query, keep_blank_values=True)
-        if any(k.lower() in ('access_token', 'refresh_token', 'otp', 'password', 'reset_token', 'authorization_code') for k, v in cand_query):
-            return False
+def job_identity(url):
+    """One comparison identity; stored URL hashes and historical rows stay intact."""
+    identity = workday_identity(url)
+    if identity:return identity
+    gh = greenhouse_query_identity(url)
+    if gh:return ('requisition_query', gh)
+    return (canonical_url(url),)
 
-        # Parse segments
-        job_segs = [s for s in job_p.path.strip('/').split('/') if s]
-        cand_segs = [s for s in cand_p.path.strip('/').split('/') if s]
-        if any(s in ('.', '..') for s in job_segs + cand_segs):
-            return False
 
-        # Strip optional locale segment
-        if job_segs and _LOCALE_RE.match(job_segs[0]):
-            job_segs = job_segs[1:]
-        if cand_segs and _LOCALE_RE.match(cand_segs[0]):
-            cand_segs = cand_segs[1:]
+def job_requisition(job):
+    """Confirmation consumes the same complete requisition as job ownership."""
+    identity=workday_identity(job['url'])
+    return identity[-1] if identity else job.get('requisition_id') or ''
 
-        # Workday redirects stored lowercase links to mixed-case job paths.
-        # Normalize only this comparison, not stored URLs or other ATS paths.
-        workday_host = (job_p.hostname or '').endswith('.myworkdayjobs.com')
-        if workday_host:
-            job_segs = [s.casefold() for s in job_segs]
-            cand_segs = [s.casefold() for s in cand_segs]
-            if len(job_segs)>=3 and cand_segs==[job_segs[0],'login']:
-                if len(cand_query)!=1 or cand_query[0][0].casefold()!='redirect':return False
-                redirect=cand_query[0][1]
-                if not redirect.startswith('/') or redirect.startswith('//') or '\\' in redirect:return False
-                destination=urlsplit(redirect)
-                if destination.query or destination.fragment:return False
-                parts=[s.casefold() for s in destination.path.strip('/').split('/') if s]
-                if parts and _LOCALE_RE.fullmatch(parts[0]):parts=parts[1:]
-                if len(parts)<3 or parts[0]!=job_segs[0] or parts[1] not in ('job','details'):return False
-                return is_workday_application_scope(job_url,urlunsplit((job_p.scheme,job_p.netloc,destination.path,'','')))
 
-        # Workday's search detail link omits the location segment that Apply
-        # inserts into the canonical job route. Keep the exact career site and
-        # full requisition slug (including any suffix), plus the child allowlist.
-        if workday_host and (
-            job_segs[1:2] == ['details'] or cand_segs[1:2] == ['details']
-        ):
-            for segments in (job_segs, cand_segs):
-                if len(segments) >= 3 and segments[1] == 'details' and '_' in segments[2]:
-                    segments[1] = 'job'
-                elif len(segments) >= 4 and segments[1] == 'job' and '_' in segments[3]:
-                    del segments[2]
+def is_workday_application_scope(job_url, candidate_url):
+    expected = workday_identity(job_url)
+    parsed = _workday_url(candidate_url)
+    if not expected or not parsed:return False
+    p, parts = parsed
+    if not parts or (p.netloc, parts[0]) != expected[1:3]:return False
+    actual = workday_identity(candidate_url)
+    if actual:
+        # Application steps are site presentation, not an independent permission
+        # list. The complete job identity remains the same at every child route.
+        return actual == expected
+    if parts[1:] != ['login']:return False
+    query = parse_qsl(p.query, keep_blank_values=True)
+    if not query:return True  # The owned flow already binds this portal and job.
+    if len(query) != 1 or query[0][0].casefold() != 'redirect':return False
+    redirect = query[0][1]
+    if not redirect.startswith('/') or redirect.startswith('//') or '\\' in redirect:return False
+    destination = urlsplit(redirect)
+    if destination.query or destination.fragment:return False
+    return workday_identity(urlunsplit((p.scheme, p.netloc, destination.path, '', ''))) == expected
 
-        if len(cand_segs) < len(job_segs):
-            return False
-        if cand_segs[:len(job_segs)] != job_segs:
-            return False
 
-        # Check remaining child route
-        child_parts = cand_segs[len(job_segs):]
-        child_route = "/" + "/".join(child_parts) if child_parts else ""
-        allowed_routes = (route.casefold() for route in _ALLOWED_WORKDAY_CHILD_ROUTES) if workday_host else _ALLOWED_WORKDAY_CHILD_ROUTES
-        return child_route in allowed_routes
-    except Exception:
-        return False
+def application_match(job_url, candidate_url):
+    """Separate a conflicting identity from a page the helper cannot recognize."""
+    if is_same_application_scope(job_url, candidate_url):return {'status': 'same_job'}
+    try:
+        expected, actual = urlsplit(job_url), urlsplit(candidate_url)
+        different = expected.netloc.casefold() != actual.netloc.casefold()
+        wd_expected, wd_actual = workday_identity(job_url), workday_identity(candidate_url)
+        if wd_expected and wd_actual:different = wd_expected != wd_actual
+        gh_expected, gh_actual = query_requisition(job_url), query_requisition(candidate_url)
+        if gh_expected and gh_actual:different = different or gh_expected != gh_actual
+        return {'status': 'different_job' if different else 'identity_unresolved'}
+    except ValueError:return {'status': 'identity_unresolved'}
+
+
+def public_url(url):
+    """Diagnostics never require authentication query strings or fragments."""
+    p = urlsplit(url)
+    return urlunsplit((p.scheme, p.netloc, p.path, '', ''))
 
 
 def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
     try:
         workday_host=urlsplit(str(job_url).strip()).hostname or ''
-        if (workday_host.endswith('.myworkdayjobs.com') or workday_host=='workday.com' or workday_host.endswith('.workday.com')) and is_workday_application_scope(job_url, candidate_url):
-            return True
+        if workday_host.casefold().endswith('.myworkdayjobs.com') and workday_identity(job_url):
+            return is_workday_application_scope(job_url, candidate_url)
         job_p = urlsplit(canonical_url(job_url))
         cand_p = urlsplit(canonical_url(candidate_url))
         if job_p.scheme.lower() != cand_p.scheme.lower() or job_p.scheme.lower() not in ('https', 'http'):

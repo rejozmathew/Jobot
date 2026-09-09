@@ -4,6 +4,21 @@ import uuid
 from functools import wraps
 
 
+def submission_pending(attempt, events=()):
+    """An intent is uncertain unless the latest dispatch is proven not executed.
+
+    Events arrive in ledger insertion order. An absent result never authorizes
+    replay; old/stale telemetry cannot settle a current submission.
+    """
+    if not dict(attempt).get('submit_intent_at'):return False
+    for row in reversed(list(events)):
+        row=dict(row)
+        if row.get('stale'):continue
+        payload=json.loads(row['payload_json'])
+        if payload.get('operation')=='submission_click':return payload.get('status')!='not_executed'
+    return True
+
+
 class ProtocolError(ValueError):
     def __init__(self, code, detail=''):
         self.code = code

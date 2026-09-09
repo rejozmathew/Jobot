@@ -131,7 +131,7 @@ class WorkspaceHost:
         self.workspace=json.loads(workspace_record(self.service,workspace_id)['config_json'])
         self.browser=None;self.busy=threading.Lock();self.exit=threading.Event()
         self.preparing=set();self.threads=[]
-        self.inspection_deadlines={};self.retire=False;self.requests=0
+        self.retire=False;self.requests=0
 
     def active_session(self):
         with self.service.tx() as db:
@@ -172,7 +172,7 @@ class WorkspaceHost:
         if mode!=w['mode']:raise ProtocolError('browser_mode_mismatch')
         target=(await browser_command(endpoint,'Target.createTarget',{'url':'about:blank'}))['targetId']
         from .cdp_client import CDPBrowser
-        from .managed_identity import is_same_application_scope
+        from .managed_identity import is_same_application_scope,application_match
         browser=await CDPBrowser.connect(endpoint,target_id=target,expected_mode=mode)
         try:
             page=await browser.get_current_page();job=self.service.job(session['job_id'])
@@ -184,14 +184,20 @@ class WorkspaceHost:
                     bounds=await browser_command(endpoint,'Browser.getWindowBounds',{'windowId':window['windowId']})
                     window_state=bounds['bounds'].get('windowState','unconfirmed')
                 except Exception:window_state='maximize_requested'
-            await page.goto(job['url'])
+            try:await page.goto(job['url'])
+            except asyncio.TimeoutError:
+                pass  # A delayed navigation response is resolved by owned reads.
             deadline=time.monotonic()+20
             observed_url=''
+            recovery=None
             while time.monotonic()<deadline:
                 observed_url=await page.evaluate('location.href')
                 if is_same_application_scope(job['url'],observed_url) and await page.evaluate("document.readyState!=='loading'"):break
                 await asyncio.sleep(.2)
-            else:raise ProtocolError('application_target_not_ready',observed_url)
+            else:
+                identity=application_match(job['url'],observed_url)
+                recovery={'reason':'application_page_loading' if identity['status']=='same_job' else identity['status'],
+                    'instruction':'The owned tab remains available. Inspect snapshot/screenshot, wait for loading, or navigate back to the assigned job.'}
             readiness={'profile_verified':True,'endpoint_verified':True,'target_operable':True,'browser_mode':mode,
                        'simplify':'unverified','observed_at':self.service.now(),'window_state':window_state,
                        'viewport':await page.evaluate('({width:innerWidth,height:innerHeight})')}
@@ -200,11 +206,17 @@ class WorkspaceHost:
                 boundary=SimplifyBoundary(page,budget_seconds=5)
                 deadline=time.monotonic()+12
                 while time.monotonic()<deadline:
-                    obs=await boundary.observe()
+                    try:obs=await boundary.observe()
+                    except asyncio.TimeoutError:
+                        await asyncio.sleep(.4);continue
                     if obs.get('panel') and obs.get('source')!='fixture':
                         readiness['simplify']='official_panel_observed';break
                     await asyncio.sleep(.4)
-                else:raise ProtocolError('simplify_workspace_setup_required','Official Simplify was not observed on the supported posting surface in '+w['id'])
+                else:
+                    readiness['simplify']='not_observed'
+                    recovery=recovery or {'reason':'simplify_setup_required',
+                        'instruction':'Inspect the owned tab and recover the configured Simplify extension, then continue in this session.'}
+            if recovery:readiness['recovery']=recovery
             return target,readiness
         finally:await browser.close()
 
@@ -230,14 +242,11 @@ class WorkspaceHost:
             self.browser=None
         self.service.session_stopped(session['id'],reason=reason,paused=paused,browser_stopped=True)
         self.service.host_seen(self.workspace_id,self.host_id,None)
-        self.inspection_deadlines.pop(session['id'],None)
         if not paused:self.retire=True
 
     def inspection_result(self,session_id,reason='confirmation_not_captured'):
-        deadline=self.inspection_deadlines.setdefault(session_id,time.monotonic()+120)
         return {'status':'submission_unknown','reason':reason,'session_id':session_id,
-                'inspection_seconds':max(0,round(deadline-time.monotonic())),
-                'next_step':'Inspect the owned screenshot/snapshot or reconcile confirmation. Do not submit again. Stop closes immediately.'}
+                'next_step':'Inspect the owned screenshot/snapshot or reconcile confirmation. Do not submit again. The session remains open until completion, Stop, or the configured maximum runtime.'}
 
     def dispatch(self, request):
         try:
@@ -259,7 +268,7 @@ class WorkspaceHost:
                             'phase':'helper_exception','activity':str(request.get('operation','Helper'))+' returned an error',
                             'error_type':detail['code'],'evidence':detail['detail'],'source':'Workspace host','status':'error',
                             'next_step':'Executor inspects the error and submission state before choosing a recovery'})
-                    if a['submit_intent_at']:
+                    if a['submission_pending']:
                         result=self.inspection_result(session['id'],detail['code'])
                         result['diagnostic']=detail;return result
             except Exception:pass  # Retain the original exception if recording also fails.
@@ -281,7 +290,7 @@ class WorkspaceHost:
         attempt=service.attempt(session['attempt_id'])
         own={'attempt_id':attempt['id'],'worker_id':attempt['worker_id'],'fence':attempt['fence']}
         client.call('heartbeat',**own)
-        if op=='finish' and attempt['submit_intent_at'] and params.get('outcome') not in ('applied','already_applied'):
+        if op=='finish' and attempt['submission_pending'] and params.get('outcome') not in ('applied','already_applied'):
             return self.inspection_result(session['id'])
         cfg=dict(self.config,cdp_url=self.workspace['cdp_url'],browser_profile=self.workspace_id,browser_mode=self.workspace['mode'])
         if op in ('context','report'):
@@ -382,10 +391,6 @@ class WorkspaceHost:
                         # Startup owns the child reference until it observes the pending
                         # control. Never acknowledge stop while a launch can still occur.
                         if session['id'] in self.preparing:continue
-                        inspection=self.inspection_deadlines.get(session['id'])
-                        if inspection is not None and time.monotonic()>=inspection:
-                            self.stop_session(session,'Submission confirmation not captured; bounded inspection ended')
-                            continue
                         if session['state']=='finishing' or run['control'] in ('pause_requested','stop_requested') or expired:
                             self.stop_session(session,'Maximum runtime reached' if expired else session['reason'] or run['control'],
                                               paused=run['control']=='pause_requested' and not expired)

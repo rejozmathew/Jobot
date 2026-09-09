@@ -5,7 +5,7 @@ import re
 from urllib.parse import urlsplit,urlunsplit
 from .managed_shared import ProtocolError,uid
 from .managed_redaction import safe_text
-from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope,is_workday_candidate_home,is_workday_application_scope,same_job_url
+from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope,is_workday_candidate_home,is_workday_application_scope,same_job_url,application_match
 
 
 class RuntimeServices:
@@ -24,12 +24,15 @@ class RuntimeServices:
         return legacy or {}
 
     def _strategy_check(self,db,a,tool_name):
+        from .managed_sessions import local_session
         cfg=json.loads(a['settings_json'])
         events=db.execute('SELECT * FROM managed_events WHERE attempt_id=? AND stale=0 ORDER BY julianday(observed_at) DESC,rowid DESC',(a['id'],)).fetchall()
         payloads=[(row,json.loads(row['payload_json'])) for row in events]
         phase=next((p.get('phase') for row,p in payloads if row['event_type']=='phase_changed' and p.get('phase')),None)
         if cfg.get('allowed_fallback')=='block' and phase in ('residual_fields','native_fallback'):
             raise ProtocolError('fallback_not_allowed')
+        if local_session(db,a['id']):
+            return self._field_context(db,a)
         extra=db.execute('SELECT COALESCE(SUM(seconds),0) FROM budget_extensions WHERE attempt_id=?',(a['id'],)).fetchone()[0]
         context=self._field_context(db,a)
         if context:
@@ -75,7 +78,7 @@ class RuntimeServices:
             apply_child=(bool(expected.path) and parsed.scheme==expected.scheme and parsed.netloc==expected.netloc
                 and parsed.path==expected.path+'/apply' and parsed.query==expected.query)
             if (expected.hostname or '').endswith('.myworkdayjobs.com'):
-                apply_child=is_workday_application_scope(job['url'],canonical) and parsed.query==expected.query
+                apply_child=is_same_application_scope(job['url'],canonical)
             if not verified and not apply_child:raise ProtocolError('target_job_mismatch')
             old=db.execute('SELECT * FROM owned_targets WHERE profile=? AND target_id=? AND state!=?',(a['browser_profile'],target_id,'closed')).fetchone()
             if old:
@@ -143,7 +146,8 @@ class RuntimeServices:
                 related=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone() if identity else None
                 if identity!=target['identity_key'] and not related:
                     if not is_same_application_scope(job['url'], url) and not is_same_application_scope(target['url'], url) and not is_workday_candidate_home(job['url'], url):
-                        raise ProtocolError('target_job_mismatch')
+                        return False
+                return True
         async def read_bound_browser():
             import asyncio
             from .cdp_client import CDPBrowser
@@ -151,7 +155,7 @@ class RuntimeServices:
             try:
                 page=await browser.get_current_page()
                 before_url=await page.evaluate('location.href')
-                verify_url(before_url)
+                before_scope=verify_url(before_url)
                 from .browser_controls import observe_writers
                 async def read_writers():return await observe_writers(page,{'job':dict(job),'attempt':dict(a)})
                 before=await read_writers()
@@ -162,7 +166,8 @@ class RuntimeServices:
                     live_url=await page.evaluate('location.href')
                     if not a['submit_intent_at'] or not is_workday_candidate_home(job['url'],live_url):
                         return False
-                    result=await page.evaluate_function(WORKDAY_OBSERVE,{'requisition':job['requisition_id'] or job['url'].rstrip('/').rsplit('_',1)[-1]})
+                    from .managed_identity import job_requisition
+                    result=await page.evaluate_function(WORKDAY_OBSERVE,{'requisition':job_requisition(dict(job))})
                     return isinstance(result,dict) and result.get('submitted') is True
                 confirmed_before=await native_confirmation() if not before.get('panel') else False
                 await asyncio.sleep(0.15)
@@ -170,19 +175,20 @@ class RuntimeServices:
                 # The observer deliberately omits query parameters from its public
                 # URL. Workday login ownership depends on the full job redirect.
                 after_url=await page.evaluate('location.href')
-                verify_url(after_url)
+                after_scope=verify_url(after_url)
                 if settings.get('mode')=='pilot' and after.get('source')=='fixture':
                     raise ProtocolError('official_extension_observation_required')
                 stable=before_url==after_url and all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
-                stable=stable and before.get('application_frames')==after.get('application_frames') and not after.get('frame_diagnostics')
+                stable=stable and before.get('application_frames')==after.get('application_frames')
                 confirmed=confirmed_before and not after.get('panel') and await native_confirmation()
-                return after,stable,browser.observed_mode,confirmed
+                match={'status':'same_job'} if before_scope and after_scope else application_match(job['url'],after_url)
+                return after,stable,browser.observed_mode,confirmed,match
             finally:
                 await browser.close()
         self.action_start(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,tool_name='browser_observe',writes_browser=False)
         try:
             import asyncio
-            obs,stable,observed_mode,native_confirmed=asyncio.run(read_bound_browser())
+            obs,stable,observed_mode,native_confirmed,match=asyncio.run(read_bound_browser())
             from .managed_context import platform_for_url
             obs_url=obs.get('url') or target['url']
             detected_platform=platform_for_url(obs_url)
@@ -207,7 +213,9 @@ class RuntimeServices:
                     known_account_ready=(status=='login_required' and any(
                         (obs.get('controls') or {}).get(k,{}).get('enabled')
                         for k in ('create_account_autofill','create_account','sign_in')))
-                    if stable and obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready):
+                    explicit_settlement=status=='unsupported' and obs.get('writer_safe') and not any(
+                        obs.get('activity',{}).get(k) for k in ('busy_indicator','explicit_writer'))
+                    if stable and obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready or explicit_settlement):
                         new_writer='idle'
                         quiescent=True
                     else:
@@ -234,7 +242,8 @@ class RuntimeServices:
                 'status':status,
                 'writer_state':new_writer,
                 'quiescent':quiescent,
-                'native_takeover_authorized':quiescent and not (
+                'identity':match,
+                'native_takeover_authorized':quiescent and match['status']=='same_job' and not (
                     obs.get('activity',{}).get('busy_indicator') and obs.get('activity',{}).get('waiting_for_input')),
                 'observed_browser_mode':observed_mode,
                 'platform':detected_platform,

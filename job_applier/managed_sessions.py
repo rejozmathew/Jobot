@@ -191,7 +191,7 @@ class SessionServices:
             if s['attempt_id']:
                 # Explicit paused-session attach: stopped browser; fresh target, same attempt.
                 attempt=self._get(db,'application_attempts',s['attempt_id'])
-                if attempt['submit_intent_at']:raise ProtocolError('submission_unknown')
+                if self._submission_pending(db,attempt):raise ProtocolError('submission_unknown')
                 attempt_id=attempt['id'];fence=attempt['fence']
             else:
                 attempt_id=self._create_attempt(db,run,job,candidate,fence,now,'local-session-v1')
@@ -224,9 +224,10 @@ class SessionServices:
                 db.execute("UPDATE managed_actions SET ended_at=?,status='aborted',uncertainty=1 WHERE attempt_id=? AND ended_at IS NULL",(now,a['id']))
                 db.execute("UPDATE application_attempts SET writer_state='idle' WHERE id=?",(a['id'],))
                 db.execute("UPDATE owned_targets SET state='closed',evidence=?,updated_at=? WHERE attempt_id=? AND state!='closed'",(reason,now,a['id']))
-                if a['submit_intent_at'] and not a['completed_at']:paused=False
+                pending=self._submission_pending(db,a)
+                if pending and not a['completed_at']:paused=False
                 if not paused and not a['completed_at']:
-                    outcome='submission_unknown' if a['submit_intent_at'] else 'interrupted'
+                    outcome='submission_unknown' if pending else 'interrupted'
                     self._complete(db,a,outcome,reason,quiescent=True,finish_key=hashlib.sha256(dumps([outcome,reason]).encode()).hexdigest(),reconciled=True)
                 if a['completed_at']:paused=False
             state='paused' if paused else 'finished' if s['state']=='finishing' else 'failed' if not s['attempt_id'] else 'stopped'
@@ -244,7 +245,7 @@ class SessionServices:
             if s['driver_id']==driver_id and s['state'] in ('connected','waiting','preparing'):return dict(s)
             if s['state']!='paused' or s['ended_at']:raise ProtocolError('stop_previous_driver_before_attach')
             a=self._get(db,'application_attempts',s['attempt_id']) if s['attempt_id'] else None
-            if a and a['submit_intent_at']:raise ProtocolError('submission_unknown')
+            if a and self._submission_pending(db,a):raise ProtocolError('submission_unknown')
             db.execute("UPDATE application_sessions SET driver_id=?,state='preparing',reason='Explicit attach after owned browser stopped' WHERE id=?",(driver_id,session_id))
             if a:db.execute('UPDATE application_attempts SET session_id=? WHERE id=?',(driver_id,a['id']))
             db.execute("UPDATE runs SET session_id=?,control='running',state='preparing' WHERE id=?",(driver_id,s['run_id']))

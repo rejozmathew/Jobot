@@ -16,6 +16,8 @@ def choose(observed, state):
     controls = observed.get('controls', {})
     native = observed.get('native', {})
     enabled = lambda key: controls.get(key, {}).get('enabled', False)
+    evidence=observed.get('fingerprint') or observed.get('page_signature') or observed.get('step','unknown')
+    fills=state.get('fill_attempts',{}).get(evidence,0) if 'fill_attempts' in state else state.get('fills',0)
     if observed.get('status') not in ('ready', 'complete', 'needs_review'):
         return 'blocked'
     if (observed.get('step')=='unknown' and (state.get('account_action') in ('sign_in','verify') or state.get('account_state')=='creation_pending') and
@@ -27,8 +29,8 @@ def choose(observed, state):
         label=controls['autofill_skills'].get('label','autofill_skills')
         return 'blocked' if label in state.get('skills_actions',[]) else 'autofill_skills'
     if state.get('advance_failed'):
-        if enabled('autofill') and state.get('fills', 0) < 2:
-            return 'retry' if state.get('fills', 0) else 'autofill'
+        if enabled('autofill') and fills < 2:
+            return 'retry' if fills else 'autofill'
         return 'blocked'
     if observed.get('status')=='needs_review' and native.get('continue',{}).get('enabled'):
         return 'native_continue'
@@ -38,7 +40,7 @@ def choose(observed, state):
         return 'native_continue'
     if enabled('start'):
         return 'start'
-    if enabled('autofill') and not state.get('fills'):
+    if enabled('autofill') and not fills:
         return 'autofill'
     return 'blocked'
 
@@ -51,7 +53,8 @@ import time
 from urllib.parse import unquote, urlsplit
 import uuid
 
-from .managed_identity import is_same_application_scope, is_workday_candidate_home
+from .managed_identity import is_same_application_scope, is_workday_candidate_home, application_match, job_requisition
+from .managed_shared import ProtocolError
 from .simplify_boundary import OBSERVE, CLICK
 
 HELPERS=Path(__file__).parent/'browser_helpers'
@@ -63,14 +66,16 @@ async def observe_page(page,package):
     """One native/extension inventory shared by snapshot and runner recovery."""
     url=await page.evaluate('location.href')
     if not (is_same_application_scope(package['job']['url'],url) or is_workday_candidate_home(package['job']['url'],url)):
-        raise ValueError('target_scope_changed')
+        match=application_match(package['job']['url'],url)
+        raise ProtocolError('target_job_mismatch' if match['status']=='different_job' else 'job_identity_unresolved',
+            'The owned page needs job verification. Use browser snapshot/screenshot or navigate back to the assigned job.')
     profile=package['attempt'].get('profile_json') or {}
     if isinstance(profile,str):profile=json.loads(profile)
     asset=next((a for a in package.get('documents',{}).get('assets',[]) if a.get('kind')=='resume'),None)
     name=unquote(urlsplit(asset['storage_ref']).path).replace('\\','/').rsplit('/',1)[-1] if asset else ''
     shared=await page.evaluate(OBSERVE)
     wd=await page.evaluate_function(WORKDAY_OBSERVE,{
-        'requisition':package['job'].get('requisition_id') or package['job']['url'].rstrip('/').rsplit('_',1)[-1],
+        'requisition':job_requisition(package['job']),
         'resume_name':name,'expected_email':profile.get('identity',{}).get('email'),
         'page_signature':shared.get('page_signature')})
     return dict(shared,**wd,simplify_inventory=shared.get('inventory',[]),
@@ -95,7 +100,7 @@ def screen_inventory(observed,package):
                     'login_kind':observed.get('login_kind'),'controls':observed.get('simplify_inventory',[]),
                     'text':observed.get('panel_text',''),'credential_use':'unverified'},
         'account':{k:account.get(k) for k in ('action','namespace','credential_ref','state','created_at','last_attempt_id','last_action_at','creation_confirmed')},
-        'instruction':'Map this logical screen once. Call fast_forward with recovery:{screen_key, credentials:{email_ref,password_ref,confirmation_ref?}, fields:[{ref,value}], action:{source:native|simplify,ref}, account_mode:sign_in|create_account if submitting auth}. Omit unused fields. All refs come from this inventory. A Simplify employer sign-in also needs credential_evidence establishing retained credential use. Never send secrets or use recovery for final Submit.'}
+        'instruction':'Map the required fields and next action together. Call fast_forward with recovery:{screen_key, credentials:{email_ref,password_ref,confirmation_ref?}, fields:[{ref,value}], action:{source:native|simplify,ref}, account_mode:sign_in|create_account if submitting auth}. Different observed controls can support further recovery on this screen. Omit unused fields. All refs come from this inventory. A Simplify employer sign-in also needs credential_evidence establishing retained credential use. Never send secrets or use recovery for final Submit.'}
 
 
 class FastRunner:
@@ -110,7 +115,8 @@ class FastRunner:
         self.config=config; self.target=target_id; self.clock=clock; self.sleep=sleeper
         self.state=state if state is not None else {}; self._persist=persist or (lambda:None)
         self.state.setdefault('pages',{})
-        self.state['submit_intent']=bool(package['attempt'].get('submit_intent_at') or self.state.get('submit_intent'))
+        self.state['submit_intent']=package['attempt'].get('submission_pending',bool(
+            package['attempt'].get('submit_intent_at') or self.state.get('submit_intent')))
         self.settings=package['attempt'].get('settings_json') or {}
         if isinstance(self.settings,str): self.settings=json.loads(self.settings)
         profile=package['attempt'].get('profile_json') or {}
@@ -131,8 +137,11 @@ class FastRunner:
         return self.call(operation,**self.owner,**params)
 
     def event(self,kind,payload):
-        self.owned('event',event_id=str(uuid.uuid4()),event_type=kind,
-                   observed_at=datetime.now(timezone.utc).isoformat(),payload=payload)
+        try:
+            self.owned('event',event_id=str(uuid.uuid4()),event_type=kind,
+                       observed_at=datetime.now(timezone.utc).isoformat(),payload=payload)
+        except Exception as exc:
+            self.state['diagnostic_error']=type(exc).__name__
 
     async def observe(self):
         return await observe_page(self.page,self.package)
@@ -161,6 +170,7 @@ class FastRunner:
                 'auth_refs':observed.get('auth_refs',{}) if status=='authentication_required' else {},
                 'metrics':self.state.get('metrics',{}),'target_id':self.target,
                 'page_decisions':self.state.get('page_decisions',0),
+                **({'diagnostic_error':self.state['diagnostic_error']} if self.state.get('diagnostic_error') else {}),
                 **({'screen':screen_inventory(observed,self.package)} if observed and status in ('authentication_required','blocked','inspection_required') else {}),
                 'attempt_id':self.owner['attempt_id']}
 
@@ -284,7 +294,10 @@ class FastRunner:
                             self.event('field_verified',{'page':step,'evidence':'Applied and verified configured salary/privacy preferences','source':'Candidate profile'})
                             self.persist();self.last=None;continue
                         return self.report('inspection_required',observed,'configured_answer_control_unconfirmed')
-                if action=='blocked':return self.report(action,observed,'required_blocker_only')
+                if action=='blocked':
+                    if observed.get('identity_mismatch'):return self.report('inspection_required',observed,'candidate_email_mismatch')
+                    if observed.get('blocking_errors'):return self.report('blocked',observed,'required_blocker_only')
+                    return self.report('inspection_required',observed,'screen_controls_unrecognized')
                 if action=='submit':
                     if self.settings.get('submission_mode')!='submit':
                         return self.report('ready_for_review',observed,'submission_not_authorized')
@@ -295,7 +308,8 @@ class FastRunner:
                         clicked=await self.click('submit',fresh)
                         return {'clicked':clicked,'execution':self.last_click_execution}
                     result=await submit(self.page,self.call,self.package,self.owner,self.config,self.target,activate,seconds=min(seconds,15))
-                    self.state['submit_intent']=bool(self.call('attempt_status',attempt_id=self.owner['attempt_id']).get('submit_intent_at'))
+                    attempt=self.call('attempt_status',attempt_id=self.owner['attempt_id'])
+                    self.state['submit_intent']=attempt.get('submission_pending',bool(attempt.get('submit_intent_at')))
                     self.persist();return result
                 gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
                 if not gate.get('quiescent'):
@@ -316,16 +330,22 @@ class FastRunner:
                 aid=str(uuid.uuid4()); t0=self.clock(); success=False
                 self.owned('action_start',action_id=aid,tool_name='workday_fast.'+action)
                 try:
-                    self.owned('writer_state',state='active')
+                    if not action.startswith('native_'):self.owned('writer_state',state='active')
                     success=await self.click(action,fresh)
                 finally:
                     self.owned('action_end',action_id=aid,status='success' if success else 'failed',duration_seconds=self.clock()-t0,
                                observed_at=datetime.now(timezone.utc).isoformat())
-                if not success:return self.report('submission_unknown' if self.state['submit_intent'] else 'blocked',fresh,'click_unconfirmed')
+                if not success:
+                    report=self.report('submission_unknown' if self.state['submit_intent'] else 'inspection_required',fresh,'click_unconfirmed')
+                    report['click']=self.last_click_result;report['execution']=self.last_click_execution
+                    return report
                 metrics['clicks']+=1
                 if action=='native_sign_in':page_state['account_entry_attempted']=True
                 if action in ('autofill','retry'):
                     page_state['fills']=page_state.get('fills',0)+1; page_state['advance_failed']=False
+                    evidence=fresh.get('fingerprint') or fresh.get('page_signature') or step
+                    attempts=page_state.setdefault('fill_attempts',{})
+                    attempts[evidence]=attempts.get(evidence,0)+1
                 if action=='autofill_skills':
                     page_state.setdefault('skills_actions',[]).append(fresh['controls']['autofill_skills'].get('label','autofill_skills'))
                     page_state['advance_failed']=False

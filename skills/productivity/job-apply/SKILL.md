@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.4.8
+version: 0.4.9
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -48,6 +48,13 @@ this conversation. Another conversation uses its own ID. Never adopt an existing
 active driver's ID. A repeated start returns the same session/attempt/tab.
 `capacity_wait` means the configured pool is occupied or unavailable; inspect
 its occupants/reason. It does not authorize another unmanaged browser.
+
+Slow page loading or missing Simplify returns `startup_recovery` on the same
+owned session. Inspect that tab and recover setup; elapsed readiness polling is
+not an employer rejection. Identity checks compare browser ownership, configured
+candidate and the actual job. Workday location/title changes and new application
+steps do not change that job. `identity_unresolved` permits owned snapshots,
+screenshots and navigation back to the assigned job; it does not close the session.
 
 The returned `session_id`, job/context, approved assets, account namespace,
 workspace and timing are authoritative. Native subsequent operations resolve
@@ -101,7 +108,11 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    skill. It fills the selected private controls, acts and observes in one owned
    connection; do not rerun the failed matcher or take a model turn per field.
 3. Let official Simplify do bulk filling. Observe until it settles; never compete
-   with active/unknown writers. On Workday read
+   with active writers. For unknown state, reobserve or use an enabled, observed
+   Simplify Stop/Cancel autofill control through `browser` with
+   `{"method":"simplify","action":"stop"}` (and its ref if needed). This only
+   cancels the extension operation; the application stays open. The helper must
+   observe settlement before native work resumes. On Workday read
    [workday-simplify](../workday-simplify/SKILL.md) and use `fast_forward`.
    A cosmetic panel spinner can coexist with an enabled Simplify input prompt.
    Use the observed enabled action (including `autofill_skills`, any count), then
@@ -179,9 +190,12 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    The host isolates its browser before making the workspace available again.
    A missing post-click confirmation is `submission_unknown`; never click again.
 
-After an uncertain click the local host allows 120 seconds of owned screenshot,
-snapshot and confirmation observation, then closes its browser/process tree and
-records uncertainty. `stop` closes immediately. `reconcile` accepts `outcome`,
+After an uncertain click, use owned screenshot, snapshot and confirmation
+observation. The session stays open until completion, Stop, or an explicitly
+configured maximum runtime. A proven `not_executed` Submit returns recovery,
+not submission uncertainty: refresh the control and continue in the same attempt.
+An intent with a missing dispatch result remains uncertain. `stop` closes
+immediately. `reconcile` accepts `outcome`,
 `evidence`, and `source` (`employer`, `simplify`, or `user_reported`); cite the
 actual user's confirmation when using user_reported. It stops a still-owned
 session before correction and preserves the original attempt duration. Portable:
@@ -203,10 +217,15 @@ fields. `context` and `report` remain readable after the browser host has stoppe
 Use approved profile facts, policy and exact saved human answers first. When an
 actual required question still lacks an answer, call `browser` with
 `{"method":"request_answers","refs":["<observed required field ref>"]}`.
-This applies configured routine policy and captures the full question, offered
+This applies configured routine policy and exact saved answers before queuing
+anything for the user. It captures the remaining full question, offered
 choices and job/candidate context. Optional or already answered fields are skipped.
 A known answer that a control refuses to accept is a technical blocker, not a
 reason to ask the user to supply the fact again.
+Most answers should come from Simplify, approved facts, defaults or saved answers.
+Human input is reserved for genuinely missing required information or an
+unresolved verification challenge. Optional history/telemetry failures are
+diagnostics; they do not justify repeating a completed write or stopping work.
 
 Check context `human_input.messaging.available`. If the harness actually provides
 messaging, use its advertised capability for a brief question under the user's

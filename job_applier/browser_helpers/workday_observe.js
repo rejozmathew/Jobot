@@ -103,7 +103,15 @@
   const submitted=!!req&&rows.some(e=>req.test(rowText(e))&&/application (?:has been |was )?(?:successfully )?(?:submitted|received)/i.test(rowText(e)));
   const attachments=all('[data-automation-id*="file"],[data-automation-id*="File"],[role="alert"],a');
   const resume_attached=!!args.resume_name&&attachments.some(e=>text(e).includes(args.resume_name)&&(/uploaded/i.test(text(e))||e.tagName==='A'||/file/i.test(e.getAttribute('data-automation-id')||'')));
-  const email_inputs=all('input[type="email"]');
-  const identity_mismatch=!!args.expected_email&&email_inputs.some(e=>e.value&&e.value.toLowerCase()!==args.expected_email.toLowerCase());
+  // References and referrers have their own email addresses. Only a labelled
+  // applicant address or the current account form establishes candidate identity.
+  const emailMeaning=e=>[accessible(e),e.name,e.getAttribute('data-automation-id')||''].join(' ').trim();
+  const otherPerson=e=>/refer(?:ence|ral|rer)|recommender|supervisor|manager|recruiter|emergency|contact person/i.test(emailMeaning(e));
+  const candidateEmails=email.filter(e=>!otherPerson(e)&&(authRoot?.contains(e)||
+    /applicant|candidate|personal|your e[- ]?mail/i.test(emailMeaning(e))||
+    /^e[- ]?mail(?: address)?\s*\*?$/i.test(accessible(e).trim())||/^email(?:address)?$/i.test(e.name)||
+    /^(?:email|username)$/i.test(e.autocomplete)));
+  const identityEmails=candidateEmails.length?candidateEmails:email.length===1&&!otherPerson(email[0])&&!emailMeaning(email[0])?email:[];
+  const identity_mismatch=!!args.expected_email&&identityEmails.some(e=>e.value&&e.value.trim().toLowerCase()!==args.expected_email.trim().toLowerCase());
   return {step,native:controls,inventory,blocking_errors:[...new Set(errors)],auth:pw.length>0||mode==='email_chooser'||auth_ui.challenge,auth_refs,auth_ui,submitted,resume_attached,identity_mismatch};
 }

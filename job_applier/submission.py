@@ -7,7 +7,7 @@ import time
 import uuid
 from urllib.parse import urlsplit,urlunsplit
 
-from .managed_identity import is_post_submit_scope,is_same_application_scope
+from .managed_identity import is_post_submit_scope,is_same_application_scope,job_requisition
 from .managed_redaction import safe_text
 
 SCRIPT=(Path(__file__).parent/'browser_helpers/submission_observe.js').read_text(encoding='utf-8')
@@ -17,11 +17,9 @@ def _stamp():return datetime.now(timezone.utc).isoformat()
 
 
 def _issued(call,ownership):
+    from .managed_shared import submission_pending
     rows=call('events',attempt_id=ownership['attempt_id'])
-    for row in reversed(rows):
-        p=json.loads(row['payload_json'])
-        if p.get('operation')=='submission_click':return p.get('status')!='not_executed'
-    return False
+    return submission_pending({'submit_intent_at':True},rows)
 
 
 async def submit(page,call,package,ownership,config,target_id,activate,*,seconds=15,confirmation_only=False,application_control=None):
@@ -66,7 +64,7 @@ async def submit(page,call,package,ownership,config,target_id,activate,*,seconds
         await embedded.arm(application_control)
         await page._session.call('Runtime.addBinding',{'name':binding})
         args={'name':name,'binding':binding,'baseline':record['baseline'],'active':already_issued,
-              'requisition':package['job'].get('requisition_id') or package['job']['url'].rstrip('/').rsplit('_',1)[-1]}
+              'requisition':job_requisition(package['job'])}
         before=await page.evaluate_function(SCRIPT,args)
         if not already_issued:
             record['baseline']=before['baseline'];args['baseline']=before['baseline']
@@ -93,6 +91,12 @@ async def submit(page,call,package,ownership,config,target_id,activate,*,seconds
                 if not clicked:
                     if result.get('execution')=='not_executed' or result.get('status') in ('stale','disabled'):
                         event('submission_click','not_executed',result.get('reason','control_not_activated'))
+                        issued=False;embedded.started=False
+                        record['dispatch']='not_executed';persist()
+                        return {'status':'inspection_required','attempt_id':ownership['attempt_id'],
+                            'execution':'not_executed','submission_pending':False,
+                            'reason':result.get('reason','control_not_activated'),'evidence_path':str(record_path),
+                            'next_step':'Refresh the observed final control and recover in this session. No submission was dispatched.'}
                     click_error=result.get('reason','click_unconfirmed')
             except Exception as exc:click_error=safe_text(str(exc),700)
             finally:
@@ -134,10 +138,10 @@ async def submit(page,call,package,ownership,config,target_id,activate,*,seconds
             owned('finish',outcome='applied',evidence=evidence,quiescent=False)
             return {'status':'applied','attempt_id':ownership['attempt_id'],'source':proof['source'],
                     'evidence':evidence,'evidence_path':str(record_path),'image_path':record.get('image_path')}
-        event('submission_observation','pending','Confirmation not captured; preserve the owned page for bounded inspection')
+        event('submission_observation','pending','Confirmation not captured; preserve the owned page for inspection')
         return {'status':'submission_unknown','attempt_id':ownership['attempt_id'],'reason':click_error or 'confirmation_not_captured',
                 'evidence_path':str(record_path),'image_path':record.get('image_path'),'diagnostics':record['diagnostics'],
-                'inspection_seconds':120,'next_step':'Read the owned screenshot or snapshot, or reconcile direct user confirmation. Do not submit again.'}
+                'next_step':'Read the owned screenshot or snapshot, or reconcile direct user confirmation. Do not submit again.'}
     finally:
         if aid:owned('action_end',action_id=aid,status='failed')
         remove()

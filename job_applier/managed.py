@@ -36,7 +36,7 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity
+from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity
 
 
 class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices):
@@ -114,7 +114,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if namespace and requisition_id and not identity_evidence: raise ProtocolError('identity_evidence_required')
         key=job_key(canonical,namespace,requisition_id)
         url_key=job_key(canonical)
-        query_identity=greenhouse_query_identity(canonical)
+        compare_identity=workday_identity if workday_identity(canonical) else greenhouse_query_identity
+        query_identity=compare_identity(canonical)
         query_key=hashlib.sha256(dumps(['requisition_query',query_identity]).encode()).hexdigest() if query_identity else None
         now=self.now()
         with self.tx() as db:
@@ -122,7 +123,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             query_matches=[]
             if query_identity:
                 query_matches=[r for r in db.execute('SELECT * FROM jobs ORDER BY created_at,id')
-                               if greenhouse_query_identity(r['url'])==query_identity]
+                                 if compare_identity(r['url'])==query_identity]
                 if not row and query_matches:row=query_matches[0]
             # Preserve old identity hashes; add this spelling as another alias.
             if not row and (urlsplit(canonical).hostname or '').endswith('.myworkdayjobs.com'):
@@ -148,7 +149,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                 # an older applied/uncertain attempt cannot be bypassed by a form URL.
                 for related_id in {job_id}|{r['id'] for r in query_matches}:
                     db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',
-                               (query_key,related_id,'consistent_requisition_query'))
+                                 (query_key,related_id,'consistent_requisition_identity'))
             db.execute('INSERT OR IGNORE INTO job_sources VALUES (?,?,?,?,?,?)',(uid(),job_id,source_type,source_id or canonical,urlunsplit(urlsplit(url.strip())._replace(fragment='')),now))
             return dict(db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone())
 
@@ -359,7 +360,9 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         return db.execute('INSERT INTO application_attempts(job_id,platform,workflow,started_at,run_id,identity_id,worker_id,session_id,browser_profile,fence,heartbeat_at,progress_at,settings_json,profile_json,versions_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',args).lastrowid
 
     def attempt(self, attempt_id):
-        with self.tx() as db: return dict(self._get(db,'application_attempts',attempt_id))
+        with self.tx() as db:
+            attempt=dict(self._get(db,'application_attempts',attempt_id))
+            return dict(attempt,submission_pending=self._submission_pending(db,attempt))
 
     def _owner(self, db, attempt_id, worker_id, fence, *, completed=False):
         a=self._get(db,'application_attempts',attempt_id)
@@ -433,7 +436,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             if quiescent and not self._is_quiescent(db,a): raise ProtocolError('writers_not_quiescent')
             if outcome in ('applied','already_applied') and not evidence: raise ProtocolError('evidence_required')
             if outcome=='applied' and not a['submit_intent_at']: raise ProtocolError('submission_intent_required')
-            if a['submit_intent_at'] and outcome not in ('applied','already_applied'): outcome='submission_unknown'
+            if self._submission_pending(db,a) and outcome not in ('applied','already_applied'): outcome='submission_unknown'
             return self._complete(db,a,outcome,evidence,quiescent=quiescent,finish_key=key)
 
     def reconcile(self, attempt_id, *, outcome, evidence, browser_quiescent, source='user_reported'):

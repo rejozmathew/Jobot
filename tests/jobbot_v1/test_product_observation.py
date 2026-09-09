@@ -58,7 +58,7 @@ def test_fixed_observer_reads_cdp_during_pending_control(tmp_path, monkeypatch, 
     s.ack_control(a['id'], worker_id=WORKER_ID, fence=1, quiescent=True)
 
 
-@pytest.mark.parametrize('status', ['active', 'unknown', 'missing', 'unsupported', 'login_required'])
+@pytest.mark.parametrize('status', ['active', 'unknown', 'missing', 'login_required'])
 def test_unobserved_writer_never_becomes_quiescent(tmp_path, monkeypatch, status):
     s, job, run, a = owned_service(tmp_path)
     calls, _ = browser_probe(monkeypatch, job['url'], status, panel=status not in ('missing', 'unknown'))
@@ -67,6 +67,14 @@ def test_unobserved_writer_never_becomes_quiescent(tmp_path, monkeypatch, status
     assert OBSERVE in calls
     assert result['quiescent'] is False
     assert result['writer_state'] != 'idle'
+
+
+def test_unknown_writer_settles_when_extension_reports_unsupported(tmp_path,monkeypatch):
+    s,job,run,a=owned_service(tmp_path)
+    browser_probe(monkeypatch,job['url'],'unsupported')
+    s.writer_state(a['id'],worker_id=WORKER_ID,fence=1,state='unknown')
+    result=s.browser_observe(a['id'],worker_id=WORKER_ID,fence=1)
+    assert result['quiescent'] and result['writer_state']=='idle'
 
 
 def test_caller_cannot_supply_completion_and_worker_cannot_read_other_candidate(tmp_path):
@@ -83,12 +91,13 @@ def test_caller_cannot_supply_completion_and_worker_cannot_read_other_candidate(
     assert client.post('/v1/candidate', headers=headers, json={'identity_id': 'other'}).status_code == 403
 
 
-def test_observer_rejects_changed_unbound_target_before_reading_form(tmp_path, monkeypatch):
+def test_observer_exposes_owned_diagnostics_without_granting_foreign_job_writes(tmp_path, monkeypatch):
     s, job, run, a = owned_service(tmp_path)
     calls, _ = browser_probe(monkeypatch, 'https://careers.example.test/jobs/unowned')
-    with pytest.raises(ProtocolError, match='target_job_mismatch'):
-        s.browser_observe(a['id'], worker_id=WORKER_ID, fence=1)
-    assert OBSERVE not in calls
+    result=s.browser_observe(a['id'], worker_id=WORKER_ID, fence=1)
+    assert result['identity']['status']=='identity_unresolved'
+    assert not result['native_takeover_authorized']
+    assert OBSERVE in calls
 
 
 @pytest.mark.parametrize('redirect,changes_during_observation', [('R1',False),('R2',False),('R2',True)])
@@ -106,8 +115,9 @@ def test_workday_login_scope_uses_full_browser_url_not_redacted_display(tmp_path
         assert observed['quiescent'] and observed['observation']['url']==display
         assert '?redirect=' not in json.dumps(observed)
     else:
-        with pytest.raises(ProtocolError,match='target_job_mismatch'):
-            s.browser_observe(a['id'],worker_id=WORKER_ID,fence=1)
+        observed=s.browser_observe(a['id'],worker_id=WORKER_ID,fence=1)
+        assert not observed['native_takeover_authorized']
+        assert observed['identity']['status']=='different_job'
 
 
 def test_http_observer_can_execute_async_cdp(tmp_path, monkeypatch):

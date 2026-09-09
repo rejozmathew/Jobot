@@ -1,6 +1,31 @@
 # First-principles assessment of application restrictions
 
-Assessment date: 2026-09-09. **Review and proposed changes, not implemented behavior.**
+Assessment date: 2026-09-09. **Historical assessment; implementation is recorded below.**
+
+## Implementation follow-up — 2026-09-09
+
+The assessment and companion catalog below describe the original source snapshot.
+The user subsequently authorized implementation after preserving the prior
+embedded-form, automatic-answer-policy and human-answer work in checkpoint
+`0ded3c9`. The current change follows the six-step simplification sequence in the
+existing modules; it adds no worker, service, policy framework or database.
+
+| Audit recommendation | Implemented change |
+|---|---|
+| Job identity and diagnostics | Shared Workday host/site/full-requisition identity; location/title/locale/step spelling no longer vetoes the job. Owned snapshots/screenshots and return navigation remain available when identity is unresolved or conflicting. Confirmation uses the complete requisition too. |
+| Recoverable setup and helper states | Slow loading, delayed navigation response and missing Simplify retain the owned target with setup recovery. Unrecognized controls and unconfirmed ordinary clicks request inspection; a helper slice ending returns waiting. |
+| Incidental write vetoes | Local semantic timing is telemetry. Removed the global two-non-dispatch auth cap and one-action-per-screen restriction; mapped decisions retain action-specific uncertainty. Auth Submit is distinguished from final application Submit. |
+| Writer/control recovery | Observed Simplify Stop/Cancel can settle the extension without closing the application. Native writes still require observed settlement and no unended writer. Explicit unsupported/idle evidence can settle unknown state. Frame diagnostics are localized to affected controls. Changed form evidence permits another fill. |
+| Submission dispatch | Existing intent and ordered dispatch events now produce one shared `submission_pending` state. Proven non-dispatch permits recovery; missing or possibly dispatched results never authorize replay. Removed the unrelated two-minute inspection closure; explicit Stop and configured maximum runtime remain. |
+| Automatic answers and optional diagnostics | Approved policy and exact saved human answers run before question creation. Human input remains for missing required facts/verification. Optional answer journaling and progress events cannot abort form recovery or disguise an executed write. |
+| Canonical instructions | Updated both skills and the helper/caller map. Ownership, candidate selection, actual employer requirements, configured authorization and duplicate prevention remain. Legacy-only callers retain their compatibility rules. |
+
+Focused synthetic regressions were added before each bounded implementation.
+Final validation: **655 tests passed in 298.98 seconds**, including isolated
+browser tests, with four dependency deprecation warnings. The managed suite ran
+with the repository virtualenv, private temporary artifacts and Brave fixtures.
+No employer application, production-record correction or benchmark is part of
+this engineering change. Synthetic coverage does not establish live ATS acceptance.
 
 ## Decision
 

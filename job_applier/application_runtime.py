@@ -182,6 +182,8 @@ def handle(service, session_id, *, include_context=True):
         package=service.application_context(state['attempt_id'])
         result['context']=package
     result['workspace']=state['workspace'];result['metadata']=state['metadata']
+    if state['metadata'].get('readiness',{}).get('recovery'):
+        result['startup_recovery']=state['metadata']['readiness']['recovery']
     return result
 
 
@@ -214,7 +216,7 @@ def session_call(config, session_id, operation, parameters=None, driver_id=None)
     driver=driver_identity(driver_id)
     if operation=='retry':
         if not session['ended_at']:raise ProtocolError('stop_session_before_retry')
-        if session['attempt_id'] and service.attempt(session['attempt_id'])['submit_intent_at']:
+        if session['attempt_id'] and service.attempt(session['attempt_id'])['submission_pending']:
             raise ProtocolError('verify_exact_submission_before_retry')
         job=service.job(session['job_id'])
         if job['status'] in ('blocked','failed','interrupted','ready_for_review','needs_review'):service.retry(job['id'])
@@ -251,7 +253,7 @@ def browser_action(config,client,ownership,package,target_id,params):
     """Shared, session-owned form operations and one-time submission."""
     import asyncio
     from .cdp_client import CDPBrowser
-    from .managed_identity import is_same_application_scope, is_workday_candidate_home, is_post_submit_scope
+    from .managed_identity import is_same_application_scope, is_workday_candidate_home, is_post_submit_scope, application_match, public_url
     from .browser_controls import FORM, observe, inventory, form_action, inspect_control, click_control, upload_file
     from .managed_shared import uid
     method=params.get('method')
@@ -268,13 +270,17 @@ def browser_action(config,client,ownership,package,target_id,params):
                 from .application_answers import capture_answers
                 history=await capture_answers(page,config,package,ownership,page=page_name,source=source,basis=params.get('answer_basis'))
                 if history.get('answers_added'):
-                    client.call('event',**ownership,event_id=uid(),event_type='checkpoint',observed_at=datetime.now(timezone.utc).isoformat(),
-                        payload={'operation':'answer_history','source':source,'page':page_name,'evidence':history['answer_history_path']})
+                    try:
+                        client.call('event',**ownership,event_id=uid(),event_type='checkpoint',observed_at=datetime.now(timezone.utc).isoformat(),
+                            payload={'operation':'answer_history','source':source,'page':page_name,'evidence':history['answer_history_path']})
+                    except Exception as exc:history['diagnostic_error']=type(exc).__name__
                 return history
-            pending=bool(package['attempt'].get('submit_intent_at'))
-            if not is_same_application_scope(package['job']['url'],url) and not (
+            pending=package['attempt'].get('submission_pending',bool(package['attempt'].get('submit_intent_at')))
+            identity=application_match(package['job']['url'],url)
+            recovery_navigation=method=='navigate' and is_same_application_scope(package['job']['url'],params.get('url',''))
+            if not reads and not recovery_navigation and identity['status']!='same_job' and not (
                 (reads or method=='submit') and ((pending and is_post_submit_scope(package['job']['url'],url)) or is_workday_candidate_home(package['job']['url'],url))):
-                raise ProtocolError('target_job_mismatch')
+                raise ProtocolError('target_job_mismatch' if identity['status']=='different_job' else 'job_identity_unresolved')
             target={k:params[k] for k in ('ref','selector') if params.get(k)}
             submission_control=False
             if method=='click' and target:
@@ -307,10 +313,12 @@ def browser_action(config,client,ownership,package,target_id,params):
             if not reads:
                 gate=await asyncio.to_thread(client.call,'browser_observe',**ownership,target_id=target_id,cdp_url=config['cdp_url'])
                 extension_action=method=='simplify' or (method=='click' and params.get('source')=='simplify')
-                if not extension_action and not gate.get('native_takeover_authorized',gate.get('quiescent')):
+                permitted=gate.get('quiescent') if recovery_navigation else gate.get('native_takeover_authorized',gate.get('quiescent'))
+                if not extension_action and not permitted:
                     raise ProtocolError('simplify_input_or_settlement_required')
             aid=uid()
-            client.call('action_start',**ownership,action_id=aid,tool_name='local_browser.'+method,writes_browser=not reads)
+            action_name='simplify_stop' if method=='simplify' and params.get('action')=='stop' else method
+            client.call('action_start',**ownership,action_id=aid,tool_name='local_browser.'+action_name,writes_browser=not reads)
             if method=='screenshot':
                 from .managed_credentials import capture_private_screenshot
                 folder=Path(config['spool_dir'])/'screenshots'
@@ -318,12 +326,14 @@ def browser_action(config,client,ownership,package,target_id,params):
                 folder.mkdir(parents=True,exist_ok=True);path=folder/(aid+'.png')
                 await capture_private_screenshot(page,path)
                 succeeded=True
-                return {'image_path':str(path),'mime_type':'image/png','url':url,'target_id':target_id,
+                return {'image_path':str(path),'mime_type':'image/png','url':public_url(url),'target_id':target_id,'identity':identity,
                     'instruction':'Inspect this owned-page image; snapshot supplies observed selectors.'}
             if method=='snapshot':
-                if pending:
-                    result={'url':url,'target_id':target_id,'submission_pending':True,
+                if pending or identity['status']!='same_job':
+                    result={'url':public_url(url),'target_id':target_id,'submission_pending':pending,
+                            'identity':identity,'recovery_only':identity['status']!='same_job',
                             'instruction':'Confirmation observation only. Do not submit again.'}
+                    if not pending:result['instruction']='Inspect this owned tab or navigate back to the assigned job before form writes.'
                 else:result=inventory(await observe(page,package),package)
                 result['title']=await page.evaluate('document.title')
                 result['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
@@ -359,10 +369,16 @@ def browser_action(config,client,ownership,package,target_id,params):
                 by_key={q['question_key']:q for q in saved if q['state']!='superseded'}
                 result={'questions':[],'fields':[],'skipped':captured['skipped'],'policy':policy,
                         'human_input':package.get('human_input',{'messaging':{'available':False},'fallback':'answer_queue'})}
+                policy_failures={field.get('ref') for field in policy['fields'] if not field.get('committed')}
                 for item in captured['questions']:
                     data=item['data']
-                    question=(client.call('request_question',**ownership,**data) if method=='request_answers' else by_key.get(question_key(data)))
-                    if method=='request_answers':result['questions'].append(question);continue
+                    if method=='request_answers' and item['ref'] in policy_failures:
+                        result['skipped'].append({'ref':item['ref'],'reason':'configured_answer_control_unconfirmed'});continue
+                    question=by_key.get(question_key(data))
+                    if method=='request_answers' and (not question or question.get('answer') is None):
+                        question=client.call('request_question',**ownership,**data)
+                        if question.get('answer') is None:
+                            result['questions'].append(question);continue
                     if not question or question.get('answer') is None:
                         result['skipped'].append({'ref':item['ref'],'reason':'no_exact_saved_answer'});continue
                     answer=question['answer'];kind=data['kind']
@@ -379,11 +395,13 @@ def browser_action(config,client,ownership,package,target_id,params):
                         'committed':applied.get('committed',False),'reason':applied.get('reason')})
                     if applied.get('committed'):
                         text=answer['label'] if isinstance(answer,dict) else ('Yes' if answer else 'No') if type(answer) is bool else answer
-                        save_answer_history(config,package,ownership['attempt_id'],[{'field':data['field'],'question':data['question'],'answer':text}],
+                        history=save_answer_history(config,package,ownership['attempt_id'],[{'field':data['field'],'question':data['question'],'answer':text}],
                             page=data['context'].get('page','form'),source='human_answer_queue',basis=question['id']+':'+str(question['revision']))
+                        if history.get('answer_history_error'):result['fields'][-1]['answer_history_error']=history['answer_history_error']
                 succeeded=True
                 if method=='request_answers':
-                    result['instruction']='Use an advertised messaging capability for a quick user reply, or call park_questions to save the blocker and release the browser. A control failure is an engineering blocker, not a question for the user. Save actual human replies with answer_from_user; then apply_answers with fresh observed refs.'
+                    result['instruction']=('Ask only the remaining questions using an advertised messaging capability, or call park_questions to save them and release the browser. Save actual human replies with answer_from_user; then apply_answers with fresh observed refs.' if result['questions'] else
+                        'No missing answers require human input. Continue after handling any reported control failure with the known answer.')
                 return result
             if method=='simplify':
                 from .simplify_boundary import SimplifyBoundary
@@ -453,18 +471,8 @@ def readonly(path):
 
 
 def history_key(url):
-    from .managed_identity import greenhouse_query_identity
-    query_identity=greenhouse_query_identity(url)
-    if query_identity:return ('requisition_query',query_identity)
-    canonical=canonical_url(url); p=urlsplit(canonical)
-    if (p.hostname or '').endswith('.myworkdayjobs.com'):
-        parts=p.path.casefold().strip('/').split('/')
-        if parts and re.fullmatch(r'[a-z]{2}(?:-[A-Za-z0-9]{2,4})?',parts[0]):parts=parts[1:]
-        if 'job' in parts:
-            i=parts.index('job')
-            if len(parts)>i+2 and '_' in parts[i+2]:
-                return p.netloc.lower(),parts[0],parts[i+2].rsplit('_',1)[-1]
-    return (canonical,)
+    from .managed_identity import job_identity
+    return job_identity(url)
 
 
 def history_matches(paths,url):

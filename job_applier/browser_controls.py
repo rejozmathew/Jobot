@@ -50,14 +50,13 @@ def _merge_writers(root, children, diagnostics):
     priorities=('active','unknown','login_required','needs_review','ready','complete','unsupported','missing')
     merged['status']=next(status for status in priorities if any(d.get('status')==status for d in documents))
     merged['panel']=any(d.get('panel') for d in documents)
-    merged['writer_safe']=all(d.get('writer_safe') for d in documents) and not diagnostics
+    merged['writer_safe']=all(d.get('writer_safe') for d in documents)
     merged['activity']={key:any(d.get('activity',{}).get(key) for d in documents)
                         for key in ('busy_indicator','explicit_writer','waiting_for_input')}
     merged['source']='fixture' if any(d.get('source')=='fixture' for d in documents) else root.get('source','observed_dom')
     merged['application_frames']=[{'frame_id':frame.frame_id,'document':frame.nonce,
         **{k:value.get(k) for k in ('fingerprint','page_signature','page_ref','status')}} for frame,value in children]
     merged['frame_diagnostics']=list(diagnostics)
-    if diagnostics:merged['status']='unknown'
     return merged
 
 
@@ -251,7 +250,6 @@ async def simplify_document(page,*,ref=None,operation=None):
     if isinstance(page,CDPPage) and package and platform_for_url(package['job']['url'])!='workday':
         router=await router_for(page)
         if not router.frames:await router.discover()
-        if router.diagnostics:raise FrameUnavailable('application_frame_unavailable')
         documents+=list(router.frames.values())
     observed=[(document,await document.evaluate(OBSERVE)) for document in documents]
     choices=[(document,value) for document,value in observed

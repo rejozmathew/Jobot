@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.6
+version: 0.3.7
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -28,8 +28,9 @@ runner contains no model and retains one CDP connection during its bounded call.
 1. Confirm role, identity, approved asset and submission authorization once.
 2. Call the runner for routine observe/act/wait/advance. It checks controls and
    writer state, lets Simplify fill, and prefers enabled Continue after settling.
-3. `waiting`: call again. Persisted counters protect against repeated autofill;
-   do not reset checkpoints to evade limits. Heartbeat is telemetry, not expiry.
+3. `waiting`: call again. A helper time slice ending is normal. Persisted evidence
+   prevents repeating unchanged actions; newly observed controls or changed form
+   evidence can support another recovery. Heartbeat is telemetry, not expiry.
 4. The runner handles Workday authentication: read the existing site account,
    reuse its saved credential (or the configured retained default for a new site),
    choose Create Account or Sign In, accept the uniquely observed account
@@ -42,8 +43,9 @@ runner contains no model and retains one CDP connection during its bounded call.
    confirmation. Keep the account pending until authentication is verified;
    do not attempt creation again.
    A proven undispatched click retains its reason and becomes
-   `creation_not_executed`, permitting at most two undispatched attempts per
-   auth mode in this session. A possibly dispatched action is not replayed.
+   `creation_not_executed`, permitting recovery of the observed control. Prior
+   undispatched clicks do not prohibit a different valid recovery. A possibly
+   dispatched creation action is not replayed.
    The screen account includes its state, timestamp and last attempt ID.
    Counters prevent repeating an uncertain create/sign-in action. Optional
    marketing consent is not selected. No generated password is silently lost.
@@ -58,8 +60,9 @@ runner contains no model and retains one CDP connection during its bounded call.
    account form. It handles the chooser returning once after creation. For a
    mapped chooser fallback, omit `account_mode` and `credentials`: this control
    opens the password form and does not submit credentials.
-   A same-site `/login?redirect=...` is supported only when the decoded redirect
-   leads back to this exact requisition. Native clicks use browser pointer input;
+   A login on the owned career portal is supported; when it has a job redirect,
+   that redirect must identify this requisition. Locations, titles and application
+   child routes are presentation, not separate job identities. Native clicks use browser pointer input;
    a dispatched click is not employer acceptance. Report account creation/sign-in
    as confirmed only after the employer supplies the corresponding evidence.
    If the user completed account creation manually, continue with sign-in and
@@ -96,15 +99,16 @@ runner contains no model and retains one CDP connection during its bounded call.
    existing submission boundary. Do not turn settings inspection into a project.
 
    `inspection_required` returns promptly for a settled recognition miss or an
-   explicit writer uncertainty. The latter allows observation only until settled.
-   Do not finish merely because a helper missed a field. A second screen decision
-   needs new required questions, native validation, verification or unresolved
-   ambiguity; values, spinners, scrolling and ordinary rerenders are not new
-   reasoning problems. Return routine pages to Simplify without LLM interpretation.
+   explicit writer uncertainty. Reobserve or use the shared observed Simplify
+   Stop/Cancel recovery to establish settlement. Do not finish merely because a
+   helper missed a field. A different control or materially changed mapped answer
+   can be handled on the same screen; only the same possibly executed decision
+   remains protected from replay. Return routine pages to Simplify without LLM interpretation.
    Keep going in the same application after the first successful auth/autofill.
 5. `blocked`: handle only the actual required blocker with the shared session's
-   `browser` operation and approved facts. One initial autofill and one retry per
-   step remain the limit. Do not audit every optional field or reconstruct history.
+   `browser` operation and approved facts. Repeated unchanged autofill returns to
+   inspection; changed form evidence can justify another fill in the same step.
+   Do not audit every optional field or reconstruct history.
    Use the shared `browser select`/`fill`/`check` API with the observed ref; the
    runtime resolves the control, including an embedded document, without a model
    choosing another dropdown handler. For genuinely missing required facts,
@@ -127,7 +131,7 @@ runner contains no model and retains one CDP connection during its bounded call.
    records intent and submits once.
    It captures native and Simplify confirmation with the actual source and applies
    the profile's accepted sources. Valid post-submit routes can be inspected even
-   after Workday's form step disappears. Follow the shared bounded inspection and
+   after Workday's form step disappears. Follow the shared inspection and
    reconciliation procedure when evidence remains uncertain. Same-site
    `jobTasks/completed/application` is an accepted read-only completion route.
    Fresh Simplify "Application Submitted!" is sufficient when its source is
@@ -137,7 +141,8 @@ runner contains no model and retains one CDP connection during its bounded call.
    observation/reconciliation only. `ready_for_review` applies only in review mode.
 
 No in-run PDF extraction, resume search, career/education reconstruction or shared
-code/skill changes. Never compete with active or unknown writers. Generic browser
+code/skill changes. Never compete with active writers; recover unknown state
+through observation or the observed extension stop control. Generic browser
 focus and old targets do not belong to this session. An unavailable CAPTCHA/MFA,
 rejected credentials or unknown required fact is a specific blocker.
 

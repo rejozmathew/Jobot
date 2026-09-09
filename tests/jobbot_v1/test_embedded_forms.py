@@ -433,3 +433,15 @@ def test_embedded_confirmation_scope_and_uncertain_dispatch(tmp_path,outcome):
                 page.target_id,activate,seconds=1,application_control=target)
             assert again['status']==expected and submissions==['/fake-submit'],again
     asyncio.run(check())
+def test_observed_simplify_stop_settles_in_its_real_document(tmp_path):
+    async def check():
+        from job_applier.simplify_boundary import SimplifyBoundary
+        async with fixture_browser(tmp_path) as (page,package,_):
+            await page.evaluate("const host=document.createElement('div');host.className='simplify-jobs-shadow-root';host.attachShadow({mode:'open'}).innerHTML='<p>Filling your application</p><button>Stop autofill</button>';host.shadowRoot.querySelector('button').onclick=()=>host.shadowRoot.innerHTML='<button>Autofill this page</button>';document.body.append(host)")
+            boundary=SimplifyBoundary(page,budget_seconds=3)
+            before=await boundary.observe()
+            assert before['status']=='active' and before['controls']['stop']['enabled']
+            result=await boundary.perform('stop')
+            assert result['execution']=='clicked' and result['writer_state']=='idle'
+            assert (await boundary.observe())['status']=='ready'
+    asyncio.run(check())

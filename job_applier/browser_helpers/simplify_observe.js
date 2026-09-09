@@ -12,7 +12,7 @@
   const reference=key=>{if(!scope.referenceKeys.has(key))scope.referenceKeys.set(key,crypto.randomUUID());return scope.referenceKeys.get(key);};
   scope.fieldValues=scope.fieldValues||new Map();
   scope.valueEpoch=scope.valueEpoch||0;
-  const CONTROL_KINDS=['autofill','autofill_skills','continue','start','create_account_autofill','create_account','sign_in','submit'];
+  const CONTROL_KINDS=['autofill','autofill_skills','continue','start','create_account_autofill','create_account','sign_in','submit','stop'];
   const candidates={};
   const controls={};
   const inventory=[];
@@ -32,6 +32,7 @@
       else if(/^create account$/.test(label)) kind='create_account';
       else if(/^sign in( (&|and) autofill)?$/.test(label)) kind='sign_in';
       else if(/^submit application$/.test(label)) kind='submit';
+      else if(/^(?:stop|cancel) (?:autofill|account step|filling)$/.test(label)) kind='stop';
       const enabled=!button.disabled && button.getAttribute('aria-disabled')!=='true' && button.getAttribute('aria-busy')!=='true';
       if(!kind){
         const ref=reference('other:'+label);

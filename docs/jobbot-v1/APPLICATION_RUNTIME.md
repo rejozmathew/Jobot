@@ -82,12 +82,16 @@ account. The native email chooser can recur once after creation. Employer
 evidence establishes `created_unverified` or `confirmed`. Screen handoffs include
 state, timestamps and last attempt ID.
 
-`target_job_mismatch` protects the assigned application's URL scope in addition
-to target/session ownership. Browser observation validates the full owned URL
-before and after reading the page. Display URLs intentionally omit queries;
-they cannot validate a Workday login whose query carries the requisition redirect.
-Only a redirect to the same application is accepted, and navigation during
-observation prevents quiescence. Full authentication URLs are not added to output.
+Job identity and browser ownership are distinct. The shared Workday parser uses
+host, career site and the complete requisition (including suffixes such as
+`R100_1`); locale, display location/title and application child routes do not veto
+the same job. History, target checks and confirmation use that identity. Stored
+URL hashes/history are not rewritten. An owned portal login is allowed; an
+explicit redirect must identify the assigned job. Browser observation checks the
+full URL before and after reading; public URLs omit authentication queries.
+`different_job` and `identity_unresolved` refuse the affected form write while
+preserving owned snapshots/screenshots and navigation back to the assigned job.
+Navigation during observation prevents quiescence.
 
 ## Actual startup and call sequence
 
@@ -124,8 +128,8 @@ Generic local service calls use `run_applier.py managed call --config <path>
    created before readiness; repeated start returns the same session/target.
 3. `ensure_host` automatically launches the no-model host. It checks ownership,
    launches the configured browser, verifies actual process arguments, profile,
-   mode, endpoint, fresh operable target and Simplify on the supported application
-   surface. It does not require a panel on about:blank.
+   mode, endpoint and fresh operable target. It observes Simplify on the application
+   surface; slow loading/missing panels return setup recovery on the same target.
 4. `session_connected` creates the managed attempt and binds the fresh target.
    The compact handle resolves low-level IDs and includes existing application
    context: identity, approved assets, account strategy and helpers/lessons.
@@ -180,7 +184,7 @@ Pause/stop acknowledgement follows actual owned process-tree termination and
 abortion of active actions. Startup observes pending control before connecting.
 Explicit attach requires completed pause and creates a fresh target for the new
 driver on the same attempt; the previous driver is rejected. Retry requires ended
-ownership and no unresolved submission intent. After a crash, a replacement host
+ownership and no unresolved submission dispatch. After a crash, a replacement host
 checks recorded process identities before classifying the lost session. It never
 replays an uncertain command. Orphan activity/unconfirmed host launch remains
 isolated with an actionable reason; a definitely unstarted failure releases its slot.
@@ -227,7 +231,9 @@ backups, checkpoints and test artifacts stay out of Git.
 
 Prepare each production workspace separately with official authenticated Simplify;
 never clone live cookies/profile state. An empty second profile is an installation
-gap. Readiness proves panel availability; the executor must still verify actual
+gap. Readiness reports observed panel availability; slow loading or a missing
+panel returns `startup_recovery` with the operable owned target retained. Process,
+profile and target ownership still must be proven. The executor verifies actual
 Simplify/account/contact identities. require_simplify:false is development-only.
 Headless fixtures do not establish headless Simplify. Real official-service
 concurrency requires two simultaneous authenticated extension sessions.
@@ -246,14 +252,15 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | workspace_host.py / workspace_process.py | Windows lifetime, readiness, scoped JSON dispatch; no model |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
-| managed_identity.py | Shared target scope, including Workday details-to-job redirects with exact host, career site, full requisition slug and allowed child route |
+| managed_identity.py | Shared Workday host/site/full-requisition parser, comparison identity, history equivalence, diagnostic match states and job_requisition for confirmation; no display-location/title/step allowlist |
+| managed_shared.submission_pending / managed_events._submission_pending | One dispatch interpretation for service attempts/context, browser/Workday, host stop/finish and answer recovery; ordered existing ledger events, no new database |
 | workday_fast.py | Bounded Workday supervisor; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
 | browser_controls.py / browser_helpers/form_controls.js | Shared native form inventory, verified text/select/check/keyboard exceptions; Workday retains its site-specific inventory |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent |
-| application_answers.py | Interprets profile salary/privacy preferences and retains private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
+| application_answers.py | Interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | Shared one-click boundary, transient native/Simplify confirmation capture, scoped redirect inspection, private evidence and truthful outcome |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
@@ -283,8 +290,10 @@ Submission capture is armed on the owned CDP target before activation. Evidence
 survives ordinary scoped redirects and is persisted in the private spool. A
 possibly dispatched submit is never replayed. Native and Simplify proof carry
 separate sources; absence of approved evidence returns uncertainty. Local hosts
-retain that page for 120 seconds of inspection, then stop the owned process tree
-and retire. Reconcile supports the native plugin and portable CLI, records a
+retain that page until completion, requested Stop or the configured maximum
+runtime; there is no additional two-minute inspection deadline. Proven
+`not_executed` dispatch permits recovery in the same attempt. An intent with no
+dispatch result remains uncertain. Reconcile supports the native plugin and portable CLI, records a
 separate source/timestamp event, and preserves historical completion/duration.
 Headed browser startup requests and verifies maximization; no automatic refresh.
 One background host owns each occupied workspace, with independent parallel
@@ -294,6 +303,17 @@ Enabled Simplify input prompts can override a cosmetic spinner after stable
 observation, while real unfinished helper writes remain exclusive. Native
 takeover remains separate from extension input permission. Shared form helpers
 verify values and return ambiguous menu/coverage evidence instead of guessing.
+
+An unknown writer can settle through fresh stable extension evidence (including
+explicit unsupported/idle state), or the observed Simplify Stop/Cancel autofill
+control via `browser simplify action:stop`. This narrowly scoped cancellation is
+available to the owning local host while the extension state is active/unknown;
+an unended host write still excludes another write. Stop does not declare idle:
+the boundary observes stable settlement. Missing or unrecognized stop controls
+retain uncertainty and return inspection. Inaccessible-frame diagnostics affect
+that document's controls; readable documents retain their own routing/validation.
+Local semantic timing remains telemetry and does not veto an otherwise valid
+write. Legacy configured strategy checks remain on their existing callers.
 
 In `needs_review`, Workday prefers enabled native Continue so that a populated
 source answer such as LinkedIn does not reopen Simplify's review menu. At authorized
@@ -341,7 +361,10 @@ intake and read-only history; meaningful unknown query keys remain distinct.
 
 Missing facts use an additive durable queue, separate from the private observed
 answer audit. `browser request_answers` first applies approved salary/privacy
-policy, then captures only missing required questions from current controls.
+policy and exact saved human answers, then queues only the remaining missing
+required questions from current controls. Simplify and the executor use approved
+facts before invoking that queue. Optional answer-history/progress-event errors
+remain diagnostics; action ownership, dispatch intent and outcomes remain mandatory.
 Failed menu interaction is a technical diagnostic, not a human question. Answers
 are scoped by candidate, verified job identity, exact field/question/options and
 page/section/document. Reordered or changed choices are not guessed equivalent.
@@ -446,9 +469,11 @@ checkpoint implements the approved maximum/fallback policy.
 
 ## Verification boundaries
 
-### Planned: shared embedded forms and unresolved questions
+### Historical design: shared embedded forms and unresolved questions
 
-This is proposed engineering scope, not implemented support or live acceptance.
+The following is the retained design rationale from before the embedded-form and
+answer-queue checkpoint. Current implemented behavior is described above; this
+historical plan is not the execution contract or a live acceptance claim.
 The existing dropdown operation supports native selects and associated ARIA
 menus in the document it can inspect. A form inside another frame is a separate
 observation/action-routing gap: adding more option-label matching alone will not

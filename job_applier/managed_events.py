@@ -18,6 +18,12 @@ def seconds(end, start):
 
 
 class EventServices:
+    def _submission_pending(self, db, attempt):
+        from .managed_shared import submission_pending
+        if not attempt['submit_intent_at']:return False
+        rows=db.execute('SELECT payload_json,stale FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt['id'],)).fetchall()
+        return submission_pending(attempt,rows)
+
     def _append_event(self, db, a, *, worker_id, fence, event_id, action_id, event_type,
                       observed_at, duration_seconds, payload):
         if event_type not in EVENT_TYPES or not event_id: raise ProtocolError('invalid_event')
@@ -64,14 +70,15 @@ class EventServices:
     def events(self, attempt_id):
         with self.tx() as db:
             self._get(db,'application_attempts',attempt_id)
-            return [dict(x) for x in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY recorded_at,id',(attempt_id,))]
+            return [dict(x) for x in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt_id,))]
 
     def action_start(self, attempt_id, *, worker_id, fence, action_id, tool_name, writes_browser=True):
         if type(writes_browser) is not bool:raise ProtocolError('invalid_writer_flag')
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
             if writes_browser:self._budget_check(db,a)
-            semantic=self._strategy_check(db,a,tool_name) if writes_browser else self._field_context(db,a)
+            stopping=tool_name=='local_browser.simplify_stop' and bool(local_session(db,attempt_id))
+            semantic=self._strategy_check(db,a,tool_name) if writes_browser and not stopping else self._field_context(db,a)
             run=self._get(db,'runs',a['run_id'])
             if run['control']!='running':
                 if writes_browser or tool_name != 'browser_observe' or run['control'] not in ('pause_requested','stop_requested'):
@@ -81,7 +88,7 @@ class EventServices:
                 if old['attempt_id']!=attempt_id or old['tool_name']!=tool_name or old['writes_browser']!=int(writes_browser): raise ProtocolError('idempotency_conflict')
                 if old['ended_at']: raise ProtocolError('action_already_finished')
                 return dict(old)
-            if writes_browser and (a['writer_state']!='idle' or db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1',(attempt_id,)).fetchone()):
+            if writes_browser and ((a['writer_state']!='idle' and not stopping) or db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1',(attempt_id,)).fetchone()):
                 raise ProtocolError('browser_writer_busy')
             db.execute('INSERT INTO managed_actions(id,attempt_id,tool_name,started_at,writes_browser,semantic_context_json) VALUES (?,?,?,?,?,?)',(action_id,attempt_id,safe_text(tool_name),self.now(),int(writes_browser),dumps(semantic)))
             if not hasattr(self,'_action_clocks'):self._action_clocks={}

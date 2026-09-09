@@ -10,6 +10,12 @@ POLICY_KEYS={'salary_expectation','routine_privacy_consent','submission_evidence
 
 
 def save_answer_history(config,package,attempt_id,answers,*,page,source,basis=None):
+    """Best-effort private journal; its failure cannot make a form write retryable."""
+    try:return _save_answer_history(config,package,attempt_id,answers,page=page,source=source,basis=basis)
+    except Exception as exc:return {'answer_history_error':type(exc).__name__}
+
+
+def _save_answer_history(config,package,attempt_id,answers,*,page,source,basis=None):
     """Private question/answer history, separate from redacted operational telemetry."""
     from .managed_redaction import reject_secrets
     if not config.get('spool_dir'):return {}
@@ -155,8 +161,8 @@ async def apply_policy(page, package, observed, *, completed=None, posted_range=
             if amount is not None:params={'method':'fill','ref':field['ref'],'value':amount}
         if params:
             if dry_run:
-                results.append({'field':label,'pending':True});continue
+                results.append({'field':label,'ref':field['ref'],'pending':True});continue
             result=await form_action(page,params)
-            results.append({'field':label,'committed':result.get('committed',False),'reason':result.get('reason')})
+            results.append({'field':label,'ref':field['ref'],'committed':result.get('committed',False),'reason':result.get('reason')})
             if result.get('committed'):completed.append(key)
     return {'changed':any(r.get('committed') for r in results),'fields':results}

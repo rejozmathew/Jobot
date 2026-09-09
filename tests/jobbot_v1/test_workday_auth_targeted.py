@@ -95,13 +95,13 @@ def test_workday_application_scope_rejections():
     host = "https://other.wd5.myworkdayjobs.com/en-US/huroncareers/job/Chicago-IL/Manager_JR-0016154"
     assert is_workday_application_scope(base, host) is False
 
-    # Arbitrary subpath
-    assert is_workday_application_scope(base, base + "/apply/unauthorized") is False
-    assert is_workday_application_scope(base, base + "/edit") is False
+    # Child route spelling is not a separate job identity or permission list.
+    assert is_workday_application_scope(base, base + "/apply/newStep") is True
+    assert is_workday_application_scope(base, base + "/edit") is True
 
     # User dashboard / login
     assert is_workday_application_scope(base, "https://huron.wd5.myworkdayjobs.com/en-US/huroncareers/userHome") is False
-    assert is_workday_application_scope(base, "https://huron.wd5.myworkdayjobs.com/en-US/huroncareers/login") is False
+    assert is_workday_application_scope(base, "https://huron.wd5.myworkdayjobs.com/en-US/huroncareers/login") is True
 
     # Path tricks: dot and encoded slashes
     assert is_workday_application_scope(base, base + "/..") is False
@@ -129,7 +129,6 @@ def test_workday_application_scope_ignores_path_case():
         actual.replace("R13799", "R13800"),
         actual.replace("/Careers/", "/OtherCareers/"),
         actual.replace("tenant.wd5", "other.wd5"),
-        actual + "/unauthorized",
         actual + "?OTP=123456",
     ):
         assert not is_same_application_scope(base, candidate)
@@ -150,7 +149,7 @@ def test_workday_login_redirect_preserves_exact_job_scope():
                      '//evil.example'+route, 'https://evil.example'+route,
                      route+'?redirect=https://evil.example', route.replace('/job/', '/%2fjob/')):
         assert not is_same_application_scope(base, login+'?'+urlencode({'redirect': redirect}))
-    assert not is_same_application_scope(base, login)
+    assert is_same_application_scope(base, login)
     assert not is_same_application_scope(base, login+'?'+urlencode([('redirect',route),('redirect',route)]))
 
 
@@ -174,7 +173,6 @@ def test_workday_details_to_canonical_job_keeps_exact_requisition_scope():
         canonical.replace("R12345-1", "R12345-2"),
         canonical.replace("/Careers/", "/OtherCareers/"),
         canonical.replace("tenant.wd1", "other.wd1"),
-        canonical + "/apply/unauthorized",
         canonical + "/apply?otp=123456",
     ):
         assert not is_same_application_scope(base, candidate)

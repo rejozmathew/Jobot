@@ -23,7 +23,7 @@ class SimplifyBoundary:
         if not isinstance(raw,dict) or raw.get('status') not in STATES or not isinstance(raw.get('url'),str):
             raise ValueError('Unrecognized Simplify observation')
         controls={}
-        for kind in ('autofill','autofill_skills','continue','start','create_account_autofill','create_account','sign_in','submit'):
+        for kind in ('autofill','autofill_skills','continue','start','create_account_autofill','create_account','sign_in','submit','stop'):
             item=(raw.get('controls') or {}).get(kind) or {}
             controls[kind]={'ref':item.get('ref') if isinstance(item.get('ref'),str) else None,'enabled':item.get('enabled') is True,
                             'label':item.get('label','')}
@@ -78,7 +78,7 @@ class SimplifyBoundary:
             'observation':observed,'execution':getattr(self,'execution','not_executed')}
 
     async def perform(self,operation,*,retry=False,credential_evidence=None):
-        if operation not in ('autofill','autofill_skills','continue','start','sign_in'):raise ValueError('Unsupported Simplify operation')
+        if operation not in ('autofill','autofill_skills','continue','start','sign_in','stop'):raise ValueError('Unsupported Simplify operation')
         self.execution='not_executed'
         self.deadline=self.clock()+self.budget
         before=await self.observe();current=before
@@ -93,6 +93,25 @@ class SimplifyBoundary:
         decision=self.decide(before,already and not can_retry,fast=self.fast)
         active=before['status']=='active';clicked=False
         try:
+            if operation=='stop':
+                control=before['controls']['stop']
+                if not control['ref'] or not control['enabled']:
+                    return self._result(before,False,'unknown','observed_stop_control_required')
+                self.execution='possibly_executed'
+                response=await self.page.evaluate(CLICK,{'ref':control['ref'],'url':before['url'],
+                    'page_ref':before.get('page_ref'),'operation':'stop'})
+                if response.get('status')!='clicked':
+                    self.execution='not_executed' if response.get('clicked') is False else 'possibly_executed'
+                    return self._result(before,False,'unknown','stop_unconfirmed')
+                self.execution='clicked';previous=None
+                while self.clock()<self.deadline:
+                    current=await self.observe()
+                    settled=current.get('panel') and current.get('writer_safe') and current['status'] in ('ready','complete','needs_review','unsupported','login_required')
+                    if settled and previous==current:
+                        return self._result(current,True,'idle','observed_stop_settled')
+                    previous=current
+                    await self.sleep(self.poll)
+                return self._result(current,False,'unknown','stop_settlement_unconfirmed')
             if operation=='sign_in' and not active:
                 if before.get('login_kind')!='employer':
                     return self._result(before,False,'idle','simplify_login_is_not_employer_sign_in')
@@ -143,5 +162,5 @@ class SimplifyBoundary:
             return self._result(current,page_or_field_changed,'unknown','autofill_budget_timeout')
         except (asyncio.TimeoutError,ValueError,RuntimeError):
             page_or_field_changed = self._page_changed(before,current) if operation in ('continue','start') else self._changed(before,current)
-            return self._result(current,page_or_field_changed,'unknown' if clicked or active else 'idle','observation_unavailable')
+            return self._result(current,page_or_field_changed,'unknown' if self.execution!='not_executed' or active or before['status']=='unknown' else 'idle','observation_unavailable')
         finally:self.deadline=None

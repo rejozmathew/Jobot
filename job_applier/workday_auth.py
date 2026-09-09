@@ -1,5 +1,7 @@
 """Bounded Workday account navigation using shared private credentials and ledger."""
 import asyncio
+import hashlib
+import json
 import uuid
 
 from .managed_credentials import fill_page_credentials
@@ -11,7 +13,6 @@ def result(reason=None,status='authentication_required'):
 
 def arm_account(r,mode,reference):
     state=r.state.setdefault('authentication',{})
-    if state.get('not_executed',{}).get(mode,0)>=2:raise ValueError('account_click_recovery_limit')
     if mode=='create_account':
         record(r,'creation_pending',reference,'Account creation dispatch intent; employer creation is not yet confirmed')
     state.update(credential_ref=reference,pending_mode=mode,
@@ -75,7 +76,10 @@ async def recover_screen(r,mapping):
     if (mapping.get('credentials') or mapping.get('fields') or (mapping.get('action') or {}).get('source')!='simplify') and not gate.get('native_takeover_authorized',True):
         return stopped('simplify_input_required')
     if mapping.get('screen_key')!=screen['screen_key']:return stopped('new_screen_evidence_requires_mapping')
-    key=screen['screen_key'];steps=r.state.setdefault('recovery_steps',{})
+    # Keep uncertainty for the actual mapped decision. Other controls or changed
+    # approved field values on the same screen remain available for recovery.
+    key=screen['screen_key']+':'+hashlib.sha256(json.dumps(mapping,sort_keys=True).encode()).hexdigest()
+    steps=r.state.setdefault('recovery_steps',{})
     if key in steps:return stopped('screen_action_already_attempted',steps[key])
     if r.state.get('submit_intent') or observed.get('confirmation_surface'):
         return stopped('submission_observation_only')
@@ -84,10 +88,13 @@ async def recover_screen(r,mapping):
     matches=[c for c in candidates if c.get('ref')==ref]
     if len(matches)!=1:return stopped('mapped_action_unavailable')
     control=matches[0]
-    if 'submit' in (control.get('text','')+' '+control.get('label','')+' '+control.get('operation','')).lower():
+    ui=observed.get('auth_ui') or {}
+    auth_submission=observed.get('auth') and ui.get('mode') in ('sign_in','create_account') and (
+        control.get('auth_form') or ref==observed.get('native',{}).get('auth_submit',{}).get('ref'))
+    if not auth_submission and (control.get('operation')=='submit' or
+            (control.get('text') or control.get('label','')).strip().lower() in ('submit','submit application')):
         return stopped('use_existing_final_submission_boundary')
     if observed.get('identity_mismatch'):return stopped('candidate_email_mismatch')
-    ui=observed.get('auth_ui') or {}
     if ui.get('challenge'):return stopped('workday_verification_required')
     fields=mapping.get('fields') or [];credentials=mapping.get('credentials');mode=mapping.get('account_mode')
     if not isinstance(fields,list) or len(fields)>30 or any(not isinstance(f,dict) or set(f)!={'ref','value'} for f in fields):
@@ -110,8 +117,6 @@ async def recover_screen(r,mapping):
         if account.get('action')=='operator_required':return stopped('account_requires_operator')
         if mode=='create_account' and account.get('action') in ('sign_in','reconcile','verify'):
             return stopped('account_creation_outcome_unconfirmed' if account['action']=='reconcile' else 'account_creation_confirmed_use_sign_in')
-        if mode and r.state.get('authentication',{}).get('not_executed',{}).get(mode,0)>=2:
-            return stopped('account_click_recovery_limit')
     if fields:
         validation=await r.page.evaluate_function(WORKDAY_CLICK,{'step':observed['step'],'page_signature':observed['page_signature'],
             'ref':ref if source=='native' else None,'fields':fields,'validate_only':True})
@@ -227,7 +232,6 @@ async def advance_auth(r,observed):
     if account.get('action')=='reconcile' and not pending_creation and not ui.get('account_exists') and not (
         mode=='sign_in' and state.get('submitted')=='create_account' and state.get('last_dispatch',{}).get('execution')=='clicked'):
         return result('account_creation_outcome_unconfirmed')
-    if state.get('not_executed',{}).get(mode,0)>=2:return result('account_click_recovery_limit')
     existing=account.get('action') in ('sign_in','verify') or pending_creation or ui.get('account_exists')
     action='auth_sign_in_email' if mode=='email_chooser' else 'auth_submit'
     if mode=='create_account' and existing and not (state.get('submitted')=='create_account' and not ui.get('account_exists')):
