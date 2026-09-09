@@ -377,6 +377,90 @@ checkpoint implements the approved maximum/fallback policy.
 
 ## Verification boundaries
 
+### Planned: shared embedded forms and unresolved questions
+
+This is proposed engineering scope, not implemented support or live acceptance.
+The existing dropdown operation supports native selects and associated ARIA
+menus in the document it can inspect. A form inside another frame is a separate
+observation/action-routing gap: adding more option-label matching alone will not
+make those controls reachable. Employer-hosted Greenhouse validation exposed
+that boundary; detailed application evidence remains in managed attempt reports.
+
+The next delivery should extend the existing shared browser/form helpers with a
+small frame-aware adapter. Keep Simplify as the bulk filler and retain the
+existing application runtime, browser profile, assigned target and lifecycle.
+This is not a separate Greenhouse application runner or a per-employer script.
+Use the same form operations for controls in the top document and in a verified
+application frame. Same-origin and cross-origin frames are separate test cases;
+the latter cannot be traversed using ordinary parent-document selectors.
+
+| Responsibility | Proposed scope and boundary |
+|---|---|
+| Frame discovery and routing | Associate the frame with the owned parent target and verified employer/requisition. Do not select arbitrary frames, ads, challenges or another job solely because they contain inputs. |
+| Control references | Bind each observed ref to its document/frame and observation. Resolve selection, checking, filling and pointer validation in that document; reject detached, navigated or ambiguous frames. Keep Simplify panel refs distinct from employer-form refs. |
+| Value operations | Reuse native-select and associated-menu behavior, including exact option matching and read-back. Preserve frame offsets and coverage checks for pointer input; do not substitute guessed coordinates or force clicks. |
+| Submission and evidence | Route the observed frame control through the existing one-click submission boundary. Arm confirmation capture before dispatch, retain parent Simplify and native frame evidence with their sources, and never replay an uncertain submission. |
+| Redirects and job identity | Recognize the same requisition across verified posting/form routes, including meaningful query identifiers. Reject conflicting job identifiers; do not authorize every same-host path. Link verified aliases through the existing identity system without rewriting historical jobs. |
+| ATS recognition | Use observed embedding evidence for custom hosts. Recognition may select ATS-specific procedures, but generic form operations should not depend on a Greenhouse hostname or employer name. |
+| Answer policy | Present approved facts, explicit user answers and existing answer defaults consistently to the executor. Preserve contrary facts, question-type boundaries and configured exclusions. Record whether an answer came from a fact, user instruction or approved default. |
+| Routine privacy consent | Extend the shared policy from checkboxes to observed select/menu acknowledgments. Require an unambiguous consent option and continue excluding marketing and job alerts. |
+| Required questions | Distinguish native required/validation evidence from Simplify review warnings. Leave optional unanswered fields alone unless separately requested; use the answer type rather than applying a yes/no default to a country or text question. |
+
+Workday retains its existing page recognition, authentication/account sequence,
+mapped recovery and fast runner. Shared changes can still affect Workday, so
+preserving that dispatch path is not sufficient evidence of compatibility.
+Regression coverage must exercise its use of the shared helpers. Do not fold the
+deferred Workday authentication exception into this delivery.
+
+Before implementation, add focused failing regressions using synthetic forms and
+isolated browser profiles, never live employer applications or production data.
+Cover top-level forms, same-origin frames, cross-origin frames, ambiguous frames,
+frame rerenders/navigation, populated selections, consent dropdowns, required
+versus optional questions, parent overlays and frame offsets. Include verified
+same-job redirects and different-job query rejection. Exercise single submission,
+native/extension confirmation and uncertain-dispatch protection with fake
+employer endpoints. Run relevant Workday authentication, mapped recovery,
+pointer, answer-history and confirmation checks, then one final managed suite:
+`.venv/Scripts/python.exe -m pytest tests/jobbot_v1 -q`. Browser fixtures establish
+mechanism coverage; later ordinary authorized applications establish live ATS
+acceptance. Runtime/skill changes must happen outside application benchmarks.
+
+A second delivery can add a shared **Needs your answer** review queue. Current
+answer history records observed answered questions; it is not a durable queue of
+unanswered questions/options and the dashboard has no response editor yet.
+Persist the exact unresolved required question, response type, observed options,
+job/candidate context, reason for escalation and subsequent user answer with
+provenance in the existing managed data/artifact system. Use approved facts and
+applicable defaults before asking. Do not treat a control-access failure as a
+request for the user to invent another answer.
+
+The dashboard is the durable review interface: **Save answers** leaves the job
+for a later batch; **Save and retry** requests an ordinary managed continuation.
+Keep unresolved jobs out of that batch. Match saved answers to fresh questions
+and options; old DOM references must not survive into a new session. Answers are
+application-scoped unless the user explicitly approves broader reuse. An
+uncertain prior submission remains a reconciliation case, not an answer-driven
+retry.
+
+Hermes Discord can be an optional notification/reply channel over those same
+question records, rather than a separate workflow or bot service. Deployment
+credentials and channel routing remain in the private Hermes configuration.
+Correlate authorized replies with a specific question and application. A quick
+reply can continue an owned, quiescent live session; otherwise preserve the
+question and release the workspace through the managed lifecycle so unrelated
+applications can proceed. A chat message saying "paused" is not a lifecycle
+transition, and a paused session currently retains its workspace slot. Define
+the bounded waiting/parking behavior as part of that second delivery.
+
+Implementation documentation and PRs must distinguish proposed, fixture-tested
+and live-verified behavior. Identify the motivating Greenhouse validation and
+related attempt IDs in the PR; keep full employer-specific diagnoses in managed
+history. Update this helper map and canonical instructions when actual caller
+responsibilities change. No Discord notification or application retry is
+authorized merely by documenting this design.
+
+### Current implementation
+
 Snapshot and Workday recovery share one native/official-extension inventory in
 workday_fast.observe_page/screen_inventory. workday_observe retains unique
 semantic refs across routine rerenders; the existing private filler and native

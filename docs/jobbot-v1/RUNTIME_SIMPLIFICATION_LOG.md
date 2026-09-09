@@ -1,5 +1,30 @@
 # Runtime simplification implementation log
 
+## Proposed shared form recovery and human answers — 2026-09-08
+
+Employer-hosted Greenhouse validation exposed a gap between shared dropdown
+operations and access to an embedded application document. The proposed
+correction belongs below ATS-specific execution: reuse existing form operations
+with verified frame routing, preserve Workday recognition/authentication, and
+carry frame submission through the existing confirmation/uncertainty boundary.
+Custom-host ATS recognition and same-requisition redirect/identity handling need
+observed evidence; neither an ATS label nor matching hostname alone grants form
+access. Individual failure narratives remain in the managed database.
+
+The first delivery also aligns existing approved answer defaults with executor
+guidance and expands routine privacy consent to observed acknowledgment menus.
+Required native questions must remain distinct from optional Simplify review
+items. The second delivery is a durable dashboard question queue, with optional
+Hermes Discord questions/replies using the same records. Keeping it separate
+allows embedded-form fixes to ship without waiting for a new review interface.
+
+The detailed boundaries, test matrix and data ownership are documented under
+[planned embedded forms and unresolved questions](APPLICATION_RUNTIME.md#planned-shared-embedded-forms-and-unresolved-questions).
+The associated PR must identify its motivating Greenhouse tests and clearly
+separate fixture results from live application outcomes. No runtime, policy,
+dashboard or Discord behavior was implemented by this design update. Workday's
+additional authentication recovery remains deferred.
+
 ## Documentation audit and record ownership — 2026-09-08
 
 This log records architecture, implementation rationale, checkpoint commits,
