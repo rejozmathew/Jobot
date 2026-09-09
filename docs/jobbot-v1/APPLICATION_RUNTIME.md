@@ -6,11 +6,11 @@ Historical failures in REVIEW_HANDOFF remain historical evidence. Actual deliver
 checks and unresolved acceptance are in [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md).
 
 The existing runner connects native/extension observations to mapped recovery.
-Magellan attempt 27 reached submission; its outcome was reconciled from the user's
-confirmation. Gartner attempt 29 stopped on a Workday login click-layer variant.
-The proposed additional Workday authentication recovery remains unimplemented.
-Current evidence and prioritization are in the log's opening entries; describing
-an implementation here does not establish live acceptance on every ATS.
+Per-application outcomes and detailed diagnoses are retained in the managed
+database and existing attempt reports. The proposed additional Workday
+authentication recovery remains unimplemented. Design rationale and prioritization
+are in the implementation log; describing an implementation here does not
+establish live acceptance on every ATS.
 
 ## Before and after
 
@@ -307,6 +307,8 @@ and never imply that an executed form action is safe to replay.
 Use the existing managed attempt ID to join outcomes/timing, code and skill
 versions, actions/events and the private spool artifacts. Keep the design/change
 history in RUNTIME_SIMPLIFICATION_LOG rather than relying on an engineering chat.
+Keep individual failure/recovery narratives in the managed database, linked to
+their attempts; design documentation explains the resulting architectural choices.
 Record both successful and blocked applications: successful work establishes
 which recovery and answer paths were useful, while failures identify unmet cases.
 
@@ -317,7 +319,8 @@ which recovery and answer paths were useful, while failures identify unmet cases
 | Private `answers/attempt-<id>.json` | Observed questions/answers, company and portal metadata, changes, provenance and any recorded answer basis |
 | Private submission capture and screenshots | Observed native/Simplify confirmation or remaining uncertainty; source stays explicit |
 | Private fast checkpoint and executor tool results | Detailed dispatch and control evidence when retained; a checkpoint is mutable working state, not a complete immutable action history |
-| Implementation log | Sanitized root cause, evidence limits, remedy/checkpoint, validation and deferred proposals |
+| Retrospective operator checkpoint events | Per-attempt diagnosis, attempted recovery, evidence, resolution and provenance without rewriting execution history |
+| Implementation log | Architecture, implementation rationale, checkpoint validation and deferred design proposals |
 
 For comparisons, identify the failure mechanism (for example, a covered control
 with proven non-dispatch), not only the final generic blocked/budget-limit label.
@@ -330,8 +333,29 @@ belong to separately sourced recruiting outcomes, as described below.
 Current coverage is incomplete: `action_end` records coarse status, the fast
 checkpoint retains the latest dispatch, and some details remain only in executor
 tool results. Historical missing answer bases and dispatch reasons remain missing.
-The Gartner 29 diagnosis in the log preserves the recovered facts. No automated
-cross-attempt analysis or universal detailed failure-event capture is claimed.
+Recovered diagnoses are stored as operator checkpoint events with
+`operation:attempt_diagnosis`, `source:operator_postmortem` and structured
+`category`, `error_type`, `reason_code`, `evidence`, `fallback_reason` and
+`resolution` fields. Annotation timestamps describe the later review, not a
+fabricated execution-time observation. Post-completion events have `stale:1` to
+avoid creating active progress; they still appear in the full attempt report.
+They do not alter the original outcome, timing, account state or action history.
+No automated cross-attempt analysis or universal detailed failure-event capture
+is claimed; these retrospective notes supplement the existing automatic records.
+
+For a read-only review of the selected managed database:
+
+```sql
+SELECT attempt_id, recorded_at,
+       json_extract(payload_json, '$.error_type') AS diagnosis,
+       json_extract(payload_json, '$.evidence') AS evidence,
+       json_extract(payload_json, '$.resolution') AS resolution
+FROM managed_events
+WHERE actor = 'operator'
+  AND json_extract(payload_json, '$.operation') = 'attempt_diagnosis'
+ORDER BY attempt_id, recorded_at;
+```
+
 If review shows recurring evidence loss, add the minimum sanitized fields to the
 existing event/report path before considering another data store. Do not copy
 passwords, mail bodies, full profiles or unrestricted DOM dumps into Git/logs, and

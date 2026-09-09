@@ -5,15 +5,15 @@
 Start with [APPLICATION_RUNTIME.md](APPLICATION_RUNTIME.md) for the implemented
 local-session architecture, helper ownership, evidence storage and deferred work.
 [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md) records the design's
-evolution, checkpoint commits, measured outcomes, known defects and proposals that
-have not been implemented. Read its current entries before interpreting older
-review documents. Magellan attempt 27 has user-reported submission confirmation;
-Gartner attempt 29 exposed an unresolved Workday sign-in click-layer variant.
-This evidence does not establish universal ATS or headless Simplify support.
+evolution, checkpoint commits, verification and deferred design proposals. Read
+its current entries before interpreting older review documents. Per-application
+outcomes, detailed diagnoses and evidence belong in the managed database and its
+private artifacts; existing attempt reports expose retrospective annotations.
+Engineering checks do not establish universal ATS or headless Simplify support.
 
-The current recommendation is to preserve the Gartner diagnosis and defer the
-proposed authentication recovery expansion while gathering distinct application
-outcomes. The runtime document contains the standard request prompt for any ATS.
+Additional Workday authentication recovery is deferred pending broader evidence
+from distinct applications. The runtime document contains the standard request
+prompt for any ATS and describes how to retrieve stored application diagnoses.
 [WORKDAY_NEXT_RUN.md](WORKDAY_NEXT_RUN.md) describes measurement and preserves
 historical benchmark instructions; it does not authorize another application.
 

@@ -10,11 +10,11 @@ for the next job, changing only its URL. It applies across ATS platforms; existi
 skills choose the available procedure. The copy-ready block under the historical
 section below is retained as evidence of the old workflow, not today's prompt.
 
-After Gartner attempt 29, the engineering recommendation is to gather distinct
-application outcomes before adding its proposed authentication recovery policy.
-Do not use repeated retries of that job as the only reliability sample. Its
-blocked history and pending account remain evidence; this document does not queue,
-retry or abandon it. See the current entries in
+Gather distinct application outcomes before expanding the authentication
+recovery policy. Repeated retries of one job are not an independent reliability
+sample. Record detailed diagnoses with their database attempts and keep this
+benchmark focused on measurement. This document does not queue, retry or abandon
+an application. See the current design entries in
 [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md).
 
 ## Current local-session benchmark

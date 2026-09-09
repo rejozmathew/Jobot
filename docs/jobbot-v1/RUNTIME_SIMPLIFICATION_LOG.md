@@ -1,112 +1,58 @@
 # Runtime simplification implementation log
 
-## Documentation audit and current prioritization — 2026-09-08
+## Documentation audit and record ownership — 2026-09-08
 
-This log records why the design changed, what shipped, what was actually observed,
-and what remains proposed. It is not a verbatim conversation transcript. Earlier
-entries already covered the shipped work; this audit adds the Gartner attempt 29
-diagnosis, the unimplemented recovery proposal, headless limits and evidence-review
-policy. README now points to the current architecture/log instead of presenting
-the old runtime outage as the current checkpoint. APPLICATION_RUNTIME contains
-the standard ATS-independent request and the existing private evidence locations.
+This log records architecture, implementation rationale, checkpoint commits,
+validation and deferred design work. Per-application diagnoses and recovery
+narratives belong in the managed database alongside their attempts. Detailed
+case notes from the documentation audit have been moved into retrospective
+operator checkpoint events; they are available through existing attempt reports.
+Original outcomes, timing, account records and execution events remain intact.
+README points to this design history and APPLICATION_RUNTIME describes the data
+locations, standard ATS-independent request and headless verification limits.
 
-The code checkpoints relevant to this conversation are:
+The code checkpoints relevant to the design review are:
 
-| Checkpoint | Design change and reason | Evidence / remaining limit |
+| Checkpoint | Design change and reason | Verification / scope |
 |---|---|---|
-| `40e12f4` | Shared controls/keyboard, action-aware Simplify waiting, profile salary/privacy policy, pre-submit capture, reconciliation and workspace retirement | WEX exposed the gaps; focused checks passed. Original WEX uncertainty was retained. |
-| `3a8dacc` | Align discovery with the canonical procedure | Removed obsolete benchmark detours from ordinary execution instructions. |
-| `1c93616` | Retain auth dispatch results; distinguish pending creation from proven non-dispatch; recognize Workday's matching auth click layer | Magellan 26 established the defect. A user-authorized local account reset preserved failed attempt history. |
-| `0afbf59` | Remove final resume audit, preserve populated answers, retain portal/company-scoped Q&A and accept the completion route | Magellan 27 submitted in 541.08s end-to-end; outcome source is `user_reported`. Thirteen answers were recovered with provenance. Automatic email follow-up remains deferred. |
-| `a952cef` | Validate full login redirects; sign in with retained credentials after pending creation; handle Workday's email chooser | Gartner 28 exposed the scope defect. Attempt 29 confirms these paths progressed, but exposes a different click-layer label. |
-| Current documentation review | Preserve attempt 29, proposed scope and reasons to defer; distinguish headless mechanics from live acceptance | Documentation only. No authentication, browser-mode, database-outcome or retry change. |
+| `40e12f4` | Shared controls/keyboard, action-aware Simplify waiting, profile salary/privacy policy, pre-submit capture, reconciliation and workspace retirement | Focused checks; shared lifecycle and data policy with ATS-specific recognition. |
+| `3a8dacc` | Align discovery with the canonical procedure | Remove obsolete benchmark detours from ordinary execution instructions. |
+| `1c93616` | Retain auth dispatch results; distinguish pending creation from proven non-dispatch; recognize Workday's matching auth click layer | Focused authentication and account checks; preserve account/attempt history. |
+| `0afbf59` | Remove final resume audit, preserve populated answers, retain portal/company-scoped Q&A and accept the completion route | Focused checks; separately attributed submission evidence. Email follow-up remains deferred. |
+| `a952cef` | Validate full login redirects; sign in with retained credentials after pending creation; handle Workday's email chooser | Focused scope and authentication checks; no generalization of Workday controls to other ATS. |
+| Documentation review | Clarify design versus operational evidence, headless limits and prioritization | Documentation and historical database annotations only; no authentication or browser-mode change. |
 
-The earlier local-session and native-pointer design is recorded below under
+Earlier local-session and native-pointer design is recorded below under
 `497689c` / `24f9eb3` era checkpoints. The governing split remains shared lifecycle,
 approved profile data, private credentials, evidence and generic form operations;
 Workday owns its page recognition, account navigation and native auth controls.
 Routine work stays with Simplify; the executor handles demonstrated exceptions.
 
-### Recommendation: defer the larger Workday recovery expansion
+### Deferred: additional Workday authentication recovery
 
-Pause further engineering specifically to complete Gartner. Keep its blocked
-attempt and pending account as evidence; moving on does not mean marking it
-applied, deleting its history or recreating the account. Gather outcomes from a
-small set of distinct, authorized applications before deciding on the proposed
-recovery expansion. This is a prioritization recommendation, not a user instruction
-to launch applications or abandon a particular job permanently.
+Do not expand the recovery policy solely to complete one repeatedly debugged
+application. Evaluate independent occurrence, time lost, successful recovery and
+completion benefit. A small matcher correction and a new retry mechanism should
+be evaluated separately. Repeated attempts on one job do not establish incidence
+across employers, and a changed presentation alone does not establish its cause.
 
-The general click-layer problem also appeared in Magellan 26, so it is not proven
-to be unique to Gartner. The generic `Submit` label inside this login dialog has
-only been established in Gartner 29. Repeated retries of one job do not estimate
-the incidence across employers; neither rarity nor bot-detection causation is
-established. Compare independent cases, successful recoveries, time lost and
-eventual submission outcomes. Revisit when the same failure recurs elsewhere or
-measured completion benefit justifies a small, isolated repair. A small matcher
-correction and a new recovery-policy mechanism should be evaluated separately.
+If revisited, any exception must be scoped to the verified active Workday login
+form/dialog and its actual control relationships. Keep final application
+submission and other ATS outside that exception. The proposed alternate-target
+recovery opportunity remains unimplemented. Operational outcomes and detailed
+supporting evidence stay with their database attempts, not this design section.
 
-## Gartner sign-in dialog click layer — attempt 29, unresolved
+Documentation links, code fences, referenced checkpoints and the diff were
+checked. No browser/application or code tests were run for this documentation
+review. Headless capability remains separate from full live acceptance.
 
-The ordinary executor loaded `a952cef` and canonical skills 0.4.7 / 0.3.5.
-Request-to-ended-session time was 96.04 seconds, including about 6.67 seconds of
-startup. The attempt finished `blocked` with no submission intent. Its account
-remained pending from attempt 28. That pending state did not prevent sign-in.
+## Workday login redirect and pending sign-in — 2026-09-08
 
-| Observed time (UTC) | Action / result |
-|---|---|
-| 02:04:02 | Header Sign In dispatched; pending-account strategy opened the modal instead of the earlier Simplify entry flow. |
-| 02:04:07 | Sign in with email dispatched successfully. |
-| 02:04:09 | Credentials were privately filled; native sign-in click returned `control_obscured`, `not_executed`. The covering element was a native `DIV[role=button]`, `simplify:false`. |
-| 02:04:14 onward | Executor captured its own owned screenshot and invoked image inspection. This is separate from the screenshot later supplied by the user. |
-| 02:04:46 | Mapped recovery selected the same underlying button and received the same non-execution result. An initial unsupported CLI flag had already been corrected to the documented session call. |
-| 02:05:08 | Executor collapsed Simplify; it was not the reported covering element. |
-| 02:05:16 | Another mapping of the same button was rejected by the two-attempt account recovery limit before dispatch. |
-| 02:05:25 | Executor finished blocked; no credential rejection, verification challenge or successful authentication was observed. |
-
-The native inventory contains a visible `signInSubmitButton` labelled Sign In and
-a same-auth-container `click_filter` with accessibility label Submit. The observer
-requires the wrapper label to equal Sign In, so it selects the covered inner
-button. The earlier wrapper correction was too literal. Separately, mapped
-recovery rejects the word Submit before considering authentication context; the
-executor did not select the wrapper, but that code would reject such a mapping.
-The two proven non-dispatches consume the per-mode recovery budget. The reported
-budget limit is therefore a downstream helper limit, not an employer rejection.
-
-Evidence is the existing managed attempt/actions/events, private fast checkpoint
-and screenshot, and the public assistant/tool exchanges from the actual executor
-conversation. No private reasoning was inspected. The full login URL scope checks
-passed in this run. A visual screenshot cannot expose an invisible HTML wrapper's
-accessibility label; native metadata supplied that distinction.
-
-### Proposed Workday-only repair, not implemented
-
-If prioritized later, restrict the exception to the active Workday sign-in
-form/dialog. Validate that its selected email/password fields, visible sign-in
-button and actual `click_filter` target belong together. Return the covering
-control's observed reference so the existing LLM mapping can nominate it; the
-helper must verify the current relationship independently. An arbitrary Submit
-label or executor assertion is insufficient. Final application submission and
-other ATS behavior remain outside this proposed exception.
-
-An optional further policy change would reserve one bounded alternate target
-after proven non-execution, while preventing another attempt after uncertain
-dispatch. That is separate from recognizing this known wrapper and is not yet
-approved or implemented. Reuse the existing Workday observer/authentication and
-mapping paths; do not add a general recovery framework or increase global limits.
-Focused acceptance would cover ordinary sign-in, this auth-layer variant,
-unrelated-overlay rejection, and final Submit exclusion from auth recovery.
-
-This documentation review ran no browser/application or code tests. Markdown
-links, referenced checkpoints and the documentation diff were checked. Existing
-headed execution remains configured; headless capability is not new live proof.
-
-## Gartner login redirect and pending sign-in — 2026-09-08
-
-Attempt 28 dispatched Create Account and returned to Workday's email sign-in
-chooser. Creation was not confirmed. Both executor recovery clicks were blocked
-by a local `target_job_mismatch`: the full browser URL contained a valid redirect
-to the same requisition, but the shared observer revalidated its queryless display
-URL. This defect predates the previous speed checkpoint.
+The shared observer incorrectly revalidated a queryless display URL even when
+the full browser URL carried a valid redirect to the same requisition. Display
+redaction and application ownership need separate inputs. This defect predates
+the previous speed checkpoint; the detailed application diagnosis is in the
+managed database.
 
 Observation now validates the full owned URL before and after the read, retains
 queryless output, and requires stable full URLs before declaring quiescence.
@@ -121,7 +67,7 @@ navigation from credential submission.
 Validation: four focused regression cases failed before the fix; all 63 selected
 observation, authentication, mapped-recovery, advancement and URL-scope checks
 passed afterward (9.53 seconds). No broad suite, new browser fixture or live
-application was run. The Gartner pending record and attempt history were retained.
+application was run. Original application and account history were retained.
 
 ## Magellan successful run and review overhead — 2026-09-08
 
