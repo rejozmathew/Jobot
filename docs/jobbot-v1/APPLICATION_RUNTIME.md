@@ -5,10 +5,12 @@ September 2026. Older HTTP accept/claim/lease startup is **compatibility only**.
 Historical failures in REVIEW_HANDOFF remain historical evidence. Actual delivery
 checks and unresolved acceptance are in [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md).
 
-Live Wiley attempt 14 stopped prematurely at sign-in. The focused follow-up
-connects observed native/extension controls to one mapped recovery step in the
-existing runner. Current live proof and remaining limitations are in the log's
-opening entry; do not infer acceptance from the implementation described here.
+The existing runner connects native/extension observations to mapped recovery.
+Magellan attempt 27 reached submission; its outcome was reconciled from the user's
+confirmation. Gartner attempt 29 stopped on a Workday login click-layer variant.
+The proposed additional Workday authentication recovery remains unimplemented.
+Current evidence and prioritization are in the log's opening entries; describing
+an implementation here does not establish live acceptance on every ATS.
 
 ## Before and after
 
@@ -134,6 +136,24 @@ Native Hermes jobbot operations are convenience calls to the same functions.
 Hooks can record observed provider/model/effort; requested settings remain
 separate. CLI-only model evidence is unknown unless supplied by the actual harness.
 
+### Standard application request
+
+Change only the URL. The canonical skills select the available ATS procedure;
+the user should not maintain different prompts for Workday, Greenhouse or iCIMS.
+An ATS appearing in this prompt is not a claim of verified support.
+
+```text
+Apply to [JOB_URL] using this repository's canonical job-apply skill.
+
+Detect the application platform automatically—Workday, Greenhouse, iCIMS, or another ATS—and follow its available repository procedure. Use my configured approved profile, resume, retained credentials, managed runtime, and Simplify.
+
+I authorize submission. Continue through supported recoveries and handle required fields using approved facts. Ask only for an unresolved verification challenge or missing required information. Do not change code, skills, or configuration.
+
+Follow the canonical submission and confirmation procedure without adding a final resume or field audit. Never repeat an uncertain submission.
+
+Report the outcome and evidence source—or the exact unresolved blocker—with total elapsed time and session/attempt IDs.
+```
+
 ## Windows lifecycle, recovery and parallelism
 
 `workspace_process` creates the browser suspended, assigns it to a Windows Job
@@ -168,6 +188,24 @@ Two distinct configured directories/endpoints allow two independent sessions.
 A third gets capacity_wait and occupants; repeated start retries capacity with
 the same request. Paused sessions retain their slot. Same-job uncertainty blocks
 that job across email identities, not another workspace. concurrency_limit caps use.
+
+### Headless execution and visual evidence
+
+The pointer validator reads the browser's rendered element bounds and
+`document.elementFromPoint`, then the CDP client dispatches browser input. This
+does not require a visible desktop cursor, an on-screen window or LLM image
+inspection for every click. A screenshot is an available diagnostic for ambiguous
+UI, not a prerequisite for routine DOM/pointer validation. Screenshot pixels alone
+also cannot identify an invisible HTML click layer; control metadata is needed.
+
+`WorkspaceHost.start_browser` already supports `--headless=new` for a headless
+workspace; headed workspaces request maximization. Modern Chrome shares its
+headed/headless implementation, as described in the [Chrome headless documentation](https://developer.chrome.com/docs/automation-and-testing/headless).
+The existing `test_native_pointer.py` exercises native pointer input in an isolated
+headless browser. These capabilities do not prove the configured Brave/Simplify
+workflow, authentication challenges or complete employer applications work
+headlessly. A future headless trial must verify the extension, viewport and
+application flow separately; no mode/configuration change was made in this review.
 
 ## Configuration, provisioning and credentials
 
@@ -263,6 +301,41 @@ Credential, verification-code and financial-identifier controls are excluded.
 Timeline checkpoints and browser results link the artifact; this does not add
 another database or a final-review pass. Audit errors are reported separately
 and never imply that an executed form action is safe to replay.
+
+### Learning from successful and blocked applications
+
+Use the existing managed attempt ID to join outcomes/timing, code and skill
+versions, actions/events and the private spool artifacts. Keep the design/change
+history in RUNTIME_SIMPLIFICATION_LOG rather than relying on an engineering chat.
+Record both successful and blocked applications: successful work establishes
+which recovery and answer paths were useful, while failures identify unmet cases.
+
+| Existing record | What it contributes |
+|---|---|
+| Managed jobs, attempts and sessions | Employer/ATS/job linkage, final status, evidence source, original timing, driver and source version |
+| Actions and event timeline | Stage, selected operation, coarse action result/duration, recovery reason and verified milestones |
+| Private `answers/attempt-<id>.json` | Observed questions/answers, company and portal metadata, changes, provenance and any recorded answer basis |
+| Private submission capture and screenshots | Observed native/Simplify confirmation or remaining uncertainty; source stays explicit |
+| Private fast checkpoint and executor tool results | Detailed dispatch and control evidence when retained; a checkpoint is mutable working state, not a complete immutable action history |
+| Implementation log | Sanitized root cause, evidence limits, remedy/checkpoint, validation and deferred proposals |
+
+For comparisons, identify the failure mechanism (for example, a covered control
+with proven non-dispatch), not only the final generic blocked/budget-limit label.
+Include the attempted recovery, whether input actually dispatched, latency and
+result. Separate repeated attempts on one job from independent employers/jobs;
+otherwise retry-heavy debugging can distort the apparent incidence and success
+rate. A submitted application is not a hiring acceptance. Later employer replies
+belong to separately sourced recruiting outcomes, as described below.
+
+Current coverage is incomplete: `action_end` records coarse status, the fast
+checkpoint retains the latest dispatch, and some details remain only in executor
+tool results. Historical missing answer bases and dispatch reasons remain missing.
+The Gartner 29 diagnosis in the log preserves the recovered facts. No automated
+cross-attempt analysis or universal detailed failure-event capture is claimed.
+If review shows recurring evidence loss, add the minimum sanitized fields to the
+existing event/report path before considering another data store. Do not copy
+passwords, mail bodies, full profiles or unrestricted DOM dumps into Git/logs, and
+do not replace historical outcomes merely to simplify analysis.
 
 Follow-up work: schedule confirmation-email correlation about 30 minutes after
 submission through the existing Hermes Gmail adapter (employer, requisition/title,

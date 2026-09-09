@@ -1,8 +1,27 @@
 # JobBot modernization — Windows Hermes implementation handoff
 
-## Current review checkpoint — live runtime unresolved
+## Current design and execution evidence
 
-Start with [REVIEW_HANDOFF.md](REVIEW_HANDOFF.md) for the combined source snapshot, verified authentication fix, subsequent browser/service outage, reported expired attempt, and bounded independent-review questions. This checkpoint is not a working-live-application release. Older verification documents below describe their own engineering stages, not current service availability.
+Start with [APPLICATION_RUNTIME.md](APPLICATION_RUNTIME.md) for the implemented
+local-session architecture, helper ownership, evidence storage and deferred work.
+[RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md) records the design's
+evolution, checkpoint commits, measured outcomes, known defects and proposals that
+have not been implemented. Read its current entries before interpreting older
+review documents. Magellan attempt 27 has user-reported submission confirmation;
+Gartner attempt 29 exposed an unresolved Workday sign-in click-layer variant.
+This evidence does not establish universal ATS or headless Simplify support.
+
+The current recommendation is to preserve the Gartner diagnosis and defer the
+proposed authentication recovery expansion while gathering distinct application
+outcomes. The runtime document contains the standard request prompt for any ATS.
+[WORKDAY_NEXT_RUN.md](WORKDAY_NEXT_RUN.md) describes measurement and preserves
+historical benchmark instructions; it does not authorize another application.
+
+## Historical runtime review
+
+[REVIEW_HANDOFF.md](REVIEW_HANDOFF.md) preserves the earlier internal-auth fix,
+browser/service outage and independent-review questions. Those observations
+describe that checkpoint, not current runtime availability.
 
 ## Ordinary Hermes connection
 
