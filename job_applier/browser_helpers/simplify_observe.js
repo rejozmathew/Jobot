@@ -106,6 +106,12 @@
   const hasRecognizedStep = Boolean(marker || stepHeadings.length > 0);
   const page_signature=await digest([publicUrl,marker?(marker.textContent||'').slice(0,160):stepHeadings,
     hasRecognizedStep?[]:fields.map(({key,type})=>({key,type}))]);
+  if(workday){
+    scope.page_signature=page_signature;
+    const step=stepHeadings.find(t=>/^(?:my information|my experience|application questions|voluntary disclosures|self identify|review)$/i.test(t.trim()));
+    scope.autofillPageKey=JSON.stringify([publicUrl,step||marker?.textContent?.trim()||stepHeadings[0]||'application']);
+    scope.autofillAttempts=scope.autofillAttempts||new Set();
+  }
   const fingerprint=await digest([page_signature,headings,fields,scope.valueEpoch]);
   const fixture=document.body && document.body.textContent && document.body.textContent.includes('Synthetic fixture; not official Simplify support');
   let declared=null;
@@ -187,6 +193,7 @@
     if(declared && ['ready','active','complete','needs_review','unsupported','login_required'].includes(declared)) status=declared;
   }
   return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,inventory,login_kind,
+    ...(workday?{workday:true,autofill_page_key:scope.autofillPageKey,autofill_attempted:scope.autofillAttempts.has(scope.autofillPageKey)}:{}),
     native_authentication_required:scope.nativeAuthenticationRequired()||workday&&
       ['sign_in','create_account','create_account_autofill'].some(k=>controls[k].enabled),
     panel_text:roots.map(getRenderedText).join(' ').replace(/\s+/g,' ').slice(0,2200),

@@ -2,7 +2,9 @@
 
 ## Application execution (any harness)
 
+- Helpers assist the application executor; they do not bound its reasoning or decide that an application is over. Across every ATS, a helper miss, retry limit, unsupported control or expired call slice means inspect the evidence/options and try another supported approach in the same owned session. Keep moving toward submission; record recovery timing for later engineering. Finish blocked only for an evidenced unresolved obstacle after executor recovery, never merely because a helper returned `blocked` or `inspection_required`.
 - Read `skills/productivity/job-apply/SKILL.md`; for Workday also read `skills/productivity/workday-simplify/SKILL.md`.
+- After the canonical startup instructions, launch immediately with `wait_seconds:0`; read ATS detail while the browser prepares, before form actions. Do not duplicate runtime preflight with repository exploration or doctor. For broken pages before submission, use the shared reload/restart recovery and continue; unknown Simplify state alone does not forbid cancelling the broken document/browser.
 - These repository files are canonical. Hermes discovery is a thin entry point under `integrations/hermes_jobbot/skills/job-apply/`; other harnesses read the same canonical skills directly.
 - Start through `jobbot start` or `python -m job_applier.application_runtime start <url>` using the selected private configuration and actual conversation ID. No API token, running dashboard or expiring browser lease is required locally. Never guess a database, dual-write history or bypass uncertain submission.
 - Use the repository virtualenv. `application_runtime doctor` is an optional read-only diagnostic; start performs configuration/history and real browser readiness checks automatically.

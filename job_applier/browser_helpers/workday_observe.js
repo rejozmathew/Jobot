@@ -15,9 +15,32 @@
   const accessible=e=>e.getAttribute('aria-label')||[...(e.labels||[])].map(text).join(' ')||
     (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)).filter(Boolean).map(text).join(' ')||
     e.getAttribute('placeholder')||'';
+  const question=e=>{
+    const field=e.closest('[data-automation-id^="formField"],fieldset,[role="group"],[role="radiogroup"]');
+    const label=field?.querySelector('legend,label,[data-automation-id="questionLabel"],[data-automation-id="richText"]');
+    return label?text(label):accessible(e);
+  };
+  scope.questionText=question;
+  const placeholder=t=>!t||/^(?:search|select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(t.trim());
+  const selectedValue=e=>{
+    if(e.tagName==='SELECT')return e.value&&!placeholder(text(e.selectedOptions[0]))?text(e.selectedOptions[0]):'';
+    const field=e.closest('[data-automation-id^="formField"],fieldset');
+    const chips=field?[...field.querySelectorAll('[data-automation-id^="selectedItem"],[data-automation-id^="promptSelectedOption"],[data-automation-id^="promptSelection"]')]:[];
+    // Workday uses suffixed selection IDs and can wrap the selected chip and
+    // the open popup in one listbox. Menu ancestry does not erase that chip.
+    const chip=chips.filter(visible).filter(n=>!n.querySelector('[data-automation-id="promptOptions"],[role="menu"]')).map(text).find(t=>!placeholder(t));
+    if(chip)return chip;
+    if(!['INPUT','TEXTAREA'].includes(e.tagName)&&(e.getAttribute('role')==='combobox'||e.getAttribute('aria-haspopup'))){
+      const value=e.getAttribute('aria-valuetext')||text(e);
+      if(e.getAttribute('aria-expanded')!=='true'&&!placeholder(value))return value;
+    }
+    return '';
+  };
+  scope.selectedValue=selectedValue;
   const nodes=all('input:not([type="hidden"]),select,textarea,button,a,[role="button"],[role="checkbox"],[role="combobox"]');
   const describe=e=>({tag:e.tagName,type:e.type||'',role:e.getAttribute('role')||'',name:e.name||'',
-    label:accessible(e).slice(0,300),text:/^(BUTTON|A)$/.test(e.tagName)||e.getAttribute('role')==='button'?text(e).slice(0,200):'',
+    label:accessible(e).slice(0,300),question:question(e).slice(0,4000),
+    text:/^(BUTTON|A)$/.test(e.tagName)||e.getAttribute('role')==='button'?text(e).slice(0,200):'',
     automation_id:e.getAttribute('data-automation-id')||'',
     auth_form:!!e.closest('form,[role="dialog"]')?.querySelector('input[type="password"]')});
   const descriptions=nodes.map(describe),keys=descriptions.map(d=>JSON.stringify(d));
@@ -29,7 +52,8 @@
     let ref=scope.keys.get(key);if(!ref){ref='wd:'+crypto.randomUUID();scope.keys.set(key,ref);}
     scope.inventory.set(ref,e);
     return {...descriptions[i],ref,id:e.id||'',enabled:!e.disabled&&e.getAttribute('aria-disabled')!=='true',
-      required:!!e.required||e.getAttribute('aria-required')==='true',present:!!e.value,
+      required:!!e.required||e.getAttribute('aria-required')==='true'||/\*\s*$/.test(question(e)),present:!!selectedValue(e)||!!e.value,
+      ...(selectedValue(e)?{selected_value:selectedValue(e)}:{}),
       ...((['checkbox','radio'].includes(e.type)||e.getAttribute('role')==='checkbox')?
         {checked:!!e.checked||e.getAttribute('aria-checked')==='true'}:{}),
       ...(e.tagName==='SELECT'?{options:[...e.options].map(o=>({value:o.value,label:o.text,disabled:o.disabled}))}:{})};
@@ -42,6 +66,21 @@
     if(controls[kind]){controls[kind]={enabled:false,ref:null};continue;}
     const ref=kind; scope.controls.set(ref,e); controls[kind]={enabled,ref};
   }
+  // Exact direct-entry actions outrank optional chat flows, including anchors
+  // on employer-customized Workday landing pages and application choosers.
+  const entryLabels=['apply manually','apply now','apply for this job','apply for job','apply for application','start application','begin application','apply'];
+  for(const label of entryLabels){
+    const matches=all('button,a,[role="button"]').filter(e=>enabledEntry(e)&&
+      (accessible(e)||text(e)).trim().toLowerCase()===label);
+    if(!matches.length)continue;
+    const e=matches[0];
+    // Matching responsive duplicates are safe only when they share a destination.
+    const unique=matches.length===1||e.tagName==='A'&&matches.every(n=>n.tagName==='A'&&n.href===e.href);
+    controls.apply={enabled:unique,ref:unique?'apply':null,label,href:e.tagName==='A'?e.href:null};
+    if(unique)scope.controls.set('apply',e);
+    break;
+  }
+  function enabledEntry(e){return !e.disabled&&e.getAttribute('aria-disabled')!=='true';}
   const errors=all('[aria-invalid="true"],[data-automation-id="errorMessage"],[role="alert"]')
     .filter(e=>!(/successfully uploaded/i.test(text(e))))
     .filter(e=>e.getAttribute('aria-invalid')==='true'||/required|error|invalid|must select|must enter/i.test(text(e)))
@@ -91,6 +130,8 @@
   const pendingConsent=checkboxes.filter(e=>consent(e)&&unchecked(e));
   authControl('auth_consent',pendingConsent);
   const notices=all('[role="alert"],[data-automation-id="errorMessage"],h1,h2,h3,p').map(text).join(' ');
+  const pageNotices=all('main,[role="main"],[role="alert"],[data-automation-id="errorPage"],h1,h2,h3,p').map(text).join(' ');
+  const refresh_error=/something went wrong/i.test(pageNotices)&&/(?:refresh|reload) (?:the |this |your )?page/i.test(pageNotices);
   const auth_ui={mode,unknown_required_consent:pendingConsent.length>1||checkboxes.some(e=>unchecked(e)&&!consent(e)&&(e.required||e.getAttribute('aria-required')==='true')),
     challenge:/verify your (?:email|account)|verification (?:email|code)|check your (?:email|inbox)|multi.factor authentication/i.test(notices),
     account_exists:/(?:account|email).{0,70}already (?:exists|registered|in use)/i.test(notices),
@@ -113,5 +154,5 @@
     /^(?:email|username)$/i.test(e.autocomplete)));
   const identityEmails=candidateEmails.length?candidateEmails:email.length===1&&!otherPerson(email[0])&&!emailMeaning(email[0])?email:[];
   const identity_mismatch=!!args.expected_email&&identityEmails.some(e=>e.value&&e.value.trim().toLowerCase()!==args.expected_email.trim().toLowerCase());
-  return {step,native:controls,inventory,blocking_errors:[...new Set(errors)],auth:pw.length>0||mode==='email_chooser'||auth_ui.challenge,auth_refs,auth_ui,submitted,resume_attached,identity_mismatch};
+  return {step,native:controls,inventory,blocking_errors:[...new Set(errors)],refresh_error,document_id:performance.timeOrigin,auth:pw.length>0||mode==='email_chooser'||auth_ui.challenge,auth_refs,auth_ui,submitted,resume_attached,identity_mismatch};
 }

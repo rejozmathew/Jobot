@@ -132,6 +132,7 @@ class WorkspaceHost:
         self.browser=None;self.busy=threading.Lock();self.exit=threading.Event()
         self.preparing=set();self.threads=[]
         self.retire=False;self.requests=0
+        self.startup_timing={}
 
     def active_session(self):
         with self.service.tx() as db:
@@ -153,12 +154,15 @@ class WorkspaceHost:
         if w['mode']=='headless':args.insert(-1,'--headless=new')
         else:args.insert(-1,'--start-maximized')
         root=Path(self.config['spool_dir'])/'hosts'
+        self.startup_timing['browser_launch_requested_at']=self.service.now()
         self.browser=OwnedProcess.launch(args,cwd=REPOSITORY,stdout_path=root/(w['id']+'.browser.out.log'),stderr_path=root/(w['id']+'.browser.err.log'))
         self.service.host_seen(w['id'],self.host_id,self.browser.identity)
         deadline=time.monotonic()+20
         while time.monotonic()<deadline:
             if not self.browser.alive():raise ProtocolError('browser_exited_during_start','See workspace browser log')
-            try:endpoint_info(w['cdp_url']);return
+            try:
+                endpoint_info(w['cdp_url'])
+                self.startup_timing['browser_endpoint_ready_at']=self.service.now();return
             except (OSError,ValueError):time.sleep(.2)
         raise ProtocolError('browser_endpoint_not_ready',w['cdp_url'])
 
@@ -199,6 +203,7 @@ class WorkspaceHost:
                     bounds=await browser_command(endpoint,'Browser.getWindowBounds',{'windowId':window['windowId']})
                     window_state=bounds['bounds'].get('windowState','unconfirmed')
                 except Exception:window_state='maximize_requested'
+            self.startup_timing['employer_navigation_requested_at']=self.service.now()
             try:await page.goto(job['url'])
             except asyncio.TimeoutError:
                 pass  # A delayed navigation response is resolved by owned reads.
@@ -215,7 +220,7 @@ class WorkspaceHost:
                     'instruction':'The owned tab remains available. Inspect snapshot/screenshot, wait for loading, or navigate back to the assigned job.'}
             readiness={'profile_verified':True,'endpoint_verified':True,'target_operable':True,'browser_mode':mode,
                        'simplify':'unverified','observed_at':self.service.now(),'window_state':window_state,
-                       'employer_storage':employer_storage,
+                       'employer_storage':employer_storage,'startup_timing':dict(self.startup_timing),
                        'viewport':await page.evaluate('({width:innerWidth,height:innerHeight})')}
             if self.config.get('require_simplify',True):
                 from .simplify_boundary import SimplifyBoundary
@@ -231,7 +236,7 @@ class WorkspaceHost:
                 else:
                     readiness['simplify']='not_observed'
                     recovery=recovery or {'reason':'simplify_setup_required',
-                        'instruction':'Inspect the owned tab and recover the configured Simplify extension, then continue in this session.'}
+                        'instruction':'Inspect loading on the owned tab. If Simplify remains missing, use browser reload; if still unusable, use session restart and continue. This applies to every portal. Recover the configured extension or use approved native controls after fresh writer observation; do not finish merely because the panel is missing.'}
             if recovery:readiness['recovery']=recovery
             return target,readiness
         finally:await browser.close()
@@ -311,6 +316,24 @@ class WorkspaceHost:
         cfg=dict(self.config,cdp_url=self.workspace['cdp_url'],browser_profile=self.workspace_id,browser_mode=self.workspace['mode'])
         if op in ('context','report'):
             return client.call('application_context' if op=='context' else 'attempt_report',attempt_id=attempt['id'])
+        if op=='restart':
+            if attempt['submission_pending']:raise ProtocolError('submission_pending_read_only')
+            # Reuse pause/attach: termination proves cancellation, then the host
+            # opens a new target with the same account/profile/session/attempt.
+            # Mark preparing first so the monitor cannot mistake this for a crash.
+            self.preparing.add(session['id'])
+            try:
+                client.call('event',**own,event_id=uid(),event_type='recovery',observed_at=service.now(),
+                    payload={'operation':'restart','evidence':'Executor requested recovery of the owned browser before submission',
+                             'next_step':'Reopen the assigned job in the same attempt and continue'})
+                self.stop_session(session,'Executor requested browser recovery',paused=True)
+                resumed=self.service.attach_session(session['id'],session['driver_id'])
+                thread=threading.Thread(target=self.prepare,args=(resumed,),daemon=True)
+                thread.start();self.threads.append(thread)
+            except Exception:
+                self.preparing.discard(session['id']);raise
+            return {**handle(service,session['id'],include_context=False),
+                    'instruction':'The owned browser is restarting in the same attempt. Read status until connected, then inspect and continue; this is not an application outcome.'}
         if op=='fast_forward':
             from .workday_fast import advance
             return advance(cfg,client,own,dict(params,target_id=session['target_id']))
@@ -322,7 +345,8 @@ class WorkspaceHost:
                 from .managed_credentials import handle_credentials
                 gate=client.call('browser_observe',**own,target_id=session['target_id'],cdp_url=cfg['cdp_url'])
                 if not gate.get('native_takeover_authorized',gate.get('quiescent')):
-                    raise ProtocolError('simplify_input_or_settlement_required')
+                    raise ProtocolError('simplify_input_or_settlement_required',
+                        'Observe or cancel ongoing Simplify work. For a broken page or missing panel before submission, use browser reload or session restart, then inspect and continue.')
                 action=uid();started=time.monotonic();result={}
                 client.call('action_start',**own,action_id=action,tool_name='credentials')
                 try:result=handle_credentials(cfg,package,dict(params,target_id=session['target_id']));return result

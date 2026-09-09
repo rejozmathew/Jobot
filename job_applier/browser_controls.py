@@ -44,6 +44,28 @@ async def observe(page, package):
     return dict(shared,**native,simplify_inventory=simplify_inventory)
 
 
+async def wait_for_page_recovery(page,package,*,seconds=12):
+    """Return fresh application evidence after navigation, not DOM-ready alone."""
+    deadline=asyncio.get_running_loop().time()+seconds;observed={};error_samples=0
+    while asyncio.get_running_loop().time()<deadline:
+        try:
+            observed=await observe(page,package)
+            error_samples=error_samples+1 if observed.get('refresh_error') else 0
+            extension=any(c.get('enabled') for c in observed.get('controls',{}).values())
+            native=observed.get('auth') or any(c.get('enabled') for c in observed.get('native',{}).values())
+            if not error_samples and (extension or native):
+                return {'status':'recovered','screen':inventory(observed,package),
+                    'instruction':'The refreshed page has usable controls. Continue the application from this fresh screen. Do not reload or restart again for the old error.'}
+            if error_samples>=2:
+                return {'status':'error_present','screen':inventory(observed,package),
+                    'instruction':'The current page still displays the refresh error. Choose further recovery using this new evidence.'}
+        except Exception:
+            pass  # Navigation can temporarily remove the execution context.
+        await asyncio.sleep(.3)
+    return {'status':'loading','screen':inventory(observed,package) if observed else None,
+        'instruction':'The page is still initializing; the old error is not evidence of a new failure. Wait and inspect this same page. A missing panel immediately after reload does not justify another reload, restart or finish.'}
+
+
 def _merge_writers(root, children, diagnostics):
     merged=dict(root)
     documents=[root]+[value for _,value in children]
@@ -79,7 +101,12 @@ async def observe_writers(page,package):
 def inventory(observed, package):
     from .workday_fast import screen_inventory
     result=screen_inventory(observed,package)
-    result['instruction']='Use observed refs with browser select, check, fill, press or click. Values come from approved profile facts. Use browser submit for the final action; it captures confirmation before closing.'
+    result['instruction']=('Use observed refs with browser select, check, fill, press or click. Values come from approved facts or explicit user choices. '
+        'Complete required questions using answer_context.standard_answers, approved profile facts and saved answers before requesting human input. '
+        'A helper mismatch or failed selection is a recovery handoff, not an application outcome. Inspect actual options, refresh stale controls, '
+        'use a scoped screenshot when needed and try another supported interaction. Keep the session open and continue after progress. '
+        'Missing Simplify or an unusable page calls for browser_recovery: inspect loading, reload when appropriate, restart if needed and continue. '
+        'Use browser submit for the final action; it captures confirmation before closing.')
     profile=package['attempt'].get('profile_json') or {}
     if isinstance(profile,str):profile=json.loads(profile)
     result['answer_policy']=profile.get('application_answer_policy',{})
@@ -243,7 +270,15 @@ async def simplify_document(page,*,ref=None,operation=None):
         observed=await document.evaluate(OBSERVE)
         control=next((c for c in observed.get('inventory',[]) if c['ref']==local['ref']),None)
         if not control:raise FrameUnavailable('simplify_control_stale')
-        if operation and control['operation']!=operation:raise FrameUnavailable('simplify_operation_mismatch')
+        if operation and control['operation']!=operation:
+            # Workday also labels the panel tab "Autofill". An explicit page-fill
+            # request can recover to its unique observed "Autofill This Page"
+            # button in this same document; other ATS/ref mappings stay strict.
+            actual=observed.get('controls',{}).get('autofill',{})
+            replacement=next((c for c in observed.get('inventory',[]) if c['ref']==actual.get('ref')),None)
+            if observed.get('workday') and operation=='autofill' and actual.get('enabled') and replacement:
+                control=dict(replacement,recovery='resolved_workday_page_autofill')
+            else:raise FrameUnavailable('simplify_operation_mismatch')
         return document,observed,control
     documents=[page]
     package=getattr(page,'application_package',None)

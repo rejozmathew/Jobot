@@ -26,8 +26,21 @@
   scope.inventory.set(ref,e);scope.bindings.set(ref,k);return ref;
  };
  const required=e=>!!e.required||e.getAttribute('aria-required')==='true'||/\*\s*$/.test(label(e));
+ const selectedValue=e=>{
+  const workday=window.__jobbotWorkdayScope;
+  if(workday?.url===location.href&&workday.selectedValue)return workday.selectedValue(e);
+  if(e.tagName==='SELECT'){
+   const value=e.selectedOptions[0]?.text||'';
+   return e.value&&!/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(value)?value:'';
+  }
+  if(e.getAttribute('role')==='combobox'||e.getAttribute('aria-haspopup')){
+   const value=e.getAttribute('aria-valuetext')||(!['INPUT','TEXTAREA'].includes(e.tagName)?text(e):'');
+   if(e.getAttribute('aria-expanded')!=='true'&&!/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(value))return value;
+  }
+  return '';
+ };
  const describe=e=>({...descriptor(e),ref:remember(e),enabled:enabled(e),required:required(e),
-  present:!!e.value,checked:['checkbox','radio'].includes(e.type)||e.getAttribute('role')==='checkbox'?checked(e):undefined,
+  present:!!selectedValue(e)||!!e.value,...(selectedValue(e)?{selected_value:selectedValue(e)}:{}),checked:['checkbox','radio'].includes(e.type)||e.getAttribute('role')==='checkbox'?checked(e):undefined,
   ...(e.tagName==='SELECT'?{options:[...e.options].map(o=>({value:o.value,label:o.text,disabled:o.disabled||o.parentElement.disabled}))}:{}),
   expanded:e.getAttribute('aria-expanded'),haspopup:e.getAttribute('aria-haspopup')});
  if(args.method==='observe'){
@@ -105,10 +118,11 @@
  if(el.type==='password'||/otp|one.?time|verification.?code/i.test((el.name||'')+' '+(el.autocomplete||'')+' '+label(el)))
   return {committed:false,reason:'use_private_credentials_helper',execution:'not_executed'};
  const value=()=>el.tagName==='SELECT'?{value:el.value,label:el.selectedOptions[0]?.text||''}:
-  {value:/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el),label:/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el)};
+  {value:selectedValue(el)||(/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el)),label:selectedValue(el)||(/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el))};
  if(args.method==='question'){
   const role=el.getAttribute('role'),group=el.closest('fieldset,[role="radiogroup"],[role="group"]');
-  const question=text(group?.querySelector('legend'))||group?.getAttribute('aria-label')||label(el);
+  const question=(owner===window.__jobbotWorkdayScope&&owner.questionText?.(el))||
+   text(group?.querySelector('legend'))||group?.getAttribute('aria-label')||label(el);
   let kind=el.tagName==='SELECT'||role==='combobox'||['listbox','menu','true'].includes(el.getAttribute('aria-haspopup'))?'select':
    el.type==='checkbox'||role==='checkbox'?'check':el.type==='radio'||role==='radio'?'radio':'text';
   if(kind==='text'&&!['INPUT','TEXTAREA'].includes(el.tagName))return {reason:'question_control_unrecognized'};
@@ -121,7 +135,8 @@
   const actual=value().value.trim();
   const answered=kind==='check'?checked(el):kind==='radio'?radios.some(e=>e.checked||e.getAttribute('aria-checked')==='true'):
    !!actual&&!/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(actual);
-  return {field:el.name||el.id||question,question,kind,options,required:required(el),answered,
+  return {field:el.name||el.id||question,question,kind,options,
+   required:required(el)||owner===window.__jobbotWorkdayScope&&/\*\s*$/.test(question),answered,
    context:{page:window.__jobbotWorkdayScope?.step||'form',section:text(group?.querySelector('legend'))||
     text(el.closest('section')?.querySelector('h1,h2,h3')),document:location.href}};
  }

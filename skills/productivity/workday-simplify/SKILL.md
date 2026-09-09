@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.9
+version: 0.3.13
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -10,7 +10,8 @@ platforms: [windows]
 # Workday with Simplify
 
 Read the canonical [job-apply](../job-apply/SKILL.md). Start the application using
-its local `start` operation. Startup verifies the configured managed instance,
+its local `start` operation before reading this ATS detail, allowing browser
+preparation to overlap this reading. Startup verifies the configured managed instance,
 history, assigned headed browser, profile, fresh target and Simplify surface.
 No API token, expiring lease, old target binding or additional worker is needed.
 
@@ -27,10 +28,32 @@ runner contains no model and retains one CDP connection during its bounded call.
 
 1. Confirm role, identity, approved asset and submission authorization once.
 2. Call the runner for routine observe/act/wait/advance. It checks controls and
-   writer state, lets Simplify fill, and prefers enabled Continue after settling.
+   writer state. Prefer enabled **Simplify Continue Application** immediately
+   after settlement, even with needs_review. Do not run dropdown/source repair
+   ahead of that action. If Simplify Continue is unavailable or failed to advance,
+   use available **Autofill This Page once before manual field repair** or native
+   Continue. Wait for settlement and continue. The page checkpoint and shared
+   browser receipt prevent an Autofill loop across calls and changing values.
+   Return every new page to the runner, including Voluntary Disclosures and
+   Self Identify, after finishing a manual exception. The shared browser also
+   routes a first manual field-repair request on these Workday pages through
+   available Autofill first; its result identifies the field action not performed.
+   On a landing page/chooser it prefers native Apply Manually, then other direct
+   Apply actions, over chat or the extension's start action. Follow an employer
+   landing page's direct application link when it leads into Workday.
 3. `waiting`: call again. A helper time slice ending is normal. Persisted evidence
    prevents repeating unchanged actions; newly observed controls or changed form
    evidence can support another recovery. Heartbeat is telemetry, not expiry.
+   An observed Workday "Something went wrong" page that explicitly requests a
+   refresh triggers one automatic reload before submission. It replaces the old
+   document even when Simplify's state is unknown, then waits for fresh page
+   controls. A still-initializing page returns waiting instead of an immediate
+   unrecognized-screen failure. Once recovered, continue without another refresh
+   or restart for the old error. Only a currently observed remaining failure
+   supports further recovery; follow job-apply's shared reload guidance.
+   Inspect other page failures and choose reload/restart yourself when supported
+   by the evidence; no exact error matcher limits executor recovery. A real new
+   document resets page fill receipts; ordinary rerenders still do not.
 4. The runner handles Workday authentication: read the existing site account,
    reuse its saved credential (or the configured retained default for a new site),
    choose Create Account or Sign In, accept the uniquely observed account
@@ -118,8 +141,16 @@ runner contains no model and retains one CDP connection during its bounded call.
    remains protected from replay. Return routine pages to Simplify without LLM interpretation.
    Keep going in the same application after the first successful auth/autofill.
 5. `blocked`: handle only the actual required blocker with the shared session's
-   `browser` operation and approved facts. Repeated unchanged autofill returns to
-   inspection; changed form evidence can justify another fill in the same step.
+   `browser` operation and approved facts. Routine Autofill is once per page;
+   recover remaining questions with the executor instead of repeating the fill.
+   This is a handoff to your reasoning, not permission to end the application.
+   Inspect the actual controls/options and try a different supported interaction.
+   A helper timeout or retry limit does not exhaust executor recovery.
+   `complete_required_answers` supplies full questions and
+   `screen.answer_context`. Follow job-apply's shared required-answer sequence
+   for approved facts/defaults, saved answers, executor recovery and last-resort
+   human input. Workday's inventory retains the full field question even when
+   its control only displays Select One; use that question when choosing.
    Do not audit every optional field or reconstruct history.
    Use the shared `browser select`/`fill`/`check` API with the observed ref; the
    runtime resolves the control, including an embedded document, without a model
@@ -132,7 +163,26 @@ runner contains no model and retains one CDP connection during its bounded call.
    does not defeat it. Counts are observed and bounded per page. Salary/privacy
    preferences use the shared profile policy; the runner applies them before
    continuing. Use shared `browser select` for native or ARIA dropdown recovery.
-6. A review count does not defeat enabled Continue after quiescence. Same URL does
+   Only after advancement cannot proceed, for an empty How Did You Hear About Us
+   field after Simplify, the runner uses
+   the Workday source prompt routine. It preserves a populated answer, follows
+   nested categories/radio leaves, scrolls only the associated virtualized menu,
+   retries stale/uncommitted clicks and verifies a committed field value.
+   Other/company website/LinkedIn/search engines are preferences, not a fixed
+   allowlist: the user permits another offered source when those are absent.
+   `source_recovery.options` contains current labels and whether each opens a
+   child menu; `path` shows attempted selections. Choose another offered label
+   yourself and call `fast_forward` with
+   `recovery:{screen_key:"<screen.screen_key>",source_choice:"<exact offered label>"}`.
+   The runner reacquires live controls and follows the selected category. If the
+   menu is unrecognized, inspect the owned snapshot/screenshot and use scoped
+   browser controls to recover it, then resume. Do not ask the user to pick a
+   source they already authorized you to choose, or finish because the helper
+   could not select it. Never select a global option from another field's menu.
+6. After settlement, a review count does not defeat enabled Simplify Continue.
+   A selected chip counts as a value even when its search input is empty or its
+   menu is open. Preserve that value; do not substitute a preferred source.
+   Same URL does
    not imply same step; the runner observes Workday's actual section/stepper.
    Keep populated source answers such as LinkedIn. In `needs_review`, prefer
    native Continue and let actual employer validation identify missing answers.
@@ -154,7 +204,8 @@ runner contains no model and retains one CDP connection during its bounded call.
 
 No in-run PDF extraction, resume search, career/education reconstruction or shared
 code/skill changes. Never compete with active writers; recover unknown state
-through observation or the observed extension stop control. Generic browser
+through observation, the observed extension stop control, or explicit broken-page
+reload/restart cancellation under the shared skill. Generic browser
 focus and old targets do not belong to this session. An unavailable CAPTCHA/MFA,
 rejected credentials or unknown required fact is a specific blocker.
 

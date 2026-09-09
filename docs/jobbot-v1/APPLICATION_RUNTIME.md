@@ -17,6 +17,93 @@ authentication recovery remains unimplemented. Design rationale and prioritizati
 are in the implementation log; describing an implementation here does not
 establish live acceptance on every ATS.
 
+Helpers support executor reasoning across all ATSs. A helper `blocked`,
+`inspection_required`, unsupported control or call-budget result does not close
+the application or establish its outcome. The executor inspects the supplied
+controls/options and evidence, tries a different supported interaction and
+resumes progress in the owned session. Recovery timing belongs in the existing
+timeline so slow cases can guide later engineering. An actual unresolved
+obstacle, user stop, or submission evidence determines the eventual outcome;
+a helper's matching limits do not. Shared browser/Simplify responses and the
+canonical job-apply skill carry this instruction to the executor.
+
+Workday's empty recruiting-source prompt has a scoped fallback after Simplify
+settles. It preserves existing answers, follows parent categories to leaves,
+uses native pointer selection and scrolls only the associated virtualized popup.
+Named source preferences fall back to any other offered source as authorized by
+the user. It retries stale/uncommitted choices and returns actual alternatives
+plus the attempted path when executor judgment is needed. The existing
+`fast_forward` recovery mapping accepts `screen_key` and `source_choice` to
+continue with an executor-selected label. Native application entry prefers
+Apply Manually and other direct Apply controls over chat. These changes are
+included in the September 9 checkpoint. Attempt 44 exercised the flow and
+submitted with user intervention; its remaining issues motivated the follow-up
+changes below. The checkpoint has not had a regression suite run.
+
+Workday prioritizes enabled Simplify Continue after settlement. If advancement
+cannot proceed, it uses available page Autofill once before manual repair. Its
+runner checkpoint uses the logical step, and the shared browser click receipt
+uses page identity rather than changing field fingerprints. Polls, new tool
+connections and a remaining Autofill button do not reset that attempt. The
+shared Simplify boundary prefers settled enabled Continue on every ATS. Autofill
+receipts and routing manual repair through first Autofill apply only to observed
+Workday. A mistaken reference to Workday's Autofill
+panel tab can resolve to the unique observed Autofill This Page action in the
+same document. The shared screen handoff exposes approved standard answers on
+every ATS. Workday also exposes the full field question behind Select One and
+requests executor completion instead of returning a bare blocked result.
+Source repair runs only after advancement cannot proceed; it never intercepts
+an already selected Continue action. Workday selection metadata includes chips,
+including suffixed IDs and chips inside an expanded prompt, instead of treating
+an empty search input as an empty answer. Generic select/combobox inventory also
+reports selected values. After a manual exception, a new Workday page's first
+manual field-repair request uses available Autofill first and reports that the
+requested individual field action has not been performed. This routing is
+specific to Workday; shared instructions return every ATS to routine filling.
+Choosing answers remains executor reasoning governed by the common job-apply
+skill, not arbitrary yes/no generation. The human queue is invoked
+only explicitly and still reuses policy/exact saved answers. These changes are
+included in the requested local checkpoint; the final follow-up changes still
+need live and regression validation.
+
+Page recovery is shared across every ATS. `browser` method `reload` deliberately
+cancels the current document, so an unknown Simplify writer cannot deadlock the
+refresh needed to recover it. The action ledger still excludes concurrent tool
+writes and unresolved submission. CDP verifies a new document before clearing
+the old writer state; subsequent observations govern new form writes. The host's
+`restart` operation reuses pause/attach to stop the owned process tree and reopen
+the assigned job with the same profile, session and attempt. Shared screen and
+Simplify/startup handoffs expose these operations for broken pages and missing
+Simplify on Workday, iCIMS, Greenhouse and proprietary sites. Executor judgment
+selects further recovery; missing controls are not an application outcome.
+Workday additionally recognizes its explicit Something went wrong / refresh
+message and attempts one automatic reload. Shared `wait_for_page_recovery` then
+observes usable native/extension controls before returning success; document
+replacement alone is not application readiness. A transient missing panel returns
+loading/waiting instead of a new failure. Fresh recovery responses say to continue
+once the old error is gone, not refresh/restart again. New documents reset Workday
+page fill receipts; rerenders do not.
+
+The user confirmed attempt 44 submitted successfully, with employer confirmation
+and 710.9 seconds recorded, but needed intervention. Its retained logs show the
+executor repeated reload and restarted after the original error cleared, source
+repair intercepted an enabled Continue despite a selected chip, and manual work
+continued on Self Identify until the user requested Autofill. The changes above
+address those observed decisions; their new behavior is awaiting live validation.
+
+Startup instructions launch immediately after the canonical skill using
+`wait_seconds:0`, overlapping host preparation with ATS-skill reading. They no
+longer place ATS reading before browser startup. Optional doctor/repeated config
+checks are not startup prerequisites. Metadata records runtime entry/preflight
+duration plus host browser-launch, endpoint-ready and employer-navigation times.
+These distinguish runtime delay from executor time before the start call; the
+runtime cannot measure prompt-to-tool latency on its own. For historical attempt
+43, reservation to connected was 8.85 seconds; earlier executor/preflight time
+was not captured. The user requested a local checkpoint before Greenhouse work.
+Python/JavaScript syntax and diff checks passed. Regression tests remain deferred
+under the user's prior instruction; no new live application was run for this
+checkpoint. The Greenhouse follow-up is a separate planning task.
+
 ## Before and after
 
 ```text
@@ -299,23 +386,24 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 
 | Component | Scope and consumer |
 |---|---|
-| application_runtime.py | Shared high-level startup/control, scoped browser exceptions, history |
+| application_runtime.py | Shared high-level startup/control and timing, scoped browser exceptions/reload, history |
 | managed_sessions.py / migration 15 | Existing ledger session/workspace/account coordination, history-derived retry storage policy and mixed-version guards |
-| workspace_host.py / workspace_process.py | Windows lifetime, readiness, employer-origin cleanup before retry navigation, scoped JSON dispatch; no model |
+| workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, scoped JSON dispatch; no model |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
 | managed_identity.py | Shared Workday host/site/full-requisition parser, comparison identity, history equivalence, diagnostic match states and job_requisition for confirmation; no display-location/title/step allowlist |
 | managed_shared.submission_pending / managed_events._submission_pending | One dispatch interpretation for service attempts/context, browser/Workday, host stop/finish and answer recovery; ordered existing ledger events, no new database |
-| workday_fast.py | Bounded Workday supervisor; native and CLI call the same advance function |
+| workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
-| cdp_client.py | Exact-target connection, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
-| browser_controls.py / browser_helpers/form_controls.js | Shared native form inventory, verified text/select/check/keyboard exceptions; Workday retains its site-specific inventory |
+| cdp_client.py | Exact-target connection, verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
+| browser_controls.py / browser_helpers/form_controls.js | Shared form/approved-answer and selected-value inventory, post-reload readiness observations, verified text/select/check/keyboard exceptions; Workday retains its question labels and scoped Autofill recovery |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent |
 | application_answers.py | Interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | Shared one-click boundary, transient native/Simplify confirmation capture, scoped redirect inspection, private evidence and truthful outcome |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
+| browser_helpers/workday_source.js | Workday-only recruiting-source field/menu association, live option inventory and virtualized-menu scrolling; workday_fast drives pointer actions and verifies commitment |
 | managed_credentials.py / managed_documents.py / hermes_gmail.py | Private credentials and shared screenshot masking (local and legacy callers), hash-checked selected-asset uploads, configured correlated mailbox |
 | hermes_plugin.py / integration entry | Convenience, actual session/model and optional messaging capability metadata, observed human-reply provenance; no alternative form logic |
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
@@ -367,7 +455,7 @@ that document's controls; readable documents retain their own routing/validation
 Local semantic timing remains telemetry and does not veto an otherwise valid
 write. Legacy configured strategy checks remain on their existing callers.
 
-In `needs_review`, Workday prefers enabled native Continue so that a populated
+After one available page Autofill settles, Workday prefers enabled native Continue in `needs_review` so that a populated
 source answer such as LinkedIn does not reopen Simplify's review menu. At authorized
 Review it submits without another resume or field audit. Missing attachment
 evidence is not a final-submit gate. The same-portal

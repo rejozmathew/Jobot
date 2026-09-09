@@ -342,6 +342,22 @@ class CDPPage:
         await self._session.call("Page.navigate", {"url": url}, timeout=timeout)
         self.url = url
 
+    async def reload(self, timeout: float = 12.0) -> dict:
+        """Cancel the old document and verify replacement before releasing its writer."""
+        before=await self.evaluate('performance.timeOrigin')
+        await self._session.call('Page.reload', {}, timeout=timeout)
+        deadline=asyncio.get_running_loop().time()+timeout
+        while asyncio.get_running_loop().time()<deadline:
+            try:
+                current=await self.evaluate('({origin:performance.timeOrigin,ready:document.readyState})')
+                if current['origin']!=before and current['ready'] in ('interactive','complete'):
+                    return {'reload_requested':True,'document_replaced':True}
+            except Exception:
+                pass  # Execution contexts disappear during document replacement.
+            await asyncio.sleep(.2)
+        return {'reload_requested':True,'document_replaced':False,
+                'instruction':'Inspect the owned page; reload completion is unconfirmed. Use session restart if the page remains broken.'}
+
     async def press_key(self, key: str, vk: int = 0) -> None:
         await _press_key(self._session,key,vk)
 

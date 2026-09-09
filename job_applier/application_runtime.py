@@ -108,6 +108,7 @@ def sync_answer_policy(config,service):
 def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, metadata=None,
           company=None,title=None, wait_seconds=25):
     """Record immediately; return one durable handle even if browser startup is slow."""
+    entered_at=datetime.now(timezone.utc).isoformat();entered_clock=time.monotonic()
     driver=driver_identity(driver_id)
     if bool(url)==bool(job_id):raise ProtocolError('one_url_or_job_id_required')
     service=prepare_local(config)
@@ -142,6 +143,7 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     workspaces=validate_workspaces(config['workspaces'])
     limit=config.get('concurrency_limit',len(workspaces))
     if type(limit) is not int or not 1<=limit<=len(workspaces):raise ProtocolError('invalid_concurrency_limit')
+    meta['startup_timing']={'runtime_entered_at':entered_at,'preflight_seconds':round(time.monotonic()-entered_clock,3)}
     session=service.reserve_session(request_id=requested,job_id=job['id'],identity_id=identity_id,driver_id=driver,
         workspace_ids=[w['id'] for w in workspaces],concurrency_limit=limit,metadata=meta,resume_asset_id=resume)
     if session['state']=='preparing':
@@ -254,14 +256,17 @@ def browser_action(config,client,ownership,package,target_id,params):
     import asyncio
     from .cdp_client import CDPBrowser
     from .managed_identity import is_same_application_scope, is_workday_candidate_home, is_post_submit_scope, application_match, public_url
+    from .managed_context import platform_for_url
     from .browser_controls import FORM, observe, inventory, form_action, inspect_control, click_control, upload_file
     from .managed_shared import uid
     method=params.get('method')
-    if method not in ('snapshot','screenshot','evaluate','click','fill','press','select','check','apply_policy','request_answers','apply_answers','submit','navigate','upload','simplify'):
+    if method not in ('snapshot','screenshot','evaluate','click','fill','press','select','check','apply_policy','request_answers','apply_answers','submit','navigate','reload','upload','simplify'):
         raise ProtocolError('unsupported_browser_method')
     reads=method in ('snapshot','screenshot')
     async def execute():
+        nonlocal method,params
         aid=None;started=time.monotonic();succeeded=False
+        redirected_from=None
         browser=await CDPBrowser.connect(config['cdp_url'],target_id=target_id,expected_mode=config.get('browser_mode','headed'))
         try:
             page=await browser.get_current_page();url=await page.evaluate('location.href')
@@ -277,10 +282,20 @@ def browser_action(config,client,ownership,package,target_id,params):
                 return history
             pending=package['attempt'].get('submission_pending',bool(package['attempt'].get('submit_intent_at')))
             identity=application_match(package['job']['url'],url)
-            recovery_navigation=method=='navigate' and is_same_application_scope(package['job']['url'],params.get('url',''))
+            recovery_navigation=(method=='reload' and is_same_application_scope(package['job']['url'],url)) or (method=='navigate' and is_same_application_scope(package['job']['url'],params.get('url','')))
             if not reads and not recovery_navigation and identity['status']!='same_job' and not (
                 (reads or method=='submit') and ((pending and is_post_submit_scope(package['job']['url'],url)) or is_workday_candidate_home(package['job']['url'],url))):
                 raise ProtocolError('target_job_mismatch' if identity['status']=='different_job' else 'job_identity_unresolved')
+            if not pending and method in ('fill','select','check','apply_policy','request_answers') and platform_for_url(package['job']['url'])=='workday':
+                observed=await observe(page,package)
+                if (observed.get('workday') and observed.get('step') in ('my_information','my_experience','application_questions','voluntary_disclosures','self_identify')
+                    and not observed.get('auth') and not observed.get('native_authentication_required') and not observed.get('autofill_attempted')
+                    and observed.get('status') in ('ready','complete','needs_review') and observed.get('controls',{}).get('autofill',{}).get('enabled')):
+                    # After a manual exception the next Workday page returns to
+                    # bulk Autofill. Record exactly what ran; the requested
+                    # individual field write has not happened yet.
+                    redirected_from=method;method='simplify'
+                    params={'method':'simplify','action':'autofill','ref':observed['controls']['autofill']['ref']}
             target={k:params[k] for k in ('ref','selector') if params.get(k)}
             submission_control=False
             if method=='click' and target:
@@ -310,12 +325,13 @@ def browser_action(config,client,ownership,package,target_id,params):
                     return await click_control(page,target)
                 return await submit(page,client.call,package,ownership,config,target_id,activate,application_control=target)
             if pending and not reads:raise ProtocolError('submission_pending_read_only')
-            if not reads:
+            if not reads and method!='reload':
                 gate=await asyncio.to_thread(client.call,'browser_observe',**ownership,target_id=target_id,cdp_url=config['cdp_url'])
                 extension_action=method=='simplify' or (method=='click' and params.get('source')=='simplify')
                 permitted=gate.get('quiescent') if recovery_navigation else gate.get('native_takeover_authorized',gate.get('quiescent'))
                 if not extension_action and not permitted:
-                    raise ProtocolError('simplify_input_or_settlement_required')
+                    raise ProtocolError('simplify_input_or_settlement_required',
+                        'Observe active work or use an enabled Simplify Stop/Cancel. If the page is broken or Simplify failed to initialize, use browser method reload or session restart to cancel old activity, then inspect and continue. This is a recovery handoff, not an application outcome.')
             aid=uid()
             action_name='simplify_stop' if method=='simplify' and params.get('action')=='stop' else method
             client.call('action_start',**ownership,action_id=aid,tool_name='local_browser.'+action_name,writes_browser=not reads)
@@ -347,6 +363,18 @@ def browser_action(config,client,ownership,package,target_id,params):
             if method=='navigate':
                 if not is_same_application_scope(package['job']['url'],params['url']):raise ProtocolError('target_job_mismatch')
                 await page.goto(params['url']);succeeded=True;return {'navigation_requested':True}
+            if method=='reload':
+                # Reload is explicit cancellation, not a form write pretending
+                # that Simplify settled. action_start still serializes writers.
+                client.call('writer_state',**ownership,state='unknown')
+                result=await page.reload()
+                succeeded=result.get('document_replaced') is True
+                if succeeded:client.call('writer_state',**ownership,state='idle')
+                if succeeded:
+                    from .browser_controls import wait_for_page_recovery
+                    result['recovery']=await wait_for_page_recovery(page,package)
+                    result['instruction']=result['recovery']['instruction']
+                return result
             if method=='press' and not target:
                 await page.press_key(params['key']);succeeded=True;return {'pressed':True}
             if method in ('fill','select','check','press'):
@@ -406,9 +434,13 @@ def browser_action(config,client,ownership,package,target_id,params):
             if method=='simplify':
                 from .simplify_boundary import SimplifyBoundary
                 from .browser_controls import simplify_document
-                document,_,_=await simplify_document(page,ref=params.get('ref'),operation=params.get('action','autofill'))
+                document,_,selected=await simplify_document(page,ref=params.get('ref'),operation=params.get('action','autofill'))
                 client.call('writer_state',**ownership,state='active')
                 result=await SimplifyBoundary(document,budget_seconds=45,fast=True).perform(params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
+                if selected and selected.get('recovery'):result['control_recovery']=selected['recovery']
+                if redirected_from:
+                    result.update(requested_action_performed=False,redirected_from=redirected_from,
+                        instruction='Used the available first Autofill on this Workday page before manual repair. The requested individual field action was not performed. Inspect the filled page, use enabled Continue, and handle only actual remaining validation. Return each new page to routine fast_forward.')
                 client.call('writer_state',**ownership,state='idle' if result.get('native_takeover_authorized') else 'unknown')
                 succeeded=result.get('execution')=='clicked';return result
             if method=='click' and params.get('ref'):
@@ -527,7 +559,7 @@ def main(argv=None):
     import argparse
     parser=argparse.ArgumentParser(description='Local JobBot session interface. No API token or dashboard required.')
     sub=parser.add_subparsers(dest='command',required=True)
-    for name in ('start','status','call','stop','pause','attach','retry','reconcile','doctor','sessions','answer_retries'):
+    for name in ('start','status','call','stop','pause','attach','restart','retry','reconcile','doctor','sessions','answer_retries'):
         p=sub.add_parser(name);p.add_argument('--config');p.add_argument('--driver-id')
         if name=='start':
             p.add_argument('url',nargs='?');p.add_argument('--job-id');p.add_argument('--request-id')

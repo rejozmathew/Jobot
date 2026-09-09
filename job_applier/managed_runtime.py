@@ -252,6 +252,7 @@ class RuntimeServices:
                 'url':target['url'],
                 'observation':obs,
                 'action_id':action_id,
+                'instruction':'Observe ongoing work or use its enabled Stop/Cancel. Before submission, a broken page or missing Simplify panel can be recovered with browser reload or session restart even when writer settlement is unknown. Inspect the new page and continue; this observation is not an application outcome.',
             }
         except Exception:
             self.action_end(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,status='failed')

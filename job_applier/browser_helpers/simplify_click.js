@@ -3,6 +3,8 @@
   const scope=window.__jobbotSimplifyScope;
   if(!scope || scope.url!==location.href || (args.page_ref && scope.id!==args.page_ref) || location.origin+location.pathname!==args.url)
     return {status:'stale',reason:'page_changed',clicked:false};
+  if(scope.workday&&args.page_signature&&scope.page_signature!==args.page_signature)
+    return {status:'stale',reason:'page_changed',clicked:false};
   const found=scope.controls.get(args.ref);
   if(!found || found.kind!==args.operation || !found.element.isConnected)
     return {status:'stale',reason:'control_changed',clicked:false};
@@ -20,6 +22,14 @@
   const rect=el.getBoundingClientRect();
   if(el.disabled || el.getAttribute('aria-disabled')==='true' || !rect.width || !rect.height)
     return {status:'disabled',reason:'control_disabled',clicked:false};
+  if(scope.workday&&found.kind==='autofill'){
+    scope.autofillAttempts=scope.autofillAttempts||new Set();
+    if(scope.autofillAttempts.has(scope.autofillPageKey)&&!args.retry)
+      return {status:'already_attempted',reason:'autofill_already_attempted_on_page',clicked:false};
+    // Receipt precedes dispatch; field changes and new CDP connections do not
+    // turn a completed (or uncertain) fill into a new first fill on this page.
+    scope.autofillAttempts.add(scope.autofillPageKey);
+  }
   el.click();
   return {status:'clicked',clicked:true};
 }

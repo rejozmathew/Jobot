@@ -32,6 +32,10 @@ class SimplifyBoundary:
             source='fixture' if raw.get('source')=='fixture' else 'observed_dom')
         result['login_kind']=raw.get('login_kind')
         result['native_authentication_required']=raw.get('native_authentication_required') is True
+        if raw.get('workday') is True:
+            result['workday']=True
+            result['autofill_attempted']=raw.get('autofill_attempted') is True
+            result['autofill_page_key']=raw.get('autofill_page_key')
         result['activity']=raw.get('activity') or {}
         if 'review_count' in raw and (raw['review_count'] is None or isinstance(raw['review_count'], int)):
             result['review_count']=raw['review_count']
@@ -46,13 +50,18 @@ class SimplifyBoundary:
     @staticmethod
     def decide(observation,already_attempted=False,*,fast=False):
         status=observation.get('status','unknown');controls=observation.get('controls') or {}
+        already_attempted=already_attempted or bool(observation.get('workday') and observation.get('autofill_attempted'))
         if status=='active':return {'action':'wait','reason':'autofill_active'}
         if observation.get('native_authentication_required'):
             return {'action':'fallback','reason':'workday_native_authentication_required'}
         if status in ('unsupported','missing','login_required'):return {'action':'fallback','reason':status}
         if status=='unknown':return {'action':'fallback','reason':'controls_unavailable'}
+        if controls.get('continue',{}).get('enabled'):
+            return {'action':'continue','reason':'prefer_extension_continue'}
         if controls.get('autofill_skills',{}).get('enabled'):
             return {'action':'autofill_skills','reason':'simplify_waiting_for_skills_input'}
+        if observation.get('workday') and not already_attempted and not observation.get('autofill_attempted') and controls.get('autofill',{}).get('enabled'):
+            return {'action':'autofill','reason':'autofill_once_before_continue'}
         if fast and status in ('complete','needs_review') and controls.get('continue',{}).get('enabled'):
             return {'action':'continue','reason':'prefer_extension_continue'}
         if status=='needs_review':return {'action':'review','reason':'review_residual_fields'}
@@ -78,7 +87,13 @@ class SimplifyBoundary:
         return {'status':observed.get('status','unknown'),'changed':bool(changed),
             'writer_state':writer,'reason':reason,'native_takeover_authorized':writer=='idle' and not (
                 observed.get('activity',{}).get('busy_indicator') and observed.get('activity',{}).get('waiting_for_input')),
-            'observation':observed,'execution':getattr(self,'execution','not_executed')}
+            'observation':observed,'execution':getattr(self,'execution','not_executed'),
+            'instruction':('While a writer is active, observe it or use its enabled Stop/Cancel control and verify settlement. '
+                'For a broken page or missing Simplify panel on any portal, inspect loading and use browser reload when appropriate; '
+                'if that fails, use session restart and continue. These operations cancel old activity even when its settlement is unknown, before submission only. '
+                'Once settled, a missing control, unsupported field or failed helper is a handoff to the executor. '
+                'Inspect the actual screen/options, recover with scoped browser tools and resume filling or advancement. '
+                'A helper limit is not a terminal application outcome; keep working on the open session.')}
 
     async def perform(self,operation,*,retry=False,credential_evidence=None):
         if operation not in ('autofill','autofill_skills','continue','start','sign_in','stop'):raise ValueError('Unsupported Simplify operation')
@@ -90,15 +105,20 @@ class SimplifyBoundary:
             return dict(self._result(before,False,'unknown' if before['status'] in ('active','unknown') else 'idle',
                 'workday_native_authentication_required'),
                 instruction='Use fast_forward for native Workday authentication with the retained credential. Resume Simplify after the application form opens.')
-        page_key=before.get('page_signature') or before['url']
+        page_key=before.get('autofill_page_key') or before.get('page_signature') or before['url']
         if operation=='autofill_skills':
             page_key=(page_key,operation,before['controls'][operation].get('label'))
-        already=page_key in self.attempted
+        already=page_key in self.attempted or operation=='autofill' and before.get('workday') and before.get('autofill_attempted',False)
         can_retry=(bool(retry) and self.fast and operation=='autofill' and already
             and before['status'] in ('ready','complete','needs_review')
             and bool(before.get('controls',{}).get('autofill',{}).get('enabled'))
             and self.retries.get(page_key,0)<1)
         decision=self.decide(before,already and not can_retry,fast=self.fast)
+        # An explicit first Autofill can repair failed advancement even when
+        # Continue remains enabled. The default recommendation still advances.
+        if (operation=='autofill' and before.get('workday') and not already and
+            before['status'] in ('ready','complete','needs_review') and before['controls'].get('autofill',{}).get('enabled')):
+            decision={'action':'autofill','reason':'first_page_autofill_before_manual_repair'}
         active=before['status']=='active';clicked=False
         try:
             if operation=='stop':
@@ -131,7 +151,10 @@ class SimplifyBoundary:
             if before['status']=='unknown':
                 return self._result(before,False,'unknown','quiescence_unverified')
             if operation in ('autofill','autofill_skills','start') and already and not can_retry and before['status'] in ('ready','complete','needs_review'):
-                return self._result(before,False,'idle','already_attempted')
+                result=self._result(before,False,'idle','already_attempted')
+                if operation=='autofill' and before.get('workday'):
+                    result['instruction']='Autofill was already attempted on this Workday page. Continue after settlement; handle any actual remaining questions using approved answers. Do not click Autofill repeatedly.'
+                return result
             if not active:
                 control=before['controls'][operation]
                 if not control['ref'] or not control['enabled']:
@@ -140,6 +163,8 @@ class SimplifyBoundary:
                     return self._result(before,False,'unknown' if before['status']=='unknown' else 'idle',decision['reason'])
                 args={'ref':control['ref'],'url':before['url'],'operation':operation}
                 if before.get('page_ref'):args['page_ref']=before['page_ref']
+                if before.get('workday') and before.get('page_signature'):args['page_signature']=before['page_signature']
+                if can_retry:args['retry']=True
                 if operation=='sign_in':self.attempted.add(('sign_in',page_key))
                 self.execution='possibly_executed'
                 result=await asyncio.wait_for(self.page.evaluate(CLICK,args),timeout=max(0.05,self.deadline-self.clock()))
@@ -161,7 +186,11 @@ class SimplifyBoundary:
                 if current['status']=='active' or changed:
                     saw_active_or_change=True
                 if operation in ('autofill','autofill_skills','sign_in') and current['status'] in ('complete','needs_review'):
-                    if saw_active_or_change or stable_count>=1:
+                    # Workday can leave the prior "complete" panel visible
+                    # briefly after a click. Give its async fill time to start.
+                    settled_without_change=stable_count>=1 and (not (before.get('workday') and operation=='autofill') or
+                        self.clock()-(self.deadline-self.budget)>=5)
+                    if saw_active_or_change or settled_without_change:
                         return self._result(current,changed,'idle','observed_change' if changed else 'no_observable_progress')
                     stable_count+=1
                 if operation in ('continue','start','sign_in') and self._page_changed(before,current) and current['status'] not in ('active','unknown'):

@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.1
+version: 0.5.5
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -19,6 +19,32 @@ shell-capable harness uses the same local interface. The application executor
 uses its configured application model and existing mailbox capabilities. This
 skill does not launch a model. Engineering and application execution are separate.
 
+After reading this canonical skill, start the configured browser immediately.
+Read the required ATS skill while the host prepares the browser; finish that
+reading before form actions. Do not put repository exploration, a separate
+doctor run, repeated configuration/history inspection or a planning turn before
+start. The runtime already performs its own prerequisite checks. Reuse skills
+already loaded in this conversation rather than reading them again.
+
+The executor owns progress toward the authorized application outcome. Helpers
+accelerate routine work; their matchers, retry counts and call budgets do not
+define the limits of executor reasoning. On every ATS, `blocked`,
+`inspection_required`, an unsupported control or a failed click is a handoff:
+read the evidence and offered options, inspect the current DOM/screenshot,
+choose another supported interaction, verify its effect and continue in the
+same session. Use the LLM to resolve unfamiliar controls and choices; do not
+just repeat an unchanged failing helper or convert its result into `finish`.
+When a helper offers alternatives, choose among them using approved facts and
+the user's permissions, then return that choice to the helper or scoped browser.
+Spend additional time on a plausible recovery and record its timing so later
+engineering can improve the slow path. Ask the user only for information or
+verification actually requiring them. Real ownership, writer settlement,
+eligibility and uncertain-submission boundaries still apply. A helper's
+inability alone is never evidence that the application cannot proceed.
+User corrections are instructions to adjust and continue the authorized task.
+An apology or discovery of an executor mistake is not a stop request. Stop only
+when the user actually requests stopping or a real application outcome requires it.
+
 These shared rules apply to all ATS platforms. Respect app-owned controls and
 selected profile facts. Use bounded recovery for demonstrated blockers and actual
 page evidence. Prefer Simplify for bulk filling, without a redundant full final
@@ -27,11 +53,11 @@ and `jobbot finish`; the portable commands below invoke the same services.
 
 ## Start in the current conversation
 
-Use native `jobbot(operation="start", parameters={"url":"<eligible-job-url>"})`
+Use native `jobbot(operation="start", parameters={"url":"<eligible-job-url>","wait_seconds":0})`
 when available. Otherwise run from this repository using its virtualenv Python:
 
 ```text
-.venv/Scripts/python.exe -m job_applier.application_runtime start "<eligible-job-url>"
+.venv/Scripts/python.exe -m job_applier.application_runtime start "<eligible-job-url>" --wait-seconds 0
 ```
 
 The selected private config resolves through `JOBBOT_CONFIG` or the repository's
@@ -41,6 +67,10 @@ claim, lease renewal, port selection or target binding is needed. The service
 checks configured identity/resume, eligibility and duplicate history, records
 preparing, launches the assigned headed browser and returns a session handle.
 Doctor is a separate read-only diagnostic; start performs its own live readiness.
+Start returns the durable session while browser preparation continues. Read the
+ATS skill now, then check `status`; when connected, retrieve `context` once if
+start did not already return it. While preparing, continue waiting on this
+session. Never open another browser because readiness is still running.
 
 `HERMES_SESSION_ID` identifies this conversation. If the shell does not expose
 it, pass `--driver-id <this-conversation-id>` on local commands, consistently for
@@ -66,7 +96,7 @@ that session automatically. The portable equivalent is:
 ```
 
 Portable operation names include `context`, `report`, `browser_observe`,
-`fast_forward`, `credentials`, `browser`, `event`, `record_account_event`,
+`fast_forward`, `credentials`, `browser`, `restart`, `event`, `record_account_event`,
 `report_upload`, `submission_intent`, `finish`, `request_mail_for_attempt`,
 `match_mail_for_attempt`, and `account_lock`. No attempt/fence/target/CDP fields
 belong in their parameters. Native `milestone` maps to `event`, `observe` to
@@ -78,6 +108,11 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
 1. Verify the actual role remains eligible and the selected identity, account
    email, contact email, resume and mailbox are the approved ones. Exclusions,
    unknown required facts and same-job submission uncertainty remain binding.
+   At a posting or application-method chooser, prefer an observed enabled
+   Apply Manually, then Apply Now/Apply for this Job/Start Application/Apply.
+   Follow the direct application link before an optional Chat to Apply or
+   chatbot route. This includes an employer-branded landing page linking to
+   Workday. Do not select chat while a direct application route is available.
 2. Read the returned account strategy; use confirmed accounts. Inspect auth
    controls using `browser` with `{"method":"snapshot"}`. Pass only observed
    unique selectors `email_ref`, `password_ref`, optional `confirmation_ref` to
@@ -122,11 +157,18 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    Use the observed enabled action (including `autofill_skills`, any count), then
    wait again. A real unended write, disabled action or explicit ongoing fill
    still blocks. Permission for extension input does not authorize native edits.
-4. Prefer enabled Continue after settling over nonblocking review warnings.
+4. Prefer enabled Simplify Continue Application after settling over nonblocking
+   review warnings, source repair or optional field inspection. A populated
+   dropdown stays populated even if Simplify says needs_review. Advance first;
+   repair it only for an actual employer validation error or incorrect known fact.
+   On Workday, if Simplify Continue is unavailable or failed to advance, use the
+   page's available Autofill once before manual repair, then try Continue again.
+   Return every new page to the normal Simplify flow after handling an exception;
+   a manual questionnaire does not make later pages manual, including Self Identify.
    Handle only actual required blockers and material identity/document errors.
    Use approved facts; never fabricate screening answers or reconstruct history.
 5. For exceptions, `browser` methods are `snapshot`, `screenshot`, `click` (observed `selector`),
-   `fill` (`selector`, approved `value`), `press` (`key`), `navigate` (`url` in the
+   `fill` (`selector`, approved `value`), `press` (`key`), `reload`, `navigate` (`url` in the
    owned application), `evaluate` (`script`, optional structured `argument`),
    `upload` (`selector`, selected `asset_id`), and `simplify` (`action`). These
    use the assigned target. Never use global desktop focus, a process-global CDP
@@ -208,15 +250,57 @@ Reconciliation never submits or creates a retry. Cross-job URLs are not proof.
 
 Headed sessions start maximized. Obscured clicks return viewport/covering metadata
 and use only an uncovered point on the actual control. Inspect and use an observed
-panel collapse control if needed; never force through an overlay or automatically
-refresh an application. Completed workspaces retire their owned background host;
+panel collapse control if needed; never force through an overlay. Completed workspaces retire their owned background host;
 parallel sessions retain their independent hosts and browser processes.
+
+For a broken page before submission, recover it instead of finishing blocked.
+This applies to Workday, iCIMS, Greenhouse and proprietary portals alike. A
+missing Simplify panel is also a recovery case: inspect the current page and
+whether it is still loading, then refresh if the extension did not initialize.
+Check again after reload; restart the owned browser if still unusable. Diagnose
+an extension login/setup issue when the UI shows one. Use approved native
+controls where supported after fresh writer observation, without reconstructing
+career/education history. Neither missing Simplify nor a helper timeout is by
+itself grounds to finish blocked; choose the next recovery from actual evidence.
+After a reload, let the application and extension initialize and inspect the
+fresh result. `recovery.status:recovered` means resume normal application work.
+`loading` means wait and reobserve this page, not another refresh or restart.
+Once the old error disappears and the page has usable controls or progresses,
+that recovery is finished. Another reload/restart needs a new, currently observed
+failure; never keep recovering from an error that existed before the refresh.
+Use `browser` with `{"method":"reload"}` when the employer requests a refresh
+or the current page evidence supports it. This deliberately cancels the old
+document; an unknown Simplify writer and a missing Stop/Cancel button do not
+prohibit this recovery. The runtime verifies document replacement, then new
+observations govern form writes. Inspect and restore unsaved fields as needed.
+If refresh fails or the browser remains unusable, call `restart` with empty
+parameters. The host stops its owned browser and reopens the assigned job with
+the same profile, session and attempt. Read status until connected, inspect the
+page, recover sign-in/form progress and continue. A helper's automatic recovery
+limit hands the decision back to the executor; it does not forbid another
+evidence-based recovery. Reload/restart never authorize repeating a possibly
+submitted application. Pending submission remains observation/reconciliation only.
 
 `finish` parameters are `{"outcome":"blocked","evidence":"<observed reason>",
 "quiescent":true}` (or another supported truthful outcome). Do not add invented
 fields. `context` and `report` remain readable after the browser host has stopped.
 
 ## Missing required answers
+
+This decision sequence applies to every ATS and proprietary application form.
+Read the complete question and offered choices, use the selected profile's
+standard answers/defaults and other approved facts, and consult saved answers.
+The shared screen's `answer_context` exposes those standard answers and core
+preferences; the remaining approved profile is in the application context.
+Decide answers for the page together where practical, actually enter them with
+the available form tools, and verify that they commit. If a known answer fails
+to commit, refresh the control, inspect its options, follow child menus or use
+another supported interaction and continue. A review count, Select One label
+or failed helper is unfinished work, not evidence that the user must answer.
+Only information still genuinely unknown after this process belongs in the
+human-input workflow. A final blocker is the last resort for an evidenced
+obstacle remaining after executor recovery. These judgments belong to the
+executor; no universal yes/no answer is manufactured by the helper.
 
 Use approved profile facts, policy and exact saved human answers first. When an
 actual required question still lacks an answer, call `browser` with
@@ -315,7 +399,10 @@ A helper exception is not an employer rejection. Record `event_type:"recovery"`
 with its observed `error_type`, concise `evidence`, and the safe `next_step`.
 Use the existing scoped browser/credential tools for a supported exception path
 when possible; keep Simplify as the bulk filler. Do not finish merely because one
-helper failed. If bounded recovery cannot proceed, record what failed, what was
+helper failed or its bounded call ended. Continue executor-led recovery using
+the current screen, alternative controls and actual offered choices. A failed
+matcher is a technical limitation, not missing candidate information. If an
+actual obstacle remains after these alternatives, record its evidence, what was
 tried, what is needed, and whether any submission occurred before finishing.
 Do not log raw prompts, private reasoning, field values or credential/mail content.
 

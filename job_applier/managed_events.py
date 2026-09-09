@@ -77,8 +77,12 @@ class EventServices:
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
             if writes_browser:self._budget_check(db,a)
-            stopping=tool_name=='local_browser.simplify_stop' and bool(local_session(db,attempt_id))
-            semantic=self._strategy_check(db,a,tool_name) if writes_browser and not stopping else self._field_context(db,a)
+            local=bool(local_session(db,attempt_id))
+            stopping=tool_name=='local_browser.simplify_stop' and local
+            recovering=tool_name=='local_browser.reload' and local
+            if recovering and self._submission_pending(db,a):raise ProtocolError('submission_pending_read_only')
+            cancelling=stopping or recovering
+            semantic=self._strategy_check(db,a,tool_name) if writes_browser and not cancelling else self._field_context(db,a)
             run=self._get(db,'runs',a['run_id'])
             if run['control']!='running':
                 if writes_browser or tool_name != 'browser_observe' or run['control'] not in ('pause_requested','stop_requested'):
@@ -88,7 +92,7 @@ class EventServices:
                 if old['attempt_id']!=attempt_id or old['tool_name']!=tool_name or old['writes_browser']!=int(writes_browser): raise ProtocolError('idempotency_conflict')
                 if old['ended_at']: raise ProtocolError('action_already_finished')
                 return dict(old)
-            if writes_browser and ((a['writer_state']!='idle' and not stopping) or db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1',(attempt_id,)).fetchone()):
+            if writes_browser and ((a['writer_state']!='idle' and not cancelling) or db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1',(attempt_id,)).fetchone()):
                 raise ProtocolError('browser_writer_busy')
             db.execute('INSERT INTO managed_actions(id,attempt_id,tool_name,started_at,writes_browser,semantic_context_json) VALUES (?,?,?,?,?,?)',(action_id,attempt_id,safe_text(tool_name),self.now(),int(writes_browser),dumps(semantic)))
             if not hasattr(self,'_action_clocks'):self._action_clocks={}

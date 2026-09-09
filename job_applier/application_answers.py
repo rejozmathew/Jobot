@@ -140,7 +140,7 @@ async def apply_policy(page, package, observed, *, completed=None, posted_range=
     policy=profile_policy(package);completed=completed if completed is not None else []
     results=[]
     for field in observed.get('inventory',[]):
-        label=field.get('label') or field.get('text') or ''
+        label=field.get('question') or field.get('label') or field.get('text') or ''
         key=(observed.get('page_signature') or observed.get('step',''))+'|'+label
         if key in completed or not field.get('enabled') or not field.get('ref'):continue
         params=None

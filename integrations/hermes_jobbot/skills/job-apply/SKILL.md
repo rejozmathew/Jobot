@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Run repository-managed job applications with tracking.
-version: 0.4.4
+version: 0.4.5
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -21,8 +21,8 @@ This is the thin Hermes discovery layer. The application repository owns the pro
 ## Procedure
 1. Resolve the repository from the active Project or configured JobBot `app_repo`. Require an explicit runtime config; never choose a database by cwd or a similarly named checkout.
 2. Use `read_file` on `<repo>/skills/productivity/job-apply/SKILL.md`. Its relative references resolve from that repository directory, not this entry-point directory.
-3. For Workday, also read `<repo>/skills/productivity/workday-simplify/SKILL.md`. Use the shipped native `jobbot fast_forward` operation or its documented same-runtime CLI, not one-off polling scripts.
-4. Follow the repository local start/session procedure. Configuration selects identity, documents and workspaces; the host resolves ownership/target. No token export, running HTTP service or expiring shared lease is required. Another harness uses the same CLI.
+3. Immediately start through the canonical skill's local start command with `wait_seconds:0`; the browser prepares while you read the ATS detail. Do not insert repository exploration, doctor, repeated skill reads or a planning turn before start. Configuration selects identity, documents and workspaces; the host resolves ownership/target.
+4. For Workday, read `<repo>/skills/productivity/workday-simplify/SKILL.md` while startup runs, then check the returned session's readiness/context and use the shipped native `jobbot fast_forward` operation or its documented same-runtime CLI. No token export, running HTTP service or expiring shared lease is required. Another harness uses the same CLI.
 
 ## Pitfalls
 No in-run PDF extraction or experience/education reconstruction. Do not compete with Simplify, clear every nonblocking review warning, bypass ownership, or resubmit an uncertain application. A fresh URL does not authorize using a stale run or another candidate.
