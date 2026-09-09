@@ -17,6 +17,13 @@ def next_operation(platform, observed=None):
     if status in ('active','unknown'):
         return {'operation':'browser_observe','parameters':{},
                 'instruction':'Observe the current writer until it settles. Inspect an unusable page with the shared recovery controls.'}
+    if platform=='icims' and 'native' not in observed:
+        return {'operation':'browser','parameters':{'method':'snapshot'},
+                'instruction':'Inspect the iCIMS posting and embedded application controls before choosing Autofill. Open Apply on the posting; use the current Email/Next controls on the login page.'}
+    apply=(observed.get('native') or {}).get('apply',{})
+    if platform=='icims' and apply.get('enabled'):
+        return {'operation':'browser','parameters':{'method':'click','ref':apply['ref']},
+                'instruction':'Open the observed iCIMS Apply control, including its embedded frame, before filling application details.'}
     for action in ('continue','autofill'):
         if observed.get('controls',{}).get(action,{}).get('enabled'):
             return {'operation':'browser','parameters':{'method':'simplify','action':action},
@@ -149,7 +156,8 @@ def inventory(observed, package):
     result['instruction']=('Use observed refs with browser select, check, fill, press or click. Values come from approved facts or explicit user choices. '
         'Complete required questions using answer_context.standard_answers, approved profile facts and saved answers before requesting human input. '
         'A helper mismatch or failed selection is a recovery handoff, not an application outcome. Inspect actual options, refresh stale controls, '
-        'use a scoped screenshot when needed and try another supported interaction. Keep the session open and continue after progress. '
+        'if an expected control is missing, take and visually inspect an owned screenshot immediately, inspect embedded frames and scroll containers, then try another supported interaction. '
+        'Before concluding that recovery is exhausted, inspect a fresh screenshot and attempt the remaining plausible actions. Keep the session open and continue after progress. '
         'Missing Simplify or an unusable page calls for browser_recovery: inspect loading, reload when appropriate, restart if needed and continue. '
         'Use browser submit for the final action; it captures confirmation before closing.')
     profile=package['attempt'].get('profile_json') or {}

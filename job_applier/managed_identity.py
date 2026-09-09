@@ -51,14 +51,27 @@ def greenhouse_query_identity(url):
     except (ValueError,ProtocolError):return None
 
 
+def icims_identity(url):
+    """iCIMS keeps the job id across posting, login and embedded form routes."""
+    try:
+        p=urlsplit(canonical_url(url));host=p.hostname or ''
+        if host!='icims.com' and not host.endswith('.icims.com'):return None
+        match=re.match(r'^/jobs/(\d+)(?:/|$)',p.path,re.I)
+        if match:return ('icims',p.scheme,p.netloc,match[1])
+    except (ValueError,ProtocolError):pass
+    return None
+
+
 def same_job_url(left, right):
-    """Compare URLs without changing persisted identity hashes or opaque queries."""
+    """Compare known ATS identities; preserve other portals' opaque URL queries."""
     try:
         a, b = urlsplit(canonical_url(left)), urlsplit(canonical_url(right))
     except (ValueError, ProtocolError):
         return False
     wd_left,wd_right=workday_identity(left),workday_identity(right)
     if wd_left or wd_right:return bool(wd_left and wd_right and wd_left==wd_right)
+    icims_left,icims_right=icims_identity(left),icims_identity(right)
+    if icims_left and icims_right:return icims_left==icims_right
     gh_left,gh_right=greenhouse_query_identity(left),greenhouse_query_identity(right)
     if gh_left and gh_right:return gh_left==gh_right
     if any(k=='gh_jid' for p in (a,b) for k,v in parse_qsl(p.query,keep_blank_values=True)):
@@ -132,6 +145,8 @@ def job_identity(url):
     """One comparison identity; stored URL hashes and historical rows stay intact."""
     identity = workday_identity(url)
     if identity:return identity
+    identity = icims_identity(url)
+    if identity:return identity
     gh = greenhouse_query_identity(url)
     if gh:return ('requisition_query', gh)
     return (canonical_url(url),)
@@ -175,6 +190,8 @@ def application_match(job_url, candidate_url):
         if wd_expected and wd_actual:different = wd_expected != wd_actual
         gh_expected, gh_actual = query_requisition(job_url), query_requisition(candidate_url)
         if gh_expected and gh_actual:different = different or gh_expected != gh_actual
+        icims_expected,icims_actual=icims_identity(job_url),icims_identity(candidate_url)
+        if icims_expected and icims_actual:different=different or icims_expected!=icims_actual
         return {'status': 'different_job' if different else 'identity_unresolved'}
     except ValueError:return {'status': 'identity_unresolved'}
 
@@ -190,6 +207,8 @@ def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
         workday_host=urlsplit(str(job_url).strip()).hostname or ''
         if workday_host.casefold().endswith('.myworkdayjobs.com') and workday_identity(job_url):
             return is_workday_application_scope(job_url, candidate_url)
+        icims_expected,icims_actual=icims_identity(job_url),icims_identity(candidate_url)
+        if icims_expected and icims_actual and icims_expected==icims_actual:return True
         job_p = urlsplit(canonical_url(job_url))
         cand_p = urlsplit(canonical_url(candidate_url))
         if job_p.scheme.lower() != cand_p.scheme.lower() or job_p.scheme.lower() not in ('https', 'http'):

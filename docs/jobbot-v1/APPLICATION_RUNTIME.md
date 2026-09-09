@@ -35,6 +35,26 @@ obstacle, user stop, or submission evidence determines the eventual outcome;
 a helper's matching limits do not. Shared browser/Simplify responses and the
 canonical job-apply skill carry this instruction to the executor.
 
+Missing expected controls now trigger visual recovery explicitly. Shared browser
+snapshots automatically attach a masked private screenshot when no enabled native
+or Simplify progress control is found, structured/frame inspection fails, or the
+owned page's identity is unresolved. The result instructs the executor to read the image with
+its harness image tool, inspect frames/overlays/inner scrollbars, and continue.
+Capturing without inspecting is insufficient. Screenshot failure remains a
+recovery diagnostic, not another finish gate. The same instruction is exposed
+in the common screen recovery payload, including Workday, and in canonical skills:
+inspect a fresh screenshot and remaining plausible actions before giving up.
+
+iCIMS was already detected by hostname, but previously used the generic exact-path
+matcher. Its `/jobs/<numeric-id>/.../job`, `/login` and embedded-view URLs now
+compare by scheme, employer host and job id. Slugs and page-mode query parameters
+do not change the job. The existing frame router, browser/credential write paths,
+target binding and URL comparisons reuse that identity. Stored URL hashes and
+history are not rewritten. Start/status includes `platform` and `ats_reference`
+while preparing. The iCIMS reference describes the observed posting-to-Email/Next
+flow without assuming later stages. iCIMS first inspects the posting/frame and
+opens the observed Apply control before using Autofill on application details.
+
 Workday's empty recruiting-source prompt has a scoped fallback after Simplify
 settles. It preserves existing answers, follows parent categories to leaves,
 uses native pointer selection and scrolls only the associated virtualized popup.
@@ -492,17 +512,17 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 
 | Component | Scope and consumer |
 |---|---|
-| application_runtime.py | Shared request identity, start/retry and control_session stop/pause lifecycle; successful legacy-history matching, platform guidance, scoped browser exceptions, field-task attribution, Autofill timing and answer/metadata capture |
+| application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
 | managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed |
 | workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, queued JSON dispatch on the physical browser; no model or five-second busy veto |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
-| managed_identity.py | Shared Workday host/site/full-requisition parser, comparison identity, history equivalence, diagnostic match states and job_requisition for confirmation; no display-location/title/step allowlist |
+| managed_identity.py | Workday host/site/full-requisition and iCIMS host/job-id comparison, history equivalence, application scope and diagnostic match states; existing frame router, runtime, credentials and binding callers share scope matching |
 | managed_shared.submission_state / submission_pending and managed_events._submission_state / _submission_pending | One per-attempt evidence projection from existing ordered events; evidence reporting only; accepted alone suppresses a new requested attempt |
 | workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
-| browser_controls.py / browser_helpers/form_controls.js | Shared form reader, exact committed-selection verification, posting metadata and document-local private verification groups and remaining_submission_work; used by submission, browser runtime, answer capture, credentials and Workday |
+| browser_controls.py / browser_helpers/form_controls.js | Shared form reader including Apply, committed-selection verification, posting metadata, private code groups and remaining_submission_work; iCIMS entry guidance; used by submission, browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
 | application_answers.py | Interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |

@@ -202,13 +202,18 @@ def handle(service, session_id, *, include_context=True):
     from .browser_controls import next_operation
     from .managed_context import platform_for_url
     job=result.get('context',{}).get('job') or service.job(state['job_id'])
+    platform=result.get('context',{}).get('platform') or platform_for_url(job['url'])
+    result['platform']=platform
+    reference={'icims':'job-apply/references/icims.md','greenhouse':'job-apply/references/greenhouse.md',
+               'workday':'workday-simplify/SKILL.md'}.get(platform)
+    if reference:result['ats_reference']=str(REPOSITORY/'skills'/'productivity'/reference)
     readiness=state['metadata'].get('readiness',{})
     if state['state'] in ('connected','waiting'):
         # Startup controls describe the initial document only. Once execution
         # begins, status requests direct a fresh observation instead of replaying
         # an old enabled Autofill recommendation.
         progressed=bool(state['attempt_id'] and service.events(state['attempt_id']))
-        result['next_operation']=next_operation(result.get('context',{}).get('platform') or platform_for_url(job['url']),
+        result['next_operation']=next_operation(platform,
             {} if progressed else readiness.get('observation'))
     else:
         result['next_operation']={'operation':'status','parameters':{},'instruction':'Wait for session readiness while reading the detected ATS reference.'}
@@ -393,38 +398,65 @@ def browser_action(config,client,ownership,package,target_id,params):
             aid=uid()
             action_name='simplify_stop' if method=='simplify' and params.get('action')=='stop' else method
             client.call('action_start',**ownership,action_id=aid,tool_name='local_browser.'+action_name,writes_browser=not reads)
-            if method=='screenshot':
+            async def screenshot_evidence():
                 from .managed_credentials import capture_private_screenshot
                 folder=Path(config['spool_dir'])/'screenshots'
                 if not folder.is_absolute():raise ProtocolError('absolute_spool_required')
                 folder.mkdir(parents=True,exist_ok=True);path=folder/(aid+'.png')
                 await capture_private_screenshot(page,path)
-                succeeded=True
                 return {'image_path':str(path),'mime_type':'image/png','url':public_url(url),'target_id':target_id,'identity':identity,
                     'instruction':'Inspect this owned-page image; snapshot supplies observed selectors.'}
+            if method=='screenshot':
+                evidence=await screenshot_evidence();succeeded=True;return evidence
             if method=='snapshot':
+                visual_reason=None
                 if identity['status']!='same_job':
+                    visual_reason='identity_unresolved_on_owned_page'
                     result={'url':public_url(url),'target_id':target_id,'submission_pending':pending,
                             'identity':identity,'recovery_only':identity['status']!='same_job',
                             'instruction':'Inspect this owned tab or navigate back to the assigned job before form writes.'}
                 else:
-                    observed=await observe(page,package)
-                    metadata=observed.get('job_metadata')
-                    if metadata is None:
-                        metadata=await page.evaluate_function(FORM,{'method':'metadata'})
-                    try:client.call('observe_job_metadata',**ownership,metadata=metadata)
-                    except Exception:pass  # Optional labels cannot disguise a browser action.
-                    result=inventory(observed,package)
-                    if result.get('verification'):
-                        from .hermes_gmail import mailbox_handoff
-                        result['verification']['mailbox']=mailbox_handoff(config)
-                        result['verification']['next_operation']={'operation':'credentials',
-                            'parameters':{'mode':'verification','action':'inspect','refs':result['verification']['groups'][0]['refs']}}
+                    try:
+                        observed=await observe(page,package)
+                        metadata=observed.get('job_metadata')
+                        if metadata is None:
+                            metadata=await page.evaluate_function(FORM,{'method':'metadata'})
+                        try:client.call('observe_job_metadata',**ownership,metadata=metadata)
+                        except Exception:pass  # Optional labels cannot disguise a browser action.
+                        result=inventory(observed,package)
+                        native_progress=any(control.get('enabled') for control in observed.get('native',{}).values())
+                        simplify_progress=any(observed.get('controls',{}).get(key,{}).get('enabled') for key in ('continue','submit'))
+                        if not native_progress and not simplify_progress:
+                            visual_reason='expected_progress_control_not_found'
+                        frames=observed.get('application_frames') or {}
+                        if isinstance(frames,dict) and frames.get('diagnostics'):
+                            visual_reason='embedded_form_inspection_incomplete'
+                        if result.get('verification'):
+                            from .hermes_gmail import mailbox_handoff
+                            result['verification']['mailbox']=mailbox_handoff(config)
+                            result['verification']['next_operation']={'operation':'credentials',
+                                'parameters':{'mode':'verification','action':'inspect','refs':result['verification']['groups'][0]['refs']}}
+                    except Exception as exc:
+                        result={'url':public_url(url),'target_id':target_id,'identity':identity,
+                                'observation_error_type':type(exc).__name__}
+                        visual_reason='structured_observation_failed'
                 result['title']=await page.evaluate('document.title')
                 result['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
                 if pending:
                     from .simplify_boundary import OBSERVE
                     result['simplify']=await page.evaluate(OBSERVE)
+                if visual_reason:
+                    recovery={'reason':visual_reason,
+                        'instruction':'Inspect the returned image with the current harness image tool (Hermes: vision_analyze). Look for Apply, Email/Next, embedded frames, overlays and inner scrollbars. Compare visible controls with the inventory, refresh frame refs or use supported browser inspection, and continue. Do not finish merely because the structured reader missed a control. A CAPTCHA notice alone is not an active challenge.'}
+                    try:
+                        evidence=await screenshot_evidence()
+                        result.update({k:v for k,v in evidence.items() if k!='instruction'})
+                        recovery['image_path']=evidence['image_path']
+                    except Exception as exc:
+                        recovery['capture_error_type']=type(exc).__name__
+                        recovery['instruction']='The automatic screenshot could not be captured. Inspect the owned DOM/frames, retry the screenshot or recover the browser, and continue; an image capture failure is not an application outcome.'
+                    result['visual_recovery']=recovery;result['instruction']=recovery['instruction']
+                    result.pop('next_operation',None)  # The executor reads the image before choosing another action.
                 succeeded=True;return result
             if method=='evaluate':
                 result=await page.evaluate_function(params['script'],params['argument']) if 'argument' in params else await page.evaluate(params['script'])

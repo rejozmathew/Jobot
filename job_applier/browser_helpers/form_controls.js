@@ -141,6 +141,7 @@
  if(args.method==='observe'){
   const inventory=nodes().map(describe),controls={};
   const labels={'save and continue':'continue','continue':'continue','next':'continue','next step':'continue',
+    'apply':'apply','apply now':'apply','apply for this job':'apply','apply manually':'apply','start application':'apply',
     'submit':'submit','submit application':'submit','send application':'submit'};
   for(const item of inventory){
    const kind=labels[item.text.toLowerCase()];if(!kind)continue;

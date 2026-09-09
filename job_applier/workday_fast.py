@@ -117,6 +117,8 @@ def screen_inventory(observed,package):
         'step':observed.get('step'),'auth':observed.get('auth'),'auth_ui':observed.get('auth_ui'),
         'native':observed.get('inventory',[]),'errors':observed.get('blocking_errors',[]),'refresh_error':observed.get('refresh_error',False),
         'browser_recovery':{'available':True,
+            'screenshot':{'operation':'browser','parameters':{'method':'screenshot'}},
+            'visual_instruction':'If an expected control is missing, take this screenshot and inspect it with the harness image tool. Inspect embedded frames, overlays and scroll containers; continue from what is visible. Before giving up on any portal, inspect a fresh image and try the remaining plausible recovery. Capturing an image without reading it is not visual inspection.',
             'reload':{'operation':'browser','parameters':{'method':'reload'}},'restart':{'operation':'restart','parameters':{}},
             'instruction':'On any portal, inspect a broken page or missing Simplify panel and allow actual loading before recovery. After reload, use the fresh screen: once the page has usable controls or progresses, continue without another reload/restart for the old error. A new observed failure can support further recovery. Inspect submission evidence when relevant; a previous click does not disable recovery.'},
         'simplify':{'enabled':settings.get('autofill','simplify')=='simplify','status':observed.get('status'),'panel':observed.get('panel'),

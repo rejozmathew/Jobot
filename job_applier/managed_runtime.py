@@ -77,11 +77,11 @@ class RuntimeServices:
             if session and session['target_id']!=target_id:raise ProtocolError('target_not_owned')
             verified=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone()
             # An account alias proves credential scope, NOT requisition/tab ownership.
-            # Alternate URLs need a verified job identity; only the conventional
-            # same-origin /apply child preserves the posting identity implicitly.
+            # Alternate URLs need the same verified job identity. Known ATS
+            # requisitions retain identity across their normal application steps.
             apply_child=(bool(expected.path) and parsed.scheme==expected.scheme and parsed.netloc==expected.netloc
                 and parsed.path==expected.path+'/apply' and parsed.query==expected.query)
-            if (expected.hostname or '').endswith('.myworkdayjobs.com'):
+            if (expected.hostname or '').endswith(('.myworkdayjobs.com','.icims.com')):
                 apply_child=is_same_application_scope(job['url'],canonical)
             if not verified and not apply_child:raise ProtocolError('target_job_mismatch')
             old=db.execute('SELECT * FROM owned_targets WHERE profile=? AND target_id=? AND state!=?',(a['browser_profile'],target_id,'closed')).fetchone()

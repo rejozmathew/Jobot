@@ -1,5 +1,42 @@
 # Runtime simplification implementation log
 
+## iCIMS route identity and visual recovery - 2026-09-09
+
+The supplied ComPsych transcript and screenshots show two misses: Apply was
+visible in an embedded document omitted by structured observation, and the same
+job's `/login` step was refused as `job_identity_unresolved`. An attempted
+page-mode URL was also refused as `target_job_mismatch`. The hostname detector
+already returned iCIMS; its scope matcher still compared generic exact paths and
+queries. The executor also stopped instead of inspecting the visible page and
+later inferred an active hCaptcha obstacle merely from a protection notice.
+
+Added the stable iCIMS employer-host/job-id comparison to existing identity,
+scope, history comparison and binding paths. The existing frame router now
+recognizes same-job embedded mode URLs and login transitions without a new frame
+service or permission exception. Other ATS comparison paths remain intact. The
+shared inventory identifies Apply controls; iCIMS startup requests a snapshot
+before Autofill and recommends the observed Apply ref when present.
+
+Start/status exposes the detected platform and required reference even while
+preparing. Added the iCIMS reference with the observed frame/Email/Next behavior.
+The user explicitly requested visual inspection before abandoning any portal.
+Canonical instructions and shared screen recovery now say to capture AND read
+the image, inspect embedded frames and inner scroll areas, try plausible recovery
+and continue. Shared snapshots automatically attach masked image evidence on
+missing progress controls, structured/frame inspection failures or unresolved
+page identity. Enabled Simplify advancement remains a valid progress control.
+No screenshot proof/approval gate was added to finish or form entry. A CAPTCHA
+notice alone no longer justifies requesting a human challenge response.
+
+No live application/mailbox was used as a fixture or modified. The configured
+history was opened read-only for table names; no records changed. No new tests
+or regression runs, following the user's instruction. Requested Antigravity
+Flash read-only validation could not complete: restricted authentication failed,
+headless tool permission was unavailable, and a supplied-diff/no-tools review
+timed out without findings. The primary agent reviewed the source and completed
+Python/JavaScript syntax and whitespace checks; this does not establish live
+iCIMS end-to-end acceptance. Running application hosts were not restarted.
+
 ## Credential and submission error-return review - 2026-09-09
 
 Reviewed all credential helper refusals, submission activation/results and the

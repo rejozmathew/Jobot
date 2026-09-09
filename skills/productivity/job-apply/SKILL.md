@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.10
+version: 0.5.11
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -36,6 +36,19 @@ same session. Use the LLM to resolve unfamiliar controls and choices; do not
 just repeat an unchanged failing helper or convert its result into `finish`.
 When a helper offers alternatives, choose among them using approved facts and
 the user's permissions, then return that choice to the helper or scoped browser.
+If a control you expect is missing, take an owned-page screenshot immediately
+and actually inspect it with the harness image tool. Look inside embedded frames,
+overlays and inner scroll containers. Compare the image with the structured
+inventory; a reader miss is not evidence that the visible control is absent.
+Snapshots that miss progress controls may already include `image_path` and
+`visual_recovery`; read that image before choosing the next action. Refresh refs
+after navigation and use the observed controls in the same session. Before
+ending for any unresolved obstacle, inspect a fresh screenshot and attempt the
+remaining plausible recovery. If capture fails, recover the browser or use the
+available DOM evidence; do not turn the screenshot failure into another blocker.
+Do not return a terminal answer after merely announcing the next action. Perform
+it, inspect the result, and continue. A CAPTCHA logo or protection notice alone
+does not establish an active challenge or justify asking the user to solve one.
 Spend additional time on a plausible recovery and record its timing so later
 engineering can improve the slow path. Ask the user only for information or
 verification actually requiring them. Real ownership, writer settlement,
@@ -72,6 +85,12 @@ ATS skill now, then check `status`; when connected, retrieve `context` once if
 start did not already return it. While preparing, continue waiting on this
 session. Never open another browser because readiness is still running.
 
+Start/status returns the detected `platform` and an `ats_reference` path when
+available, including while the browser prepares. Read that reference before form
+actions: iCIMS uses `references/icims.md`, Greenhouse uses `references/greenhouse.md`,
+and Workday uses the canonical `workday-simplify` skill. Portal detection is a
+starting hint; follow the actual page and controls at each step.
+
 Read `next_operation` from readiness/status and fresh browser observations.
 Workday routes to `fast_forward` with `{"seconds":60}`. Greenhouse and other
 shared forms route to `browser` with `{"method":"simplify","action":"autofill"}`
@@ -93,6 +112,9 @@ not an employer rejection. Identity checks compare browser ownership, configured
 candidate and the actual job. Workday location/title changes and new application
 steps do not change that job. `identity_unresolved` permits owned snapshots,
 screenshots and navigation back to the assigned job; it does not close the session.
+iCIMS `/jobs/<id>/.../job`, `/login` and embedded page-mode routes retain the
+same employer/job identity. Use their current frame refs for Email, Next and
+subsequent form controls; an ordinary login transition is not loss of ownership.
 
 The returned `session_id`, job/context, approved assets, account namespace,
 workspace and timing are authoritative. Native subsequent operations resolve
