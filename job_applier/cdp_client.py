@@ -148,11 +148,12 @@ class _CDPSession:
         self._reader_task: Optional[asyncio.Task] = None
         self._listeners: dict[str, list] = {}
 
-    def subscribe(self, method: str, callback):
+    def subscribe(self, method: str, callback, *, session_id=None):
         """Listen on this exact target connection; callbacks must not block."""
-        self._listeners.setdefault(method, []).append(callback)
+        key = (session_id, method)
+        self._listeners.setdefault(key, []).append(callback)
         def remove():
-            callbacks=self._listeners.get(method, [])
+            callbacks=self._listeners.get(key, [])
             if callback in callbacks:callbacks.remove(callback)
         return remove
 
@@ -177,7 +178,7 @@ class _CDPSession:
                             else:
                                 fut.set_result(msg.get("result", {}))
                     elif mid is None:
-                        for callback in tuple(self._listeners.get(msg.get('method'), [])):
+                        for callback in tuple(self._listeners.get((msg.get('sessionId'), msg.get('method')), [])):
                             try:callback(msg.get('params', {}))
                             except Exception:pass
                 # opcode 0x2 = ping, 0x3 = close; ignore for our purposes
@@ -186,14 +187,19 @@ class _CDPSession:
         except Exception:
             pass
 
-    async def call(self, method: str, params: Optional[dict] = None, timeout: float = 30.0) -> dict:
+    async def call(self, method: str, params: Optional[dict] = None, timeout: float = 30.0, *, session_id=None) -> dict:
         self._id += 1
         mid = self._id
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending[mid] = fut
         async with self._lock:
-            await self.ws.send_text(json.dumps({"id": mid, "method": method, "params": params or {}}))
+            message = {"id": mid, "method": method, "params": params or {}}
+            if session_id is not None:message['sessionId'] = session_id
+            await self.ws.send_text(json.dumps(message))
         return await asyncio.wait_for(fut, timeout)
+
+    def channel(self, session_id):
+        return _CDPChannel(self, session_id)
 
     async def close(self) -> None:
         # IMPORTANT: we ATTACHED to an existing browser (the user's Brave).
@@ -211,6 +217,21 @@ class _CDPSession:
 # ---------------------------------------------------------------------------
 # Page element handle (for query_selector_all / set_input_files)
 # ---------------------------------------------------------------------------
+class _CDPChannel:
+    """Flattened child target, multiplexed on the already owned page connection."""
+    def __init__(self, connection, session_id):
+        self.connection, self.session_id = connection, session_id
+
+    async def call(self, method, params=None, timeout=30.0):
+        return await self.connection.call(method, params, timeout, session_id=self.session_id)
+
+    def subscribe(self, method, callback):
+        return self.connection.subscribe(method, callback, session_id=self.session_id)
+
+    def channel(self, session_id):
+        return self.connection.channel(session_id)
+
+
 class CDPElement:
     def __init__(self, session: _CDPSession, object_id: str):
         self._session = session
@@ -280,6 +301,7 @@ class CDPPage:
             "returnByValue": True,
             "awaitPromise": True,
         }
+        if getattr(self, 'context_id', None) is not None:params['contextId'] = self.context_id
         res = await self._session.call("Runtime.evaluate", params, timeout=timeout)
         if "exceptionDetails" in res:
             det = res["exceptionDetails"]
@@ -289,7 +311,9 @@ class CDPPage:
 
     async def evaluate_function(self, function_declaration: str, arg: Any = None, timeout: float = 30.0) -> Any:
         # Bind to the current document's global object, not a guessed context ID.
-        root = await self._session.call("Runtime.evaluate", {"expression": "globalThis", "returnByValue": False}, timeout=timeout)
+        root_params = {"expression": "globalThis", "returnByValue": False}
+        if getattr(self, 'context_id', None) is not None:root_params['contextId'] = self.context_id
+        root = await self._session.call("Runtime.evaluate", root_params, timeout=timeout)
         object_id = root.get("result", {}).get("objectId")
         if not object_id:
             raise RuntimeError("evaluate error: execution_context_unavailable")

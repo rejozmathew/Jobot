@@ -59,19 +59,20 @@ def validate_workspaces(workspaces):
 
 def prepare_local(config):
     """Back up the selected managed DB before the additive local-session migration."""
-    from .managed_migrations import migrate
+    from .managed_migrations import migrate,MIGRATIONS
     from .managed import Service
     path=Path(config['db_path'])
     with closing(readonly(path)) as db:
         row=db.execute('SELECT id FROM instance').fetchone()
         if not row or row[0]!=config['instance_id']:raise ProtocolError('instance_mismatch')
         version=db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
-    if version<15:
+    latest=max(number for number,_ in MIGRATIONS)
+    if version<latest:
         from .workspace_process import FileLock
         with FileLock(str(path)+'.migration.lock'):
             with closing(readonly(path)) as db:
                 version=db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
-                if version<15:
+                if version<latest:
                     backup=path.with_name(path.name+'.before-local-'+str(time.time_ns())+'.db')
                     with closing(sqlite3.connect(backup)) as destination:db.backup(destination)
                     with closing(readonly(backup)) as check:
@@ -193,6 +194,14 @@ def session_call(config, session_id, operation, parameters=None, driver_id=None)
         if not session['attempt_id']:raise ProtocolError('attempt_not_started')
         return getattr(service,'application_context' if operation=='context' else 'attempt_report')(session['attempt_id'])
     session=service.session(session_id)
+    if operation=='answer':
+        driver=driver_identity(driver_id)
+        params=dict(parameters or {})
+        allowed={q['id'] for q in service.questions_for_attempt(session['attempt_id'])['questions']} if session['attempt_id'] else set()
+        answers=params.get('answers')
+        if not isinstance(answers,list) or any(not isinstance(a,dict) or a.get('question_id') not in allowed for a in answers):
+            raise ProtocolError('question_context_mismatch')
+        return service.answer_questions(answers=answers,source='user_reply',reply_evidence=params.get('reply_evidence'))
     if operation=='reconcile':
         params=dict(parameters or {})
         if not session['attempt_id']:raise ProtocolError('attempt_not_started')
@@ -243,10 +252,10 @@ def browser_action(config,client,ownership,package,target_id,params):
     import asyncio
     from .cdp_client import CDPBrowser
     from .managed_identity import is_same_application_scope, is_workday_candidate_home, is_post_submit_scope
-    from .browser_controls import FORM, POINTER, observe, inventory, form_action
+    from .browser_controls import FORM, observe, inventory, form_action, inspect_control, click_control, upload_file
     from .managed_shared import uid
     method=params.get('method')
-    if method not in ('snapshot','screenshot','evaluate','click','fill','press','select','check','apply_policy','submit','navigate','upload','simplify'):
+    if method not in ('snapshot','screenshot','evaluate','click','fill','press','select','check','apply_policy','request_answers','apply_answers','submit','navigate','upload','simplify'):
         raise ProtocolError('unsupported_browser_method')
     reads=method in ('snapshot','screenshot')
     async def execute():
@@ -254,6 +263,7 @@ def browser_action(config,client,ownership,package,target_id,params):
         browser=await CDPBrowser.connect(config['cdp_url'],target_id=target_id,expected_mode=config.get('browser_mode','headed'))
         try:
             page=await browser.get_current_page();url=await page.evaluate('location.href')
+            page.application_package=package
             async def remember_answers(page_name='form',source='employer_form'):
                 from .application_answers import capture_answers
                 history=await capture_answers(page,config,package,ownership,page=page_name,source=source,basis=params.get('answer_basis'))
@@ -269,28 +279,30 @@ def browser_action(config,client,ownership,package,target_id,params):
             submission_control=False
             if method=='click' and target:
                 if params.get('source')=='simplify':
-                    submission_control=await page.evaluate_function(
-                        "(ref)=>window.__jobbotSimplifyScope?.controls.get(ref)?.kind==='submit'",params.get('ref'))
+                    from .browser_controls import simplify_document
+                    _,_,control=await simplify_document(page,ref=params.get('ref'))
+                    submission_control=bool(control and control['operation']=='submit')
                 else:
-                    info=await page.evaluate_function(FORM,dict(target,method='inspect'))
+                    info=await inspect_control(page,target)
                     submission_control=info.get('submission_control') is True
             if method=='submit' or submission_control:
                 from .submission import submit
                 if not pending and params.get('source')!='simplify':
-                    info=await page.evaluate_function(FORM,dict(target,method='inspect')) if target else {}
+                    info=await inspect_control(page,target) if target else {}
                     if not info.get('submission_control'):raise ProtocolError('observed_submit_control_required')
                 async def activate():
                     if params.get('source')=='simplify':
-                        from .simplify_boundary import OBSERVE,CLICK
-                        observed=await page.evaluate(OBSERVE)
+                        from .simplify_boundary import CLICK
+                        from .browser_controls import simplify_document
+                        document,observed,selected=await simplify_document(page,ref=params.get('ref'),operation='submit')
                         control=observed.get('controls',{}).get('submit',{})
-                        if not control.get('enabled') or (params.get('ref') and control.get('ref')!=params['ref']):
+                        if not control.get('enabled') or (selected and control.get('ref')!=selected['ref']):
                             return {'clicked':False,'execution':'not_executed','reason':'submit_control_unavailable'}
-                        return await page.evaluate_function(CLICK,{'ref':control['ref'],'operation':'submit',
+                        return await document.evaluate_function(CLICK,{'ref':control['ref'],'operation':'submit',
                             'url':observed['url'],'page_ref':observed.get('page_ref')})
                     if not target:raise ProtocolError('observed_submit_control_required')
-                    return await page.click_observed(POINTER,dict(target,expected_url=await page.evaluate('location.href')))
-                return await submit(page,client.call,package,ownership,config,target_id,activate)
+                    return await click_control(page,target)
+                return await submit(page,client.call,package,ownership,config,target_id,activate,application_control=target)
             if pending and not reads:raise ProtocolError('submission_pending_read_only')
             if not reads:
                 gate=await asyncio.to_thread(client.call,'browser_observe',**ownership,target_id=target_id,cdp_url=config['cdp_url'])
@@ -313,6 +325,7 @@ def browser_action(config,client,ownership,package,target_id,params):
                     result={'url':url,'target_id':target_id,'submission_pending':True,
                             'instruction':'Confirmation observation only. Do not submit again.'}
                 else:result=inventory(await observe(page,package),package)
+                result['title']=await page.evaluate('document.title')
                 result['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
                 if pending:
                     from .simplify_boundary import OBSERVE
@@ -335,10 +348,49 @@ def browser_action(config,client,ownership,package,target_id,params):
                 from .application_answers import apply_policy
                 result=await apply_policy(page,package,await observe(page,package),posted_range=params.get('salary_range'))
                 succeeded=not any(not field['committed'] for field in result['fields']);return result
+            if method in ('request_answers','apply_answers'):
+                from .application_answers import apply_policy,save_answer_history
+                from .browser_controls import required_questions
+                from .managed_questions import question_key
+                refs=params.get('refs') or ([params['ref']] if params.get('ref') else [])
+                policy=await apply_policy(page,package,await observe(page,package),posted_range=params.get('salary_range'))
+                captured=await required_questions(page,refs,include_answered=method=='apply_answers')
+                saved=client.call('questions_for_attempt',attempt_id=ownership['attempt_id'])['questions']
+                by_key={q['question_key']:q for q in saved if q['state']!='superseded'}
+                result={'questions':[],'fields':[],'skipped':captured['skipped'],'policy':policy,
+                        'human_input':package.get('human_input',{'messaging':{'available':False},'fallback':'answer_queue'})}
+                for item in captured['questions']:
+                    data=item['data']
+                    question=(client.call('request_question',**ownership,**data) if method=='request_answers' else by_key.get(question_key(data)))
+                    if method=='request_answers':result['questions'].append(question);continue
+                    if not question or question.get('answer') is None:
+                        result['skipped'].append({'ref':item['ref'],'reason':'no_exact_saved_answer'});continue
+                    answer=question['answer'];kind=data['kind']
+                    if kind=='radio':
+                        ref=item['option_refs'].get((answer['value'],answer['label']))
+                        if not ref:
+                            result['skipped'].append({'ref':item['ref'],'reason':'saved_radio_option_unavailable'});continue
+                        action={'method':'check','ref':ref,'value':True}
+                    else:
+                        action={'method':{'text':'fill','select':'select','check':'check'}[kind],
+                                'ref':item['ref'],**(answer if kind=='select' else {'value':answer})}
+                    applied=await form_action(page,action)
+                    result['fields'].append({'question_id':question['id'],'revision':question['revision'],
+                        'committed':applied.get('committed',False),'reason':applied.get('reason')})
+                    if applied.get('committed'):
+                        text=answer['label'] if isinstance(answer,dict) else ('Yes' if answer else 'No') if type(answer) is bool else answer
+                        save_answer_history(config,package,ownership['attempt_id'],[{'field':data['field'],'question':data['question'],'answer':text}],
+                            page=data['context'].get('page','form'),source='human_answer_queue',basis=question['id']+':'+str(question['revision']))
+                succeeded=True
+                if method=='request_answers':
+                    result['instruction']='Use an advertised messaging capability for a quick user reply, or call park_questions to save the blocker and release the browser. A control failure is an engineering blocker, not a question for the user. Save actual human replies with answer_from_user; then apply_answers with fresh observed refs.'
+                return result
             if method=='simplify':
                 from .simplify_boundary import SimplifyBoundary
+                from .browser_controls import simplify_document
+                document,_,_=await simplify_document(page,ref=params.get('ref'),operation=params.get('action','autofill'))
                 client.call('writer_state',**ownership,state='active')
-                result=await SimplifyBoundary(page,budget_seconds=45,fast=True).perform(params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
+                result=await SimplifyBoundary(document,budget_seconds=45,fast=True).perform(params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
                 client.call('writer_state',**ownership,state='idle' if result.get('native_takeover_authorized') else 'unknown')
                 succeeded=result.get('execution')=='clicked';return result
             if method=='click' and params.get('ref'):
@@ -351,31 +403,32 @@ def browser_action(config,client,ownership,package,target_id,params):
                     control=next((c for c in observed.get('simplify_inventory',[]) if c['ref']==params['ref']),None)
                     if not control:return {'execution':'not_executed','reason':'stale_control'}
                     if control['operation']=='sign_in':return {'execution':'not_executed','reason':'use_scoped_simplify_sign_in_with_credential_evidence'}
-                    result=await page.evaluate_function(CLICK,{'ref':control['ref'],'operation':control['operation'],'url':observed['url'],'page_ref':observed.get('page_ref')})
-                else:result=await page.click_observed(POINTER,{'ref':params['ref'],'step':observed['step'],'page_signature':observed['page_signature']})
+                    from .browser_controls import simplify_document
+                    document,extension,local=await simplify_document(page,ref=control['ref'])
+                    result=await document.evaluate_function(CLICK,{'ref':local['ref'],'operation':local['operation'],'url':extension['url'],'page_ref':extension.get('page_ref')})
+                else:result=await click_control(page,{'ref':params['ref']},step=observed['step'],page_signature=observed['page_signature'])
                 succeeded=bool(result.get('clicked') or result.get('status')=='clicked')
                 if succeeded and params.get('source')!='simplify' and not observed.get('auth'):
                     result.update(await remember_answers(page_name=observed.get('step','form'),source='executor_click'))
-                return result
-            selector=params.get('selector')
-            if not isinstance(selector,str) or not selector:raise ProtocolError('observed_selector_required')
-            if method=='click':
-                await remember_answers()
-                result=await page.click_observed(POINTER,{'selector':selector,'expected_url':url})
-                succeeded=result.get('clicked') is True
-                if succeeded:result.update(await remember_answers(source='executor_click'))
                 return result
             if method=='upload':
                 from .managed_documents import local_asset_path
                 asset=next((a for a in package['documents']['assets'] if a['id']==params['asset_id']),None)
                 if not asset:raise ProtocolError('asset_not_selected')
                 path=local_asset_path(asset)
-                if await page.evaluate_function('(p)=>document.querySelectorAll(p).length',selector)!=1:raise ProtocolError('ambiguous_or_stale_control')
+                if not target:raise ProtocolError('observed_control_required')
                 client.call('report_upload',**ownership,asset_id=asset['id'],status='upload_attempted',evidence='Approved asset supplied to an observed file control')
-                controls=await page.query_selector_all(selector)
-                await controls[0].set_input_files(str(path))
+                await upload_file(page,target,path)
                 succeeded=True
                 return {'upload_attempted':True,'asset_id':asset['id'],'filename':path.name,'confirmation_required':True}
+            selector=params.get('selector')
+            if not isinstance(selector,str) or not selector:raise ProtocolError('observed_selector_required')
+            if method=='click':
+                await remember_answers()
+                result=await click_control(page,{'selector':selector})
+                succeeded=result.get('clicked') is True
+                if succeeded:result.update(await remember_answers(source='executor_click'))
+                return result
         finally:
             if aid:client.call('action_end',**ownership,action_id=aid,status='success' if succeeded else 'failed',duration_seconds=time.monotonic()-started)
             await browser.close()
@@ -400,6 +453,9 @@ def readonly(path):
 
 
 def history_key(url):
+    from .managed_identity import greenhouse_query_identity
+    query_identity=greenhouse_query_identity(url)
+    if query_identity:return ('requisition_query',query_identity)
     canonical=canonical_url(url); p=urlsplit(canonical)
     if (p.hostname or '').endswith('.myworkdayjobs.com'):
         parts=p.path.casefold().strip('/').split('/')
@@ -461,13 +517,13 @@ def main(argv=None):
     import argparse
     parser=argparse.ArgumentParser(description='Local JobBot session interface. No API token or dashboard required.')
     sub=parser.add_subparsers(dest='command',required=True)
-    for name in ('start','status','call','stop','pause','attach','retry','reconcile','doctor','sessions'):
+    for name in ('start','status','call','stop','pause','attach','retry','reconcile','doctor','sessions','answer_retries'):
         p=sub.add_parser(name);p.add_argument('--config');p.add_argument('--driver-id')
         if name=='start':
             p.add_argument('url',nargs='?');p.add_argument('--job-id');p.add_argument('--request-id')
             p.add_argument('--company');p.add_argument('--title');p.add_argument('--metadata',default='{}')
             p.add_argument('--wait-seconds',type=float,default=25)
-        elif name not in ('doctor','sessions'):p.add_argument('session_id')
+        elif name not in ('doctor','sessions','answer_retries'):p.add_argument('session_id')
         if name=='call':p.add_argument('operation');p.add_argument('--parameters',default='{}')
         if name=='reconcile':
             p.add_argument('--outcome',choices=('applied','already_applied','interrupted','failed','blocked'),required=True)
@@ -485,6 +541,9 @@ def main(argv=None):
         elif args.command=='sessions':
             from .managed import Service
             result=Service(cfg['db_path'],instance_id=cfg['instance_id']).sessions_view()
+        elif args.command=='answer_retries':
+            from .managed import Service
+            result=Service(cfg['db_path'],instance_id=cfg['instance_id']).answer_retries(identity_id=cfg['identity_id'])
         elif args.command=='reconcile':
             result=session_call(cfg,args.session_id,'reconcile',
                 {'outcome':args.outcome,'evidence':args.evidence,'source':args.source},args.driver_id)

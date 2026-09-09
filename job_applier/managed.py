@@ -27,6 +27,7 @@ from .managed_runtime import RuntimeServices
 from .managed_context import ContextServices
 from .managed_archive import ArchiveServices
 from .managed_sessions import SessionServices, local_session
+from .managed_questions import QuestionServices
 from .managed_versions import code_evidence
 from .managed_redaction import safe_text, reject_secrets
 
@@ -35,10 +36,10 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-from .managed_identity import canonical_url, job_key, RELATED, same_job_url
+from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity
 
 
-class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices):
+class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices):
     def __init__(self, db_path, *, instance_id=None, now_fn=utc_now):
         p=Path(db_path)
         if not p.is_absolute(): raise ProtocolError('absolute_db_path_required')
@@ -113,9 +114,16 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if namespace and requisition_id and not identity_evidence: raise ProtocolError('identity_evidence_required')
         key=job_key(canonical,namespace,requisition_id)
         url_key=job_key(canonical)
+        query_identity=greenhouse_query_identity(canonical)
+        query_key=hashlib.sha256(dumps(['requisition_query',query_identity]).encode()).hexdigest() if query_identity else None
         now=self.now()
         with self.tx() as db:
             row=db.execute('SELECT j.* FROM jobs j JOIN job_identity_keys k ON k.job_id=j.id WHERE k.identity_key IN (?,?) ORDER BY (j.url=?) DESC,j.created_at,j.id LIMIT 1',(key,url_key,canonical)).fetchone()
+            query_matches=[]
+            if query_identity:
+                query_matches=[r for r in db.execute('SELECT * FROM jobs ORDER BY created_at,id')
+                               if greenhouse_query_identity(r['url'])==query_identity]
+                if not row and query_matches:row=query_matches[0]
             # Preserve old identity hashes; add this spelling as another alias.
             if not row and (urlsplit(canonical).hostname or '').endswith('.myworkdayjobs.com'):
                 row=next((r for r in db.execute('SELECT * FROM jobs ORDER BY created_at,id') if same_job_url(r['url'],canonical)),None)
@@ -135,6 +143,12 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                     db.execute('UPDATE jobs SET namespace=?,requisition_id=? WHERE id=?',(namespace,str(requisition_id),job_id))
             for alias_key in {key,url_key}:
                 db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(alias_key,job_id,safe_text(identity_evidence or 'normalized_url')))
+            if query_key:
+                # Retain every historical job row and link existing duplicates so
+                # an older applied/uncertain attempt cannot be bypassed by a form URL.
+                for related_id in {job_id}|{r['id'] for r in query_matches}:
+                    db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',
+                               (query_key,related_id,'consistent_requisition_query'))
             db.execute('INSERT OR IGNORE INTO job_sources VALUES (?,?,?,?,?,?)',(uid(),job_id,source_type,source_id or canonical,urlunsplit(urlsplit(url.strip())._replace(fragment='')),now))
             return dict(db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone())
 

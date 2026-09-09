@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.4.7
+version: 0.4.8
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -133,6 +133,13 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    selection. `check` accepts boolean `value` and never toggles an already correct
    box. `fill` and `press` also accept refs; keys include Tab, Shift+Tab, Space,
    Escape, Enter, PageUp, PageDown and Control+A. Unassociated or ambiguous options return evidence.
+   Use this SAME API for Workday, other ATSs, native selects and custom dropdowns,
+   including embedded application frames. Pass the opaque observed ref unchanged;
+   the runtime resolves its document and rechecks ownership. Do not choose a
+   separate iframe handler, switch targets or construct a frame selector. A stale
+   ref requires a fresh snapshot. Uploads, private credentials, Simplify actions
+   and submission use the same document routing. If multiple Simplify documents
+   offer an action, pass that action's observed ref to `browser simplify`.
    Keep a populated "How did you hear about us?" answer such as LinkedIn even
    when Simplify marks it for review. Prefer enabled native Continue to opening
    a filled field's review menu; repair only an actual employer validation error.
@@ -190,6 +197,41 @@ parallel sessions retain their independent hosts and browser processes.
 `finish` parameters are `{"outcome":"blocked","evidence":"<observed reason>",
 "quiescent":true}` (or another supported truthful outcome). Do not add invented
 fields. `context` and `report` remain readable after the browser host has stopped.
+
+## Missing required answers
+
+Use approved profile facts, policy and exact saved human answers first. When an
+actual required question still lacks an answer, call `browser` with
+`{"method":"request_answers","refs":["<observed required field ref>"]}`.
+This applies configured routine policy and captures the full question, offered
+choices and job/candidate context. Optional or already answered fields are skipped.
+A known answer that a control refuses to accept is a technical blocker, not a
+reason to ask the user to supply the fact again.
+
+Check context `human_input.messaging.available`. If the harness actually provides
+messaging, use its advertised capability for a brief question under the user's
+messaging authorization; do not assume Discord exists or invent a recipient.
+Record only an actual reply. Native Hermes `answer` accepts
+`answers:[{question_id,answer,expected_revision}]` and attaches current user-turn
+provenance. Portable `call <session-id> answer` additionally requires
+`reply_evidence`; live `answer_from_user` uses the same fields. Choice answers may
+be the exact `{value,label}` object, which distinguishes duplicate HTML values.
+Never use the original application request or a prior answer as a new reply.
+
+If no quick reply is available, call `park_questions` with empty parameters.
+It saves the blocker and requests browser stop; the host releases the workspace
+only after its process tree stops. This is not pause, which retains a slot.
+The dashboard's **Needs your answer** view supports Save answers, Save and queue
+retry, and Queue all answered applications. Saving is data only. Queued retries
+are picked up by an ordinary harness, not a model launched by the runtime.
+
+For an authorized answer batch, native `answer_retries` or portable
+`application_runtime answer_retries` lists ready jobs and request IDs. Start each
+with its `job_id` and returned `request_id` (CLI `--job-id` and `--request-id`).
+On the fresh attempt, use `browser apply_answers` with current observed refs to
+apply exact saved answers, then continue the ordinary ATS procedure. No old
+browser ref is reusable across attempts. Changed questions/choices need a new
+answer. Applied jobs and uncertain submissions cannot enter this retry path.
 
 ## Mail and private identity
 

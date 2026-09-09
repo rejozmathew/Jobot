@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import threading
+from datetime import datetime,timezone
 from urllib.parse import urlsplit
 from .hermes_adapter import HermesAdapter, IDENTIFIER
 from .managed_client import Client
@@ -11,6 +12,7 @@ from .managed_shared import ProtocolError, uid
 
 HOOKS=('pre_tool_call','post_tool_call','pre_api_request','post_api_request','api_request_error')
 OPERATIONS=('start','attach','pause','stop','retry','reconcile','browser','account_lock','status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy','browser_observe','credentials','fast_forward')
+OPERATIONS=OPERATIONS+('answer','answer_retries','park_questions','questions_for_attempt','answer_from_user')
 SCHEMA={'name':'jobbot','description':'Start one local application from a URL, use its owned browser and shared helpers, and record verified outcomes. No model is launched.',
     'parameters':{'type':'object','properties':{'operation':{'type':'string','enum':list(OPERATIONS)},'parameters':{'type':'object'}},'required':['operation'],'additionalProperties':False}}
 
@@ -20,6 +22,8 @@ class PluginController:
         self.config_path=config_path
         self.adapters={}
         self.runtime={}
+        self.human_input={}
+        self.user_turns={}
         self.local_sessions={}
         self._stop=threading.Event()
         self._thread=None
@@ -73,6 +77,7 @@ class PluginController:
         with self._lock:self.runtime[sid]=result
 
     def route(self, name, **kwargs):
+        if name=='pre_api_request':self._observe_human_input(kwargs)
         if name=='post_api_request':self._observe_runtime(kwargs)
         if kwargs.get('session_id') in self.local_sessions:
             tool=kwargs.get('tool_name') or kwargs.get('name') or ''
@@ -84,6 +89,29 @@ class PluginController:
         try:return getattr(adapter,name)(**kwargs)
         except Exception:
             return {'action':'block','message':'JobBot: adapter_unavailable'} if name=='pre_tool_call' else None
+
+    def _observe_human_input(self,kwargs):
+        """Inspect tool names/platform only; never persist user text or gateway data."""
+        sid=kwargs.get('session_id')
+        if not isinstance(sid,str) or not sid:return
+        request=kwargs.get('request') or {}
+        body=request.get('body') or {} if isinstance(request,dict) else {}
+        definitions=body.get('tools') or [] if isinstance(body,dict) else []
+        names={t.get('name') or (t.get('function',{}).get('name') if isinstance(t.get('function'),dict) else None)
+               for t in definitions if isinstance(t,dict)}
+        platform=kwargs.get('platform') or ''
+        conversational=platform in ('discord','telegram','slack','signal','whatsapp','matrix','teams')
+        messaging={'available':False}
+        if conversational or 'send_message' in names:
+            messaging={'available':True,'channel':platform if conversational else 'configured_messaging',
+                'tool':'send_message' if 'send_message' in names else 'conversation','reply_mode':'conversation'}
+        self.human_input[sid]={'messaging':messaging}
+        message=kwargs.get('user_message');turn=kwargs.get('turn_id')
+        if isinstance(message,str) and message.strip() and isinstance(turn,str) and turn:
+            digest=hashlib.sha256(message.encode()).hexdigest()
+            old=self.user_turns.get(sid)
+            if not old or (old['turn_id'],old['digest'])!=(turn,digest):
+                self.user_turns[sid]={'turn_id':turn,'digest':digest,'observed_at':datetime.now(timezone.utc).isoformat()}
 
     def _adapter(self, sid, cfg):
         if not isinstance(sid,str) or not IDENTIFIER.fullmatch(sid):raise ProtocolError('worker_session_required')
@@ -225,9 +253,28 @@ class PluginController:
         from .application_runtime import start,session_call,driver_identity
         from .managed import Service
         driver_identity(sid)
+        if op=='answer_retries':
+            return Service(cfg['db_path'],instance_id=cfg['instance_id']).answer_retries(identity_id=cfg['identity_id'])
+        if op=='answer':
+            turn=self.user_turns.get(sid)
+            if not turn:raise ProtocolError('observed_user_reply_required')
+            service=Service(cfg['db_path'],instance_id=cfg['instance_id'])
+            answers=params.get('answers')
+            if not isinstance(answers,list) or not answers:raise ProtocolError('answers_required')
+            with service.tx() as db:
+                for answer in answers:
+                    question=service._get(db,'application_questions',answer.get('question_id'))
+                    if question['identity_id']!=cfg['identity_id']:raise ProtocolError('question_context_mismatch')
+                    if turn['observed_at']<=question['created_at']:raise ProtocolError('user_reply_predates_question')
+                    if question['answered_at'] and turn['observed_at']<=question['answered_at']:
+                        raise ProtocolError('user_reply_predates_answer')
+            evidence='hermes_turn:'+sid+':'+turn['turn_id']+':'+turn['digest']
+            return service.answer_questions(answers=answers,source='user_reply',reply_evidence=evidence)
         if op=='start':
             observed=self.runtime.get(sid,{})
-            result=start(cfg,driver_id=sid,metadata={k:observed.get(k) for k in ('model','provider','reasoning_effort','response_model')},**params)
+            metadata={k:observed.get(k) for k in ('model','provider','reasoning_effort','response_model')}
+            metadata['human_input']=self.human_input.get(sid,{'messaging':{'available':False}})
+            result=start(cfg,driver_id=sid,metadata=metadata,**params)
             self.local_sessions[sid]=result['session_id'];return result
         session_id=params.pop('session_id',None) or self.local_sessions.get(sid)
         if not session_id:
@@ -237,6 +284,11 @@ class PluginController:
             if row:session_id=row[0];self.local_sessions[sid]=session_id
         if op=='status' and not session_id:return {'available':True,'transport':'local','runtime':self.runtime.get(sid),'bound':False,'config_path':cfg['config_path']}
         if not session_id:raise ProtocolError('start_a_local_session_first')
+        if sid in self.human_input:
+            service=Service(cfg['db_path'],instance_id=cfg['instance_id'])
+            session=service.session(session_id)
+            if not session['ended_at'] and session['driver_id']==sid:
+                service.session_human_input(session_id,sid,self.human_input[sid])
         if op in ('accept','next','bind_target','checkpoint','ack_control','extend_budget'):raise ProtocolError('local_session_resolves_lifecycle')
         aliases={'resume':'attach','observe':'observe_owned_lesson','milestone':'event','mail_request':'request_mail_for_attempt','mail_match':'match_mail_for_attempt'}
         operation=aliases.get(op,op)

@@ -109,6 +109,19 @@ class SessionServices:
     def session(self, session_id):
         with self.tx() as db:return dict(self._get(db,'application_sessions',session_id))
 
+    def session_human_input(self,session_id,driver_id,capabilities):
+        """Record the attached harness's observed messaging availability, not browser authority."""
+        from .managed_questions import human_input_capabilities
+        normalized=human_input_capabilities({'human_input':capabilities})
+        with self.tx() as db:
+            session=self._get(db,'application_sessions',session_id)
+            if session['driver_id']!=driver_id or session['ended_at']:raise ProtocolError('driver_owned_elsewhere')
+            metadata=json.loads(session['metadata_json'])
+            if metadata.get('human_input')!=normalized:
+                metadata['human_input']=normalized
+                db.execute('UPDATE application_sessions SET metadata_json=? WHERE id=?',(dumps(metadata),session_id))
+        return normalized
+
     def session_status(self, session_id):
         with self.tx() as db:
             s=dict(self._get(db,'application_sessions',session_id))
@@ -191,6 +204,9 @@ class SessionServices:
             db.execute("UPDATE runs SET state='active',control='running',accepted_at=COALESCE(accepted_at,?),started_at=COALESCE(started_at,?) WHERE id=?",(now,now,run['id']))
             db.execute("UPDATE run_jobs SET state='active' WHERE run_id=? AND job_id=?",(run['id'],job['id']))
             db.execute('INSERT INTO run_sessions(run_id,worker_id,session_id,started_at) VALUES (?,?,?,?)',(run['id'],run['worker_id'],s['driver_id'],now))
+            if self._has_question_schema(db):
+                db.execute("UPDATE answer_retry_requests SET state='started',session_id=?,started_at=? WHERE job_id=? AND identity_id=? AND state='queued'",
+                    (session_id,now,s['job_id'],s['identity_id']))
         # Existing target identity enforcement is reused after the atomic transition.
         self.session_authority=(session_id,s['driver_id'],host_id)
         self.bind_target(attempt_id,worker_id=run['worker_id'],fence=fence,target_id=target_id,url=job['url'])

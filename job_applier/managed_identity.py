@@ -1,6 +1,7 @@
 """Verified job identity aliases without deleting or rewriting historical jobs."""
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import hashlib
+import re
 from .managed_shared import ProtocolError, dumps
 
 
@@ -26,12 +27,40 @@ def job_key(url, namespace=None, requisition_id=None):
     return hashlib.sha256(dumps(data).encode()).hexdigest()
 
 
+def query_requisition(url):
+    """A consistent explicit Greenhouse query id, not a guessed path number."""
+    values=[value for key,value in parse_qsl(urlsplit(url).query,keep_blank_values=True) if key=='gh_jid']
+    if not values:return None
+    if len(set(values))!=1 or not re.fullmatch(r'[0-9]{1,20}',values[0]):return None
+    tail=urlsplit(url).path.rstrip('/').rsplit('/',1)[-1]
+    if tail.isdigit() and tail!=values[0]:return None
+    return values[0]
+
+
+def greenhouse_query_identity(url):
+    """Narrow employer posting/form aliases; unknown query keys remain meaningful."""
+    try:
+        p=urlsplit(canonical_url(url));requisition=query_requisition(url)
+        if not requisition:return None
+        parts=p.path.strip('/').split('/')
+        if parts[-1] in ('apply','confirmation'):parts=parts[:-1]
+        if not (parts in (['jobs'],['form']) or
+                len(parts)>1 and parts[0]=='jobs' and parts[-1]==requisition):return None
+        opaque=tuple((k,v) for k,v in parse_qsl(p.query,keep_blank_values=True) if k!='gh_jid')
+        return p.scheme,p.netloc,requisition,opaque
+    except (ValueError,ProtocolError):return None
+
+
 def same_job_url(left, right):
     """Compare URLs without changing persisted identity hashes or opaque queries."""
     try:
         a, b = urlsplit(canonical_url(left)), urlsplit(canonical_url(right))
     except (ValueError, ProtocolError):
         return False
+    gh_left,gh_right=greenhouse_query_identity(left),greenhouse_query_identity(right)
+    if gh_left and gh_right:return gh_left==gh_right
+    if any(k=='gh_jid' for p in (a,b) for k,v in parse_qsl(p.query,keep_blank_values=True)):
+        if not query_requisition(left) or not query_requisition(right):return False
     if (a.hostname or '').endswith('.myworkdayjobs.com'):
         a = a._replace(path=a.path.casefold())
         b = b._replace(path=b.path.casefold())
@@ -49,8 +78,6 @@ RELATED = """WITH RECURSIVE related(id) AS (
 def linked_jobs(db, job_id):
     return [r[0] for r in db.execute(RELATED+'SELECT id FROM related',(job_id,))]
 
-
-import re
 
 _ALLOWED_WORKDAY_CHILD_ROUTES = (
     "",
@@ -152,11 +179,12 @@ def is_workday_application_scope(job_url: str, candidate_url: str) -> bool:
 
 
 def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
-    if is_workday_application_scope(job_url, candidate_url):
-        return True
     try:
-        job_p = urlsplit(str(job_url).strip())
-        cand_p = urlsplit(str(candidate_url).strip())
+        workday_host=urlsplit(str(job_url).strip()).hostname or ''
+        if (workday_host.endswith('.myworkdayjobs.com') or workday_host=='workday.com' or workday_host.endswith('.workday.com')) and is_workday_application_scope(job_url, candidate_url):
+            return True
+        job_p = urlsplit(canonical_url(job_url))
+        cand_p = urlsplit(canonical_url(candidate_url))
         if job_p.scheme.lower() != cand_p.scheme.lower() or job_p.scheme.lower() not in ('https', 'http'):
             return False
         job_host = job_p.netloc.lower()
@@ -170,6 +198,11 @@ def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
         cand_query = parse_qsl(cand_p.query, keep_blank_values=True)
         if any(k.lower() in ('access_token', 'refresh_token', 'otp', 'password', 'reset_token', 'authorization_code') for k, v in cand_query):
             return False
+        if any(k=='gh_jid' for p in (job_p,cand_p) for k,v in parse_qsl(p.query,keep_blank_values=True)):
+            if not query_requisition(job_url) or not query_requisition(candidate_url):return False
+            expected_gh,actual_gh=greenhouse_query_identity(job_url),greenhouse_query_identity(candidate_url)
+            if expected_gh and actual_gh:return expected_gh==actual_gh
+        if job_p.query!=cand_p.query:return False
         expected_path = job_p.path.rstrip('/')
         actual_path = cand_p.path.rstrip('/')
         return actual_path in (expected_path, expected_path + '/apply', expected_path + '/confirmation')
@@ -184,6 +217,11 @@ def is_post_submit_scope(job_url: str, candidate_url: str) -> bool:
     try:
         job=urlsplit(canonical_url(job_url));current=urlsplit(canonical_url(candidate_url))
         if job.scheme!=current.scheme or job.netloc!=current.netloc:return False
+        # Redirects may drop a query but never introduce a conflicting identity.
+        expected=parse_qsl(job.query,keep_blank_values=True)
+        actual=parse_qsl(current.query,keep_blank_values=True)
+        for key in {k for k,v in actual}:
+            if [v for k,v in actual if k==key]!=[v for k,v in expected if k==key]:return False
         if any(s in current.path.lower() for s in ('/login','/signin','/reset','/verify','/oauth','..')):return False
         a=job.path.strip('/').split('/');b=current.path.strip('/').split('/')
         if (job.hostname or '').endswith('.myworkdayjobs.com'):

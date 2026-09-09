@@ -11,7 +11,8 @@ from job_applier.managed import Service
 from job_applier.managed_api import create_app
 from job_applier.cdp_client import CDPBrowser
 from job_applier.workday_fast import FastRunner, WORKDAY_OBSERVE
-from job_applier.simplify_boundary import OBSERVE
+from job_applier.simplify_boundary import OBSERVE,CLICK
+from job_applier.submission import SCRIPT as SUBMISSION_OBSERVE
 
 
 @pytest.mark.parametrize('panel_after',[True,False])
@@ -39,6 +40,10 @@ def test_fast_runner_finishes_through_real_managed_api(tmp_path,monkeypatch,pane
     s.bind_target(**owner,target_id='fixture-tab',url=url)
     class Page:
         index=0
+        class Session:
+            def subscribe(self,*args):return lambda:None
+            async def call(self,*args,**kwargs):return {'identifier':'synthetic-new-document-hook'}
+        _session=Session()
         async def evaluate(self,expression):
             if expression=='location.href':return url if self.index<2 else 'https://fixture.wd1.myworkdayjobs.com/en-US/Jobs/candidateHome'
             assert expression==OBSERVE
@@ -47,10 +52,18 @@ def test_fast_runner_finishes_through_real_managed_api(tmp_path,monkeypatch,pane
             if expression==WORKDAY_OBSERVE:
                 return {'step':['my_experience','review','unknown'][self.index],'native':{},'auth':False,'blocking_errors':[],
                         'resume_attached':True,'submitted':self.index==2,'identity_mismatch':False}
-            self.index+=1;return {'status':'clicked'}
+            if expression==SUBMISSION_OBSERVE:
+                if args.get('operation')=='read':
+                    return [{'source':'employer','text':'Thank you for applying','url':await self.evaluate('location.href')} ] if self.index==2 else []
+                return {'baseline':[]}
+            if expression==CLICK:
+                self.index+=1;return {'status':'clicked'}
+            return {'answers':[]}
     page=Page()
     browser=type('Browser',(),{'get_current_page':AsyncMock(return_value=page),'close':AsyncMock(),'observed_mode':'headed'})()
     monkeypatch.setattr(CDPBrowser,'connect',AsyncMock(return_value=browser))
+    # The real browser/masking paths have separate isolated-browser coverage.
+    monkeypatch.setattr('job_applier.managed_credentials.capture_private_screenshot',AsyncMock())
     token='synthetic-fixture-worker-token-32chars'
     with (nullcontext() if transport=='local' else TestClient(create_app(s,operator_token='synthetic-fixture-operator-token-32chars',worker_tokens={token:'fixture-worker'}),base_url='http://127.0.0.1:8769')) as api:
         def call(op,**payload):
@@ -61,7 +74,7 @@ def test_fast_runner_finishes_through_real_managed_api(tmp_path,monkeypatch,pane
             assert response.status_code==200,(op,response.status_code,response.text)
             return response.json()
         package=call('application_context',attempt_id=attempt['id'],worker_id=owner['worker_id'])
-        runner=FastRunner(page,call,package,owner,{'cdp_url':'http://127.0.0.1:9223'},'fixture-tab')
+        runner=FastRunner(page,call,package,owner,{'cdp_url':'http://127.0.0.1:9223','spool_dir':str(tmp_path/'spool')},'fixture-tab')
         result=asyncio.run(runner.run(seconds=8))
     assert result['status']=='applied'
     assert s.attempt(attempt['id'])['outcome']=='applied'

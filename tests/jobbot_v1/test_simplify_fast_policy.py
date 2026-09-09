@@ -390,11 +390,11 @@ def test_observer_handles_residual_input_and_review_counts():
     assert obs_0.get("review_count") == 0
 
 
-def test_boundary_perform_rejects_auth_and_submit_operations():
-    """Boundary.perform rejects create_account, sign_in, submit operations."""
+def test_boundary_perform_rejects_creation_and_submit_operations():
+    """Creation and submission use dedicated boundaries; scoped sign-in is supported."""
     port = DOMSeamPort()
     boundary = SimplifyBoundary(port)
-    for op in ("create_account", "create_account_autofill", "sign_in", "submit", "authenticate"):
+    for op in ("create_account", "create_account_autofill", "submit", "authenticate"):
         with pytest.raises(ValueError, match="Unsupported Simplify operation"):
             asyncio.run(boundary.perform(op))
 

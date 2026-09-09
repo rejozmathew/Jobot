@@ -8,7 +8,7 @@
   e.getAttribute('placeholder')||text(e.closest('label'))||'';
  const nodes=()=>[...document.querySelectorAll('input:not([type="hidden"]),textarea,select,button,a,[role="button"],[role="checkbox"],[role="radio"],[role="combobox"]')].filter(e=>visible(e)&&native(e));
  const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
- const checked=e=>e.getAttribute('role')==='checkbox'?e.getAttribute('aria-checked')==='true':!!e.checked;
+ const checked=e=>['checkbox','radio'].includes(e.getAttribute('role'))?e.getAttribute('aria-checked')==='true':!!e.checked;
  const descriptor=e=>({tag:e.tagName,type:e.type||'',role:e.getAttribute('role')||'',name:e.name||'',
   label:label(e).slice(0,300),text:/^(BUTTON|A)$/.test(e.tagName)||e.getAttribute('role')==='button'?text(e).slice(0,200):'',
   automation_id:e.getAttribute('data-automation-id')||''});
@@ -25,7 +25,8 @@
   if(matches.length===1)scope.keys.set(k,ref);
   scope.inventory.set(ref,e);scope.bindings.set(ref,k);return ref;
  };
- const describe=e=>({...descriptor(e),ref:remember(e),enabled:enabled(e),required:!!e.required||e.getAttribute('aria-required')==='true',
+ const required=e=>!!e.required||e.getAttribute('aria-required')==='true'||/\*\s*$/.test(label(e));
+ const describe=e=>({...descriptor(e),ref:remember(e),enabled:enabled(e),required:required(e),
   present:!!e.value,checked:['checkbox','radio'].includes(e.type)||e.getAttribute('role')==='checkbox'?checked(e):undefined,
   ...(e.tagName==='SELECT'?{options:[...e.options].map(o=>({value:o.value,label:o.text,disabled:o.disabled||o.parentElement.disabled}))}:{}),
   expanded:e.getAttribute('aria-expanded'),haspopup:e.getAttribute('aria-haspopup')});
@@ -105,6 +106,25 @@
   return {committed:false,reason:'use_private_credentials_helper',execution:'not_executed'};
  const value=()=>el.tagName==='SELECT'?{value:el.value,label:el.selectedOptions[0]?.text||''}:
   {value:/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el),label:/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el)};
+ if(args.method==='question'){
+  const role=el.getAttribute('role'),group=el.closest('fieldset,[role="radiogroup"],[role="group"]');
+  const question=text(group?.querySelector('legend'))||group?.getAttribute('aria-label')||label(el);
+  let kind=el.tagName==='SELECT'||role==='combobox'||['listbox','menu','true'].includes(el.getAttribute('aria-haspopup'))?'select':
+   el.type==='checkbox'||role==='checkbox'?'check':el.type==='radio'||role==='radio'?'radio':'text';
+  if(kind==='text'&&!['INPUT','TEXTAREA'].includes(el.tagName))return {reason:'question_control_unrecognized'};
+  let options=[];
+  if(el.tagName==='SELECT')options=[...el.options].filter(o=>!o.disabled&&!o.parentElement.disabled&&o.value!==''&&
+    !/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(o.text.trim())).map(o=>({value:o.value,label:o.text.trim()}));
+  const radios=kind==='radio'?[...(group||document).querySelectorAll('input[type="radio"],[role="radio"]')]
+    .filter(e=>visible(e)&&enabled(e)&&(!el.name||e.name===el.name)):[];
+  if(kind==='radio')options=radios.map(e=>({value:e.value||label(e),label:label(e),ref:remember(e)}));
+  const actual=value().value.trim();
+  const answered=kind==='check'?checked(el):kind==='radio'?radios.some(e=>e.checked||e.getAttribute('aria-checked')==='true'):
+   !!actual&&!/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(actual);
+  return {field:el.name||el.id||question,question,kind,options,required:required(el),answered,
+   context:{page:window.__jobbotWorkdayScope?.step||'form',section:text(group?.querySelector('legend'))||
+    text(el.closest('section')?.querySelector('h1,h2,h3')),document:location.href}};
+ }
  if(args.method==='inspect'){
   scope.beforeMenus=[...document.querySelectorAll('[role="listbox"],[role="menu"]')].filter(visible);
   return {...describe(el),...value(),checked:checked(el),submission_control:
@@ -113,7 +133,7 @@
  }
  if(args.method==='focus'){el.focus();return {committed:document.activeElement===el};}
  if(args.method==='check'){
-  if(!(['checkbox','radio'].includes(el.type)||el.getAttribute('role')==='checkbox')||typeof args.value!=='boolean')
+  if(!(['checkbox','radio'].includes(el.type)||['checkbox','radio'].includes(el.getAttribute('role')))||typeof args.value!=='boolean')
    return {committed:false,reason:'checkbox_value_required'};
   return {committed:checked(el)===args.value,needs_click:checked(el)!==args.value,checked:checked(el)};
  }
@@ -130,7 +150,7 @@
   const options=[...el.options].filter(o=>!o.disabled&&!o.parentElement.disabled&&
    (args.label!==undefined?o.text.trim()===args.label:o.value===args.value||o.text.trim()===args.value));
   if(options.length!==1)return {committed:false,reason:options.length?'ambiguous_option':'option_not_found'};
-  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el,options[0].value);
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'selectedIndex').set.call(el,options[0].index);
   el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));el.blur();
   return {committed:el.isConnected&&el.value===options[0].value,...value()};
  }
@@ -153,7 +173,9 @@
  }
  if(args.method==='verify_select'){
   const actual=value();
-  return {committed:actual.value===args.value||actual.label===args.value||actual.label===args.label,...actual};
+  const matches=el.tagName==='SELECT'?actual.value===args.value&&actual.label===args.label:
+   actual.value===args.value||actual.label===args.value||actual.label===args.label;
+  return {committed:matches,...actual};
  }
  return {committed:false,reason:'unsupported_form_operation'};
 }

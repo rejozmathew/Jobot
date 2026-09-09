@@ -23,7 +23,21 @@ start/browser/fast_forward/pause/stop/attach/retry call the same shared runtime 
 record model/provider/effort observed through native hooks. Missing model evidence
 stays unknown. The portable CLI works without installing this plugin globally.
 Never change the ordinary conversation's configured model or billing route merely
-to satisfy a runtime check. Canonical job-apply is v0.4.0, Workday v0.2.0.
+to satisfy a runtime check. Canonical job-apply is v0.4.8, Workday v0.3.6.
+
+Required-answer capture and the dashboard queue are harness-neutral. Context
+`human_input` advertises optional messaging from the harness's actual platform
+or tool inventory; absence of Discord still permits capture, parking, dashboard
+answers and retry pickup. Native Hermes `answer` attaches observed user-turn
+provenance. The portable CLI requires explicit reply evidence. `answer_retries`
+lists durable requests; an ordinary harness executes an authorized batch with
+fresh sessions and observed refs. Neither the queue nor local start launches an
+additional model. See the shared runtime and canonical skill for the exact calls.
+
+The portable CLI loads repository code on each invocation. A long-running native
+Hermes process must reload its JobBot plugin or restart before using newly added
+native operations. Loading files from disk does not replace its existing Python
+modules. The dashboard likewise needs a service restart after Python API changes.
 
 ## Historical HTTP credential repair (superseded for local startup)
 

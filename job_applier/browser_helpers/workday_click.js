@@ -42,7 +42,7 @@
   return {values_committed:selected.every(({e,value})=>e.isConnected&&(['checkbox','radio'].includes(e.type)?e.checked:e.value)===value),execution:'fields_written'};
  }
  if(!el||!el.isConnected||el.disabled||el.getAttribute('aria-disabled')==='true')return {clicked:false,reason:'stale_control'};
- if(args.prepare_pointer)el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
+ if(args.prepare_pointer&&!args.recheck_pointer)el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
  const r=el.getBoundingClientRect();
  if(!r.width||!r.height)return {clicked:false,reason:'hidden_control'};
  if(args.prepare_pointer){

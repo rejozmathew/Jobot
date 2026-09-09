@@ -29,9 +29,22 @@ UNMASK_CREDENTIALS = r"""(() => {
 
 async def capture_private_screenshot(page,path):
     """Existing credential mask, shared by local and legacy browser paths."""
-    await page.evaluate(MASK_CREDENTIALS)
-    try:await page.screenshot(str(path))
-    finally:await page.evaluate(UNMASK_CREDENTIALS)
+    documents=[page]
+    if getattr(page,'application_package',None):
+        from .browser_frames import router_for
+        router=await router_for(page)
+        if not router.frames:await router.discover()
+        documents.extend(router.frames.values())
+    masked=[]
+    try:
+        for document in documents:
+            if hasattr(document,'validate'):await document.validate()
+            await document.evaluate(MASK_CREDENTIALS);masked.append(document)
+        await page.screenshot(str(path))
+    finally:
+        for document in reversed(masked):
+            try:await document.evaluate(UNMASK_CREDENTIALS)
+            except Exception:pass  # A replaced document has no retained mask.
 
 
 FILL_SELECTED = r"""async (args) => {
@@ -45,8 +58,9 @@ FILL_SELECTED = r"""async (args) => {
    if(!ref)return {...result,error:'missing_'+role+'_ref'};
    let matches;
    try {
-     const mapped=ref.startsWith('wd:')?window.__jobbotWorkdayScope?.inventory?.get(ref):null;
-     matches=ref.startsWith('wd:')?(mapped?[mapped]:[]):document.querySelectorAll(ref);
+    const inventoryRef=ref.startsWith('wd:')||ref.startsWith('form:');
+    const mapped=ref.startsWith('wd:')?window.__jobbotWorkdayScope?.inventory?.get(ref):window.__jobbotFormScope?.inventory?.get(ref);
+    matches=inventoryRef?(mapped?[mapped]:[]):document.querySelectorAll(ref);
    }catch{return {...result,error:'invalid_'+role+'_ref'};}
    if(matches.length!==1)return {...result,error:'ambiguous_or_stale_'+role+'_ref',match_count:matches.length};
    const e=matches[0],r=e.getBoundingClientRect();
@@ -113,7 +127,16 @@ async def fill_page_credentials(config, package, page, params):
         url=await page.evaluate('location.href')
         if not is_same_application_scope(package['job']['url'],url):
             return {'error':'credential_target_scope_mismatch','values_committed':False}
-        result=await page.evaluate_function(FILL_SELECTED,dict(params,email=account['email'],password=account['password']))
+        page.application_package=package
+        from .browser_frames import resolve_control
+        target_page=None;local=dict(params)
+        for key in ('email_ref','password_ref','confirmation_ref'):
+            if not params.get(key):continue
+            document,ref=await resolve_control(page,{'ref':params[key]})
+            if target_page is not None and document is not target_page:
+                return {'error':'credential_controls_must_share_document','values_committed':False}
+            target_page=document;local[key]=ref['ref']
+        result=await (target_page or page).evaluate_function(FILL_SELECTED,dict(local,email=account['email'],password=account['password']))
         return dict(result,credential_ref=account['credential_ref'])
     except ValueError as exc:
         known={'saved_credential_reference_unavailable','configured_credentials_unavailable','candidate_credential_identity_mismatch'}
@@ -125,7 +148,7 @@ async def fill_page_credentials(config, package, page, params):
 async def fill_credentials(config, package, params):
     """Selectors are observed control references, never inferred by this helper."""
     browser = await CDPBrowser.connect(config.get('cdp_url', 'http://127.0.0.1:9222'),
-                                       target_id=params['target_id'], expected_mode='headed')
+                                       target_id=params['target_id'], expected_mode=config.get('browser_mode','headed'))
     try:
         page = await browser.get_current_page()
         return await fill_page_credentials(config,package,page,params)

@@ -696,3 +696,77 @@ completion of the application-automation acceptance criteria.
   under-ten-minute completion and two authenticated concurrent Simplify
   workspaces remain unverified. The earlier second-workspace Computer Use setup
   stop (browser URL could not be confidently verified) remains an installation gap.
+
+### 2026-09-08: shared embedded forms and durable human answers
+
+- Implemented the user-approved shared form/answer-queue design after stopping the
+  stalled owned application. No employer application was used as an engineering
+  fixture, retried or submitted during these changes. Source remains in the
+  original checkout for review.
+- Existing `browser select`/`fill`/`check` calls now route opaque refs through
+  DOM-owned application documents, including cross-origin OOPIFs. The model does
+  not choose another dropdown helper. Workday keeps its existing observer/runner.
+  The same routing covers Simplify, approved uploads/private credentials, masking,
+  answer capture and submission; transformed/ambiguous/unverified frames fail
+  closed with diagnostics. Parent overlays, iframe replacement and document
+  navigation invalidate unsafe actions.
+- Added consistent employer query-requisition aliases to intake and read-only
+  duplicate history. Submission captures transient child evidence and scoped
+  redirects before one click; wrong-requisition and replacement-frame success
+  messages cannot establish an application outcome. Uncertainty never permits
+  another submit. Duplicate native-select values and ARIA radio read-back are
+  verified against the actual offered choice.
+- Migration 16 adds required questions, immutable human answer revisions and
+  durable retry requests to the existing managed database. Exact question,
+  choices, context, job identity and candidate scope control reuse. Approved
+  policy runs first; failed controls and optional fields do not become prompts.
+  `park_questions` stops the owned browser before releasing capacity. The
+  dashboard offers Save, Save and queue retry, and a batch queue action. Draft
+  conflicts reload current answers rather than overwriting a newer revision.
+  Saving/queueing never launches a model. An ordinary harness picks up queued
+  requests and applies saved answers against fresh controls.
+- Messaging is optional harness metadata. Hermes observes actual platform/tool
+  availability and requires a user turn newer than both the question and its last
+  answer; only a turn ID/hash is retained as reply evidence. A harness without
+  messaging uses the same durable dashboard path. Existing suppression across
+  email identities, submission reconciliation and stop-before-reuse remain.
+- Antigravity Gemini supplied synthetic identity tests and bounded source reviews
+  of frame routing and the queue. Findings were checked against source and browser
+  regressions: duplicate-value ambiguity and revision conflict recovery were
+  corrected; suggested removal of same-requisition aliases/global uncertainty
+  suppression or release before host termination was rejected because those are
+  intentional ownership/history protections. Existing `finish` already converts
+  failed post-intent attempts to submission_unknown.
+- Focused integration: 48 passed in 49.22s, followed by seven final radio,
+  reply-provenance and canonical-skill checks in 5.74s. Tests use isolated
+  localhost Brave documents, synthetic ledgers and the actual dashboard API/UI.
+  Screenshot QA confirms the question cards, controls and batch actions fit.
+  These fixtures do not establish a successful live embedded ATS application or
+  universal custom-widget support.
+- The first full pass exposed forgotten writer uncertainty after repeated reads
+  and the missing backward-compatible snapshot title. Both were fixed. Older
+  fixtures were aligned with the already-implemented scoped sign-in, explicit
+  writer versus cosmetic spinner policy, and shared submission collector; the
+  Workday HTTP/local integration still exercises the real Service/database.
+  The affected 50-check group then passed in 23.26s.
+- Final managed suite: **624 passed, zero failures/errors/skips**, exit 0, 254.21s.
+  JUnit independently confirms those counts (254.095s suite time). Real isolated
+  browser checks were enabled, including headed lifecycle survival, a 65-second
+  driver gap, parallel isolation, crash cleanup, pause/attach and Workday auth.
+  The exact command/log/JUnit are retained privately as
+  `embedded-managed-verified.*`; JavaScript syntax and Git whitespace checks pass.
+- The dashboard was offline at deployment and was started at its existing
+  `http://127.0.0.1:60157` address with the same selected instance/database.
+  Preparation initially encountered a filesystem read-only error in workspace
+  metadata; the authorized retry with normal-user filesystem access succeeded.
+  Schema 16 is present, a fresh SQLite backup passes integrity_check, and hashes
+  of all records in 40 existing tables are unchanged by preparation. Authenticated
+  health/view/answer_queue confirm the current source fingerprint
+  `b0fd3f65d2c24cf7c5c20728bbcf62e6fbc75ae4d096f25b535eb6a1a905715f`.
+  No active applications were present. The queue has no historical backfill;
+  future observed missing questions populate it. No commit or push was made.
+- Long-running native Hermes instances must reload JobBot or restart to load
+  the new native operations; the portable CLI already loads current code on each
+  call. No live application retry or Discord message was sent by this engineering
+  task. Live ATS acceptance and authenticated extension behavior remain separate
+  from the synthetic regression evidence.

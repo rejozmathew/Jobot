@@ -11,6 +11,13 @@ outcomes, detailed diagnoses and evidence belong in the managed database and its
 private artifacts; existing attempt reports expose retrospective annotations.
 Engineering checks do not establish universal ATS or headless Simplify support.
 
+[STOP_CONDITION_AUDIT.md](STOP_CONDITION_AUDIT.md) assesses application restrictions
+from first principles, distinguishes essential ownership/submission protections
+from recoverable helper failures, and records proposed removals and narrower
+checks. Its [source catalog](STOP_CONDITION_CATALOG.md) indexes the current guard
+sites. These are assessment documents, not a claim that the proposed changes are
+implemented.
+
 Additional Workday authentication recovery is deferred pending broader evidence
 from distinct applications. The runtime document contains the standard request
 prompt for any ATS and describes how to retrieve stored application diagnoses.

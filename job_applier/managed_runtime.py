@@ -147,14 +147,14 @@ class RuntimeServices:
         async def read_bound_browser():
             import asyncio
             from .cdp_client import CDPBrowser
-            from .simplify_boundary import SimplifyBoundary
             browser=await CDPBrowser.connect(endpoint_url,target_id=target['target_id'],expected_mode=settings.get('browser_mode','headed'))
             try:
                 page=await browser.get_current_page()
                 before_url=await page.evaluate('location.href')
                 verify_url(before_url)
-                boundary=SimplifyBoundary(page,budget_seconds=5)
-                before=await boundary.observe()
+                from .browser_controls import observe_writers
+                async def read_writers():return await observe_writers(page,{'job':dict(job),'attempt':dict(a)})
+                before=await read_writers()
                 # Only a native exact-requisition confirmation can settle a submit
                 # after the extension disappears. This is read-only and server-owned.
                 from .workday_fast import WORKDAY_OBSERVE
@@ -166,7 +166,7 @@ class RuntimeServices:
                     return isinstance(result,dict) and result.get('submitted') is True
                 confirmed_before=await native_confirmation() if not before.get('panel') else False
                 await asyncio.sleep(0.15)
-                after=await boundary.observe()
+                after=await read_writers()
                 # The observer deliberately omits query parameters from its public
                 # URL. Workday login ownership depends on the full job redirect.
                 after_url=await page.evaluate('location.href')
@@ -174,6 +174,7 @@ class RuntimeServices:
                 if settings.get('mode')=='pilot' and after.get('source')=='fixture':
                     raise ProtocolError('official_extension_observation_required')
                 stable=before_url==after_url and all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
+                stable=stable and before.get('application_frames')==after.get('application_frames') and not after.get('frame_diagnostics')
                 confirmed=confirmed_before and not after.get('panel') and await native_confirmation()
                 return after,stable,browser.observed_mode,confirmed
             finally:
@@ -191,7 +192,7 @@ class RuntimeServices:
                 other_actions=db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND id!=?',(attempt_id,action_id)).fetchone()
                 unended_writer=db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1 AND id!=?',(attempt_id,action_id)).fetchone()
                 prior_writer=a['writer_state']
-                has_active_autofill=(prior_writer=='active' or bool(unended_writer))
+                has_active_autofill=(prior_writer in ('active','unknown') or bool(unended_writer))
 
                 if unended_writer:
                     new_writer='active'

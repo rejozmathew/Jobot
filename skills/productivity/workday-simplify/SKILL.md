@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.5
+version: 0.3.6
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -105,6 +105,13 @@ runner contains no model and retains one CDP connection during its bounded call.
 5. `blocked`: handle only the actual required blocker with the shared session's
    `browser` operation and approved facts. One initial autofill and one retry per
    step remain the limit. Do not audit every optional field or reconstruct history.
+   Use the shared `browser select`/`fill`/`check` API with the observed ref; the
+   runtime resolves the control, including an embedded document, without a model
+   choosing another dropdown handler. For genuinely missing required facts,
+   follow job-apply's `request_answers` / optional messaging / `park_questions`
+   procedure. After a saved-answer retry, use `apply_answers` with fresh refs and
+   return routine advancement to this Workday runner. A control failure with a
+   known answer remains a technical recovery, not a question for the user.
    Enabled `Autofill N Skills` is a separate input action; a cosmetic spinner
    does not defeat it. Counts are observed and bounded per page. Salary/privacy
    preferences use the shared profile policy; the runner applies them before

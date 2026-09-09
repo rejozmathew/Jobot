@@ -31,6 +31,7 @@
 <main id="console" hidden>
   <nav aria-label="Workspace">
     <button data-tab="queue" class="active">Applications</button>
+    <button data-tab="answers">Needs your answer <span id="answer-count"></span></button>
     <button data-tab="run">Activity</button>
     <button data-tab="profile">Profile</button>
     <button data-tab="settings">Settings</button>
@@ -46,7 +47,7 @@
   <section id="tab-queue" class="tab">
     <section class="card" id="local-sessions-card" hidden>
       <h2>Application sessions</h2>
-      <p>Give a job URL to your Hermes conversation to start. Each session has its own browser workspace.</p>
+      <p>Give a job URL to your application conversation to start. Each session has its own browser workspace.</p>
       <div id="local-sessions"></div>
     </section>
     <section class="card">
@@ -141,6 +142,17 @@
           </form>
         </div>
       </details>
+    </section>
+  </section>
+
+  <section id="tab-answers" class="tab" hidden>
+    <section class="card">
+      <div class="section-title">
+        <h2>Application questions</h2>
+        <button id="queue-answered-batch" type="button">Queue all answered applications</button>
+      </div>
+      <p>Answer the required questions that held up an application. Save for later, or queue it for the next application batch.</p>
+      <div id="answer-groups"></div>
     </section>
   </section>
 

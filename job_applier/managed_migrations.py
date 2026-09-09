@@ -187,7 +187,27 @@ def migration_15(db):
         acquired_at TEXT NOT NULL, PRIMARY KEY(person_key,namespace))''')
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15)]
+def migration_16(db):
+    db.execute('''CREATE TABLE application_questions (
+        id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES jobs(id),identity_id TEXT NOT NULL REFERENCES candidates(id),
+        first_attempt_id INTEGER NOT NULL REFERENCES application_attempts(id),last_attempt_id INTEGER NOT NULL REFERENCES application_attempts(id),
+        question_key TEXT NOT NULL,field TEXT NOT NULL,question TEXT NOT NULL,kind TEXT NOT NULL,
+        options_json TEXT NOT NULL,context_json TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,
+        answer_json TEXT,answer_source TEXT,answered_at TEXT,created_at TEXT NOT NULL,last_seen_at TEXT NOT NULL,
+        UNIQUE(job_id,identity_id,question_key))''')
+    db.execute('''CREATE TABLE application_question_answers (
+        question_id TEXT NOT NULL REFERENCES application_questions(id),revision INTEGER NOT NULL,
+        answer_json TEXT NOT NULL,source TEXT NOT NULL,evidence TEXT NOT NULL,created_at TEXT NOT NULL,
+        PRIMARY KEY(question_id,revision))''')
+    for action in ('UPDATE','DELETE'):
+        db.execute(f"CREATE TRIGGER immutable_question_answers_{action.lower()} BEFORE {action} ON application_question_answers BEGIN SELECT RAISE(ABORT,'immutable answer history'); END")
+    db.execute('''CREATE TABLE answer_retry_requests (
+        id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES jobs(id),identity_id TEXT NOT NULL REFERENCES candidates(id),
+        state TEXT NOT NULL,requested_at TEXT NOT NULL,session_id TEXT REFERENCES application_sessions(id),started_at TEXT)''')
+    db.execute("CREATE UNIQUE INDEX one_queued_answer_retry ON answer_retry_requests(job_id,identity_id) WHERE state='queued'")
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16)]
 
 
 def migrate(path):

@@ -53,6 +53,15 @@ async def capture_answers(browser_page,config,package,ownership,*,page='form',so
     from .browser_controls import FORM
     try:
         captured=await browser_page.evaluate_function(FORM,{'method':'answers','page':page})
+        from .cdp_client import CDPPage
+        from .managed_context import platform_for_url
+        if isinstance(browser_page,CDPPage) and platform_for_url(package['job']['url'])!='workday':
+            from .browser_frames import router_for
+            router=await router_for(browser_page,package)
+            if not router.frames:await router.discover()
+            for frame in router.frames.values():
+                child=await frame.evaluate_function(FORM,{'method':'answers','page':page})
+                captured['answers'].extend(child['answers'])
         context=captured.get('context',{});job=dict(package['job'])
         if not job.get('company') and context.get('company'):
             job.update(company=context['company'],company_source=context.get('source'))
@@ -133,6 +142,12 @@ async def apply_policy(page, package, observed, *, completed=None, posted_range=
             if (re.search(r'privacy|personal data|data processing|data protection',label,re.I) and
                 not re.search(r'marketing|job alerts|talent community|newsletter',label,re.I)):
                 params={'method':'check','ref':field['ref'],'value':True}
+        elif policy.get('routine_privacy_consent') and field.get('tag')=='SELECT':
+            if (re.search(r'privacy|personal data|data processing|data protection',label,re.I) and
+                not re.search(r'marketing|job alerts|talent community|newsletter',label,re.I)):
+                choices=[o for o in field.get('options',[]) if not o.get('disabled') and
+                         re.fullmatch(r'(?:I (?:acknowledge|agree|consent)|Yes)',o.get('label','').strip(),re.I)]
+                if len(choices)==1:params={'method':'select','ref':field['ref'],'value':choices[0]['value']}
         elif (field.get('tag')=='INPUT' and field.get('type') in ('text','number','tel','') and
               re.search(r'salary|compensation|pay expectation',label,re.I) and
               not re.search(r'current|previous|past|history|hourly|per hour|monthly|per month',label,re.I)):

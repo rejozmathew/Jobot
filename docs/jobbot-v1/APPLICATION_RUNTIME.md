@@ -5,6 +5,11 @@ September 2026. Older HTTP accept/claim/lease startup is **compatibility only**.
 Historical failures in REVIEW_HANDOFF remain historical evidence. Actual delivery
 checks and unresolved acceptance are in [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md).
 
+The [first-principles stop-condition audit](STOP_CONDITION_AUDIT.md) challenges
+the necessity and placement of the restrictions described here. It distinguishes
+current behavior from proposed simplification and includes a source catalog and
+read-only historical incidence. Audit recommendations are not yet implementation.
+
 The existing runner connects native/extension observations to mapped recovery.
 Per-application outcomes and detailed diagnoses are retained in the managed
 database and existing attempt reports. The proposed additional Workday
@@ -44,7 +49,7 @@ One absolute configured `db_path` remains authoritative. `legacy_history_paths`
 are read-only duplicate/uncertainty sources; missing sources fail closed. There
 is no cwd-selected database or second outcome store. `prepare_local` checks the
 instance and makes an integrity-checked SQLite backup before additive migration
-15. Existing accounts, attempts and submissions remain. Transactions are short
+16. Existing accounts, attempts and submissions remain. Transactions are short
 state updates; browser/model/mail work stays outside them. Existing SQLite busy
 handling remains in the shared connection layer.
 
@@ -62,6 +67,9 @@ handling remains in the shared connection layer.
 | Fence | Existing generation retained for service compatibility; local authority also requires session/current driver/host |
 | Heartbeat | Driver activity telemetry, with no authorization expiry |
 | Fast checkpoint/lock | Private counters plus OS lock for competing calls; not an outcome store; crash releases lock |
+| Application question | Full required question, offered choices and context; exact job identity + candidate scope |
+| Question answer revision | Immutable human answer/source/evidence/time; current revision uses optimistic concurrency |
+| Answer retry request | Durable queued/started handoff to an ordinary harness; no model or browser launched when saved |
 
 Account lookup precedes authentication and is scoped to candidate plus verified
 portal namespace. `creation_pending` records dispatch intent; it does not prove
@@ -243,16 +251,18 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
 | browser_controls.py / browser_helpers/form_controls.js | Shared native form inventory, verified text/select/check/keyboard exceptions; Workday retains its site-specific inventory |
+| browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
+| managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent |
 | application_answers.py | Interprets profile salary/privacy preferences and retains private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | Shared one-click boundary, transient native/Simplify confirmation capture, scoped redirect inspection, private evidence and truthful outcome |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | managed_credentials.py / managed_documents.py / hermes_gmail.py | Private credentials and shared screenshot masking (local and legacy callers), hash-checked selected-asset uploads, configured correlated mailbox |
-| hermes_plugin.py / integration entry | Convenience and actual session/model metadata; no alternative form logic |
+| hermes_plugin.py / integration entry | Convenience, actual session/model and optional messaging capability metadata, observed human-reply provenance; no alternative form logic |
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js | Existing dashboard, parallel session/process/driver/model/progress and independent controls |
 
-Common policy is job-apply v0.4.7; Workday policy is workday-simplify v0.3.5, in
+Common policy is job-apply v0.4.8; Workday policy is workday-simplify v0.3.6, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision
@@ -301,6 +311,65 @@ Credential, verification-code and financial-identifier controls are excluded.
 Timeline checkpoints and browser results link the artifact; this does not add
 another database or a final-review pass. Audit errors are reported separately
 and never imply that an executed form action is safe to replay.
+
+### Shared embedded forms and human answers
+
+The harness uses one `browser select`/`fill`/`check` interface. Observed refs carry
+document identity internally; no model chooses an iframe or Workday handler.
+Non-Workday inventory includes visible DOM-owned application iframes, including
+cross-origin OOPIFs, without looking for other tabs. Discovery uses the assigned
+employer page's explicit application embed and rejects contradictory requisition
+IDs. Workday keeps its existing observer and fast runner. Same-origin and
+cross-origin native selects, ARIA menus, uploads, private credentials, answer
+capture, credential masking and Simplify actions share this routing.
+
+Refs survive a new CDP connection to the same document, but not navigation,
+replacement or changed ownership. Native pointer input validates the child and
+every parent iframe hit target before dispatch; overlays cannot be forced through.
+Traversal is bounded to four levels, twelve application frames and the first
+24 iframe owners per document. Transforms/zoom that prevent reliable coordinate
+mapping and unverified redirects return diagnostics. This is shared plumbing for
+recognized embedded forms, not a claim that every custom widget or ATS works.
+
+Submission arms the parent and selected embedded document before the single
+intent/click. Child confirmation is tied to its original frame ID and application
+URL, including after a normal scoped redirect. Replacement frames and conflicting
+query requisitions cannot supply proof. Transient messages are retained. A repeat
+call after uncertain dispatch only observes; it never clicks Submit again.
+Custom employer `/jobs?gh_jid=...` and `/form?gh_jid=...` aliases now also match in
+intake and read-only history; meaningful unknown query keys remain distinct.
+
+Missing facts use an additive durable queue, separate from the private observed
+answer audit. `browser request_answers` first applies approved salary/privacy
+policy, then captures only missing required questions from current controls.
+Failed menu interaction is a technical diagnostic, not a human question. Answers
+are scoped by candidate, verified job identity, exact field/question/options and
+page/section/document. Reordered or changed choices are not guessed equivalent.
+The current answer can change through an optimistic revision; earlier answer
+records remain immutable. Choice objects include both value and label, avoiding
+duplicate HTML-value ambiguity. Passwords and verification/financial identifiers
+are excluded. Approved facts are never reconstructed from a resume during a run.
+
+`human_input` is a harness capability declaration, defaulting to no messaging and
+the dashboard queue. The core imports no Discord or Hermes service. Hermes derives
+availability from its actual conversation platform or offered messaging tool;
+its `answer` bridge requires an observed user turn newer than the question and
+its last answer, and stores a turn ID/hash as provenance. Other harnesses can
+declare the same capability at start or use the dashboard without messaging.
+Capabilities do not grant permission to send a message or choose a recipient.
+CLI answer writes require explicit user-reply evidence. Late replies only update
+answer data; they do not reclaim a stopped browser.
+
+`park_questions` records a blocked attempt and requests stop. Host acknowledgement
+releases browser/portal ownership and the slot, unlike pause. The dashboard reads
+the same database and offers Save answers, Save and queue retry, and a batch queue
+button. Saving never starts a browser. `answer_retries` lists ready requests for
+the configured candidate; an ordinary authorized harness starts each with the
+returned job/request IDs. `session_connected` marks its request started. No
+scheduler or extra LLM is created. `browser apply_answers` checks current refs and
+the exact question before applying a saved answer and recording its provenance.
+Same-job applied/uncertain history and ownership gates still block retries across
+email identities. Queue changes cannot reconcile a submission.
 
 ### Learning from successful and blocked applications
 

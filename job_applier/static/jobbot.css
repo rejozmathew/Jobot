@@ -443,6 +443,15 @@ footer {
   display: none !important;
 }
 
+.answer-application { border-top: 1px solid var(--border); padding: 24px 0; }
+.answer-application:first-child { border-top: 0; }
+.answer-application h3 { margin: 0; }
+.answer-meta, .answer-empty { color: var(--text-muted); }
+.answer-field { display: grid; gap: 8px; margin: 20px 0; max-width: 760px; }
+.answer-field > span { font-weight: 600; line-height: 1.5; }
+.answer-field select, .answer-field textarea { width: 100%; }
+.answer-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0 10px; }
+
 @media (max-width: 850px) {
   body { padding: 14px; }
   .split, .form-row { grid-template-columns: 1fr; }
