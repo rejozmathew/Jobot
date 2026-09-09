@@ -15,7 +15,7 @@ import time
 from urllib.parse import urlsplit
 from .managed_identity import canonical_url
 from .managed_cli import credential_available
-from .managed_shared import ProtocolError
+from .managed_shared import ProtocolError,uid
 
 REPOSITORY=Path(__file__).resolve().parents[1]
 CONFIG_POINTER=REPOSITORY/'artifacts/jobbot-v1-private/runtime-config.json'
@@ -128,7 +128,27 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     identity_id=config.get('identity_id');resume=config.get('resume_asset_id')
     if not identity_id or not resume:raise ProtocolError('configured_candidate_and_resume_required')
     sync_answer_policy(config,service)
-    requested=request_id or hashlib.sha256(json.dumps([driver,identity_id,job['id']]).encode()).hexdigest()
+    if not request_id and (metadata or {}).get('request_turn_id'):
+        request_id=hashlib.sha256(json.dumps([driver,identity_id,job['id'],metadata['request_turn_id']]).encode()).hexdigest()
+    # A fresh request may restart an unfinished job from any conversation.
+    # Reserve still reuses this driver's active session; explicit request IDs
+    # retain transport idempotency. Ended sessions do not trap future starts.
+    from .managed_identity import RELATED
+    with service.tx() as db:
+        replay=db.execute('SELECT id FROM application_sessions WHERE request_id=?',(request_id,)).fetchone() if request_id else None
+        if not replay:service._assert_not_suppressed(db,job['id'])
+        previous=None if replay else db.execute(RELATED+'''SELECT s.* FROM related r JOIN application_sessions s ON s.job_id=r.id
+            WHERE s.ended_at IS NULL ORDER BY s.requested_at DESC LIMIT 1''',(job['id'],)).fetchone()
+    same_request=previous and not request_id and previous['driver_id']==driver and previous['identity_id']==identity_id and previous['state'] not in ('paused','finishing')
+    if previous and not same_request:
+        stopped=control_session(config,service,dict(previous),'stop')
+        if not stopped.get('ended_at'):
+            continuation={'job_id':job['id'],'wait_seconds':0}
+            if request_id:continuation['request_id']=request_id
+            stopped['next_operation']={'operation':'start','parameters':continuation,
+                'instruction':'The previous browser is stopping. Continue this new application request after it closes.'}
+            return stopped
+    requested=request_id or (previous['request_id'] if same_request else uid())
     from .managed_versions import code_evidence
     evidence=code_evidence()
     meta={**(metadata or {}),'requested_model':config.get('application_model',config.get('model')),
@@ -184,6 +204,8 @@ def handle(service, session_id, *, include_context=True):
         package=service.application_context(state['attempt_id'])
         result['context']=package
     result['workspace']=state['workspace'];result['metadata']=state['metadata']
+    result['application_kind']=state['metadata'].get('application_kind',
+        'reattempt' if state['metadata'].get('fresh_employer_storage') else 'first_attempt')
     from .hermes_gmail import mailbox_handoff
     result['mailbox']=mailbox_handoff(state['metadata'].get('credential_sources',{}))
     from .browser_controls import next_operation
@@ -202,6 +224,23 @@ def handle(service, session_id, *, include_context=True):
     if state['metadata'].get('readiness',{}).get('recovery'):
         result['startup_recovery']=state['metadata']['readiness']['recovery']
     return result
+
+
+def control_session(config,service,session,operation):
+    """Existing stop/pause lifecycle, shared by direct control and a fresh start."""
+    if session['ended_at']:return handle(service,session['id'],include_context=False)
+    if not session['run_id']:
+        return service.session_stopped(session['id'],reason='Cancelled while waiting for capacity',browser_stopped=True)
+    service.control(session['run_id'],command=operation)
+    from .workspace_host import ensure_host
+    ensure_host(config,session['workspace_id'])
+    end=time.monotonic()+15
+    while time.monotonic()<end:
+        current=service.session(session['id'])
+        if current['state'] in ('paused','stopped','failed','finished') and (operation!='stop' or current['ended_at']):
+            return handle(service,session['id'],include_context=False)
+        time.sleep(.1)
+    return {**handle(service,session['id'],include_context=False),'control_pending':True}
 
 
 def session_call(config, session_id, operation, parameters=None, driver_id=None):
@@ -232,12 +271,15 @@ def session_call(config, session_id, operation, parameters=None, driver_id=None)
                 'evidence':result['evidence'],'source':params.get('source','user_reported'),'completed_at':result['completed_at']}
     driver=driver_identity(driver_id)
     if operation=='retry':
-        if not session['ended_at']:raise ProtocolError('stop_session_before_retry')
-        if session['attempt_id'] and service.attempt(session['attempt_id'])['submission_pending']:
-            raise ProtocolError('verify_exact_submission_before_retry')
+        with service.tx() as db:service._assert_not_suppressed(db,session['job_id'])
+        if not session['ended_at']:
+            stopped=control_session(config,service,session,'stop')
+            if not stopped.get('ended_at'):
+                stopped['next_operation']={'operation':'retry','parameters':{},
+                    'instruction':'The previous browser is stopping. Continue retry after it closes.'}
+                return stopped
         job=service.job(session['job_id'])
-        if job['status'] in ('blocked','failed','interrupted','ready_for_review','needs_review'):service.retry(job['id'])
-        return start(config,job_id=job['id'],driver_id=driver,request_id='retry:'+session_id+':'+driver)
+        return start(config,job_id=job['id'],driver_id=driver)
     if operation=='attach':
         session=service.attach_session(session_id,driver)
         from .workspace_host import ensure_host
@@ -245,17 +287,7 @@ def session_call(config, session_id, operation, parameters=None, driver_id=None)
         return handle(service,session_id)
     if session['driver_id']!=driver:raise ProtocolError('driver_owned_elsewhere')
     if operation in ('pause','stop'):
-        if not session['run_id']:
-            return service.session_stopped(session_id,reason='Cancelled while waiting for capacity',browser_stopped=True)
-        service.control(session['run_id'],command=operation)
-        from .workspace_host import ensure_host
-        ensure_host(config,session['workspace_id'])
-        end=time.monotonic()+15
-        while time.monotonic()<end:
-            current=service.session(session_id)
-            if current['state'] in ('paused','stopped','failed','finished'):return handle(service,session_id,include_context=False)
-            time.sleep(.1)
-        return {**handle(service,session_id,include_context=False),'control_pending':True}
+        return control_session(config,service,session,operation)
     from .workspace_host import call_host
     return call_host(config,session,operation,parameters or {},driver)
 
@@ -580,7 +612,7 @@ def history_matches(paths,url):
     for path in paths:
         try:
             with closing(readonly(path)) as db:
-                rows=db.execute("SELECT id,url,status FROM jobs WHERE status IN ('applied','already_applied','submission_unknown','in_progress','running')")
+                rows=db.execute("SELECT id,url,status FROM jobs WHERE status IN ('applied','already_applied')")
                 for row in rows:
                     if history_key(row['url'])==key:
                         matches.append({'database':str(Path(path).resolve()),'job_id':row['id'],'status':row['status']})

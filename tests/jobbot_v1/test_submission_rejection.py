@@ -87,22 +87,6 @@ def test_rejection_proof_requires_freshness_and_matching_action(tmp_path):
     assert s.attempt(owner['attempt_id'])['submission_pending']
 
 
-def test_failed_reconciliation_label_cannot_enable_service_retry(tmp_path):
-    s,session,owner,jobs=service_dispatch(tmp_path)
-    s.session_stopped(session['id'],reason='Synthetic stop after uncertain response',browser_stopped=True)
-    s.reconcile(owner['attempt_id'],outcome='failed',evidence='No confirmation available',browser_quiescent=True)
-    with pytest.raises(ProtocolError,match='reconciliation_required'):
-        s.retry(jobs[0]['id'])
-
-
-def test_resolved_rejection_remains_retryable_after_session_stop(tmp_path):
-    s,session,owner,jobs=service_dispatch(tmp_path)
-    s.record_submission_rejection(**owner,proof={'dispatch_id':'dispatch-1','document_id':'document-1','frame_id':'root',
-        'source':'employer','reason_code':'invalid_security_code','observed_at':s.now(),'fresh_after_dispatch':True})
-    s.session_stopped(session['id'],reason='Synthetic stop after explicit rejection',browser_stopped=True)
-    assert s.retry(jobs[0]['id'])['status']=='queued'
-
-
 @pytest.mark.parametrize('mode',['top','cross'])
 def test_local_form_rejection_is_captured_and_correction_can_submit_once(tmp_path,monkeypatch,mode):
     import test_embedded_forms as fixture

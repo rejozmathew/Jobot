@@ -6,6 +6,13 @@ checkpoint `54324f5`. Final verification passed all 761 tests, with no failures,
 errors or skips, in 352.84 seconds. The results below retain the failures found
 and corrected during engineering.
 
+This report records checkpoint `184717e`. The later
+[shared retry policy](RETRY_POLICY.md) supersedes its cross-attempt uncertainty
+restrictions and advances job-apply to `0.5.7` and workday-simplify to `0.3.15`.
+The 761-test result below applies
+only to the preceding implementation. The user prohibited new tests and further
+regression execution for the follow-up; its review basis is source/diff inspection.
+
 ## Delivered behavior
 
 | Area | Implementation and evidence |

@@ -199,12 +199,6 @@ class QuestionServices:
                 questions=self._questions(db,job_id,identity_id)
                 if not questions or any(q['state']=='pending' for q in questions):raise ProtocolError('unanswered_questions')
                 self._assert_not_suppressed(db,job_id);self._assert_no_owner(db,job_id)
-                job=self._get(db,'jobs',job_id)
-                uncertain=db.execute(RELATED+'''SELECT 1 FROM related r JOIN application_attempts a ON a.job_id=r.id
-                    WHERE a.submit_intent_at IS NOT NULL AND (a.outcome='submission_unknown' OR a.completed_at IS NULL)''',(job_id,)).fetchone()
-                if uncertain:raise ProtocolError('reconciliation_required')
-                if job['status'] not in ('blocked','failed','interrupted','ready_for_review','needs_review','queued'):
-                    raise ProtocolError('not_retryable')
                 if db.execute('SELECT 1 FROM job_archives WHERE job_id=?',(job_id,)).fetchone():raise ProtocolError('job_archived')
                 old=db.execute("SELECT * FROM answer_retry_requests WHERE job_id=? AND identity_id=? AND state='queued'",(job_id,identity_id)).fetchone()
                 if old:requests.append(dict(old));continue

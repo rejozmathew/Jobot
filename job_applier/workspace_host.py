@@ -273,7 +273,7 @@ class WorkspaceHost:
 
     def inspection_result(self,session_id,reason='confirmation_not_captured'):
         return {'status':'submission_unknown','reason':reason,'session_id':session_id,
-                'next_step':'Inspect the owned screenshot/snapshot or reconcile confirmation. Do not submit again. The session remains open until completion, Stop, or the configured maximum runtime.'}
+                'next_step':'Inspect the owned screenshot/snapshot or reconcile confirmation. Do not replay Submit in this attempt. A new user application request can start a fresh attempt. The session remains open until completion, Stop, or the configured maximum runtime.'}
 
     def dispatch(self, request):
         try:

@@ -9,6 +9,13 @@ This work uses synthetic fixtures only; it does not change attempt 45, retry a
 live application, access live mail or backfill production records.
 [Implementation validation](GREENHOUSE_RECOVERY_VALIDATION_2026_09_09.md) records the checks and fixes.
 
+Follow-up policy: [Shared application requests and retry](RETRY_POLICY.md)
+supersedes this plan's cross-attempt uncertainty restrictions. Any new requested
+attempt is allowed unless success is recorded; fresh rejection proof remains
+useful for correcting and continuing within the same attempt. The 761-test result
+belongs to checkpoint `184717e`, before that follow-up. No new tests or regression
+runs were authorized for the retry-policy change.
+
 
 ## Intended result
 

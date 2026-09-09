@@ -50,11 +50,13 @@ class EventServices:
                     'stage_id':stage,'parent_id':stage,'task_id':task_id,'task_state':state,'phase':stage,
                     'activity':activity,'evidence':evidence,'next_step':next_step,'source':source})
 
-    def _submission_pending(self, db, attempt):
-        from .managed_shared import submission_pending
-        if not attempt['submit_intent_at']:return False
+    def _submission_state(self, db, attempt):
+        from .managed_shared import submission_state
         rows=db.execute('SELECT payload_json,stale,observed_at FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt['id'],)).fetchall()
-        return submission_pending(attempt,rows)
+        return submission_state(attempt,rows)
+
+    def _submission_pending(self, db, attempt):
+        return self._submission_state(db,attempt)['state'] in ('pending','accepted')
 
     def record_submission_rejection(self,attempt_id,*,worker_id,fence,proof):
         """Resolve only the fresh employer response for the current captured click."""

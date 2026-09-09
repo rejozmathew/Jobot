@@ -281,16 +281,19 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if decision not in ('ready','held','excluded') or not reason: raise ProtocolError('invalid_eligibility')
         with self.tx() as db:
             job=self._get(db,'jobs',job_id)
-            if job['status'] in ('running','applied','submission_unknown'): raise ProtocolError('protected_job')
+            if job['status'] in ('running','applied','already_applied'): raise ProtocolError('protected_job')
             db.execute('UPDATE jobs SET eligibility=?,intervention_reason=? WHERE id=?',(decision,safe_text(reason),job_id))
             return dict(self._get(db,'jobs',job_id))
 
     def _assert_not_suppressed(self, db, job_id):
         prior=db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id LEFT JOIN submission_ledger l ON l.job_id=r.id WHERE l.job_id IS NOT NULL OR j.status IN ('applied','already_applied') LIMIT 1",(job_id,)).fetchone()
         if prior:raise ProtocolError('already_applied')
-        attempts=db.execute(RELATED+'SELECT a.* FROM related r JOIN application_attempts a ON a.job_id=r.id WHERE a.submit_intent_at IS NOT NULL',
+        attempts=db.execute(RELATED+'SELECT a.* FROM related r JOIN application_attempts a ON a.job_id=r.id',
                             (job_id,)).fetchall()
-        if any(self._submission_pending(db,attempt) for attempt in attempts):raise ProtocolError('reconciliation_required')
+        # Only recorded success suppresses another attempt. Uncertainty belongs
+        # to the old attempt's history, not the job's future eligibility.
+        if any(self._submission_state(db,attempt)['state']=='accepted' for attempt in attempts):
+            raise ProtocolError('already_applied')
 
     def _assert_no_owner(self, db, job_id, exclude_session=None):
         if self._has_local_schema(db):
@@ -300,7 +303,6 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if lease:
             if lease['state']=='quarantined' or datetime.fromisoformat(lease['expires_at'])<=datetime.fromisoformat(self.now()):raise ProtocolError('reconciliation_required')
             raise ProtocolError('owned_elsewhere')
-        if db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id WHERE j.status IN ('submission_unknown','running')",(job_id,)).fetchone():raise ProtocolError('reconciliation_required')
 
     def _eligible(self, db, job_id, settings=None, exclude_session=None):
         job=self._get(db,'jobs',job_id)
@@ -313,7 +315,6 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         self._assert_not_suppressed(db,job_id)
         if db.execute('SELECT 1 FROM job_archives WHERE job_id=?',(job_id,)).fetchone():raise ProtocolError('job_archived')
         self._assert_no_owner(db,job_id,exclude_session)
-        if job['status']=='interrupted': raise ProtocolError('reconciliation_required')
         if job['eligibility']!='ready': raise ProtocolError('not_ready')
         return job
 
@@ -483,7 +484,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             db.execute('INSERT OR IGNORE INTO submission_ledger VALUES (?,?,?,?)',(a['job_id'],person,evidence,now))
         db.execute('UPDATE run_jobs SET state=? WHERE run_id=? AND job_id=?',(outcome,a['run_id'],a['job_id']))
         # A late reconciliation may NEVER release a newer owner's browser.
-        state='released' if quiescent and outcome!='submission_unknown' else 'quarantined'
+        # Browser ownership and employer submission evidence are independent.
+        state='released' if quiescent else 'quarantined'
         db.execute('UPDATE browser_leases SET state=? WHERE profile=? AND generation=? AND attempt_id=?',(state,a['browser_profile'],a['fence'],a['id']))
         if local_session(db,a['id']):
             # The host must stop the owned browser before freeing this workspace.
@@ -542,8 +544,5 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             job=self._get(db,'jobs',job_id)
             self._assert_not_suppressed(db,job_id)
             self._assert_no_owner(db,job_id)
-            if job['status'] in ('submission_unknown','running'):raise ProtocolError('reconciliation_required')
-            if job['status'] not in ('failed','blocked','interrupted','ready_for_review','needs_review'):raise ProtocolError('not_retryable')
-            if db.execute("SELECT 1 FROM browser_leases l JOIN application_attempts a ON a.id=l.attempt_id WHERE a.job_id=? AND l.state!='released'",(job_id,)).fetchone():raise ProtocolError('reconciliation_required')
             db.execute("UPDATE jobs SET status='queued',updated_at=? WHERE id=?",(self.now(),job_id))
             return dict(self._get(db,'jobs',job_id))

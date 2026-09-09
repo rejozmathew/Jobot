@@ -92,6 +92,7 @@ class SessionServices:
                     WHERE EXISTS (SELECT 1 FROM application_attempts a WHERE a.job_id=r.id)
                        OR EXISTS (SELECT 1 FROM application_sessions s WHERE s.job_id=r.id AND s.ended_at IS NOT NULL)
                     LIMIT 1''',(job_id,)).fetchone())
+                session_metadata['application_kind']='reattempt' if session_metadata['fresh_employer_storage'] else 'first_attempt'
                 db.execute('''INSERT INTO application_sessions(id,request_id,request_key,job_id,identity_id,
                     driver_id,workspace_id,state,reason,requested_at,preparing_at,driver_seen_at,metadata_json)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',

@@ -177,7 +177,7 @@ async def submit(page,call,package,ownership,config,target_id,activate,*,seconds
         event('submission_observation','pending','Confirmation not captured; preserve the owned page for inspection')
         return {'status':'submission_unknown','attempt_id':ownership['attempt_id'],'reason':click_error or 'confirmation_not_captured',
                 'evidence_path':str(record_path),'image_path':record.get('image_path'),'diagnostics':record['diagnostics'],
-                'next_step':'Read the owned screenshot or snapshot, or reconcile direct user confirmation. Do not submit again.'}
+                'next_step':'Read the owned screenshot or snapshot, or reconcile direct user confirmation. Do not replay Submit in this attempt. A new user application request can start a fresh attempt.'}
     finally:
         if aid:owned('action_end',action_id=aid,status='failed')
         remove()

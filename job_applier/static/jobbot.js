@@ -102,6 +102,7 @@ function renderSessions(v){
   const candidate=v.candidates.find(c=>c.id===s.identity_id)||{};
   const metadata=s.metadata||{},n=el('div',undefined,'attempt');
   n.append(postingHeading(job),badge(s.state));
+  if(metadata.application_kind)n.append(badge(metadata.application_kind==='reattempt'?'Reattempt':'First attempt'));
   if(candidate.email)n.append(el('p',candidate.email));
   const progress=renderProgress(s.progress||{debug:s.steps||[]},s.id),debug=progress.querySelector('.debug-details');n.append(progress);
   debug.append(el('p',`Host ${s.host_alive?'running':'offline'} · Driver ${s.driver_recently_active?'recently active':'idle or disconnected'} · Writer ${s.writer_state}`));
@@ -122,8 +123,8 @@ function renderSessions(v){
   $('local-sessions').append(n);
  }
 }
-function canQueueAnswers(group){return !group.pending_count&&group.browser_stopped&&['blocked','failed','interrupted','ready_for_review','needs_review','queued'].includes(group.status)&&group.retry?.state!=='queued';}
-function answerError(error){return ({unanswered_questions:'Answer every required question before queueing a retry.',answer_revision_conflict:'This answer changed elsewhere. Refresh and review the latest saved answer.',question_changed:'The employer changed this question. Review its current choices.',owned_elsewhere:'Save your answers now; queue a retry after the current application closes.',reconciliation_required:'Submission needs to be verified before this application can retry.',already_applied:'This application was already submitted.'})[error.message]||error.message;}
+function canQueueAnswers(group){return !group.pending_count&&group.browser_stopped&&!['applied','already_applied'].includes(group.status)&&group.retry?.state!=='queued';}
+function answerError(error){return ({unanswered_questions:'Answer every required question before queueing a retry.',answer_revision_conflict:'This answer changed elsewhere. Refresh and review the latest saved answer.',question_changed:'The employer changed this question. Review its current choices.',owned_elsewhere:'Save your answers now; queue a retry after the current application closes.',reconciliation_required:'The previous browser must finish closing before another attempt can start.',already_applied:'This application was already submitted.'})[error.message]||error.message;}
 async function saveAnswerGroup(group,queue){
  const changes=group.questions.filter(q=>state.answerDrafts.has(q.id)).map(q=>{const draft=state.answerDrafts.get(q.id);return {question_id:q.id,answer:draft.value,expected_revision:draft.revision};});
  let saved=false;
@@ -173,7 +174,7 @@ function renderAnswers(v){
    card.append(label);
   }
   const actions=el('div',undefined,'answer-actions');const save=el('button','Save answers');save.type='button';save.onclick=()=>saveAnswerGroup(group,false);
-  const retry=el('button','Save and queue retry','primary');retry.type='button';retry.disabled=!group.browser_stopped||['applied','already_applied','submission_unknown'].includes(group.status);retry.onclick=()=>saveAnswerGroup(group,true);actions.append(save,retry);card.append(actions);
+  const retry=el('button','Save and queue retry','primary');retry.type='button';retry.disabled=!group.browser_stopped||['applied','already_applied'].includes(group.status);retry.onclick=()=>saveAnswerGroup(group,true);actions.append(save,retry);card.append(actions);
   if(!group.browser_stopped)card.append(el('small','Save your answers to continue in the active application.'));
   if(group.retry?.state==='queued')card.append(el('small','Ready for pickup by your next application batch.'));
   const superseded=group.questions.filter(q=>q.state==='superseded');

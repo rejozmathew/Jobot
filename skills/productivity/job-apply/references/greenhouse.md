@@ -29,7 +29,9 @@ A fresh employer “Invalid security code”, “Expired security code” or req
 field rejection captured after Submit can return `submission_rejected` and
 `submission_pending:false`. Correct it in the owned session, request/fill a fresh
 code if appropriate and submit with a new intent. Old errors, missing responses
-and a generic failed reconciliation do not authorize another submission.
+and a generic failed reconciliation do not prove that the same click can be
+replayed. A new application request follows the shared retry policy: preserve
+this attempt and start a fresh one, without a non-submission confirmation gate.
 
 Normal observations persist unambiguous posting/Simplify company and role
 metadata into the existing job record, preserving explicit labels. Progress uses

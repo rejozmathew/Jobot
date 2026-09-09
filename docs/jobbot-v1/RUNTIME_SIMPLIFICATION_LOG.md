@@ -1,5 +1,39 @@
 # Runtime simplification implementation log
 
+## Shared retry policy and recovery documentation - 2026-09-09
+
+The current request policy is [RETRY_POLICY.md](RETRY_POLICY.md). Match the URL
+to its durable job and start another attempt whenever a new request arrives
+without recorded success. Failed, stopped, interrupted and submission-unknown
+outcomes are retained as earlier attempt history. They require no special
+unblocker or proof of non-submission. This applies to every ATS and proprietary
+form, with or without login.
+
+The shared service, local start/retry, native request identity, legacy history
+reader and saved-answer queue now follow that decision. New native user turns
+distinguish application requests; repeated calls in the same request reuse its
+session. Ordinary browser cleanup uses one stop/pause implementation before a
+fresh attempt obtains a target. Heartbeats remain telemetry. Pending dispatch
+still prevents automatic Submit replay inside its own active attempt. Earlier
+entries defending a cross-attempt uncertainty ban are superseded by this policy.
+
+The preceding six recovery/progress tracks were committed at `184717e`:
+platform-appropriate initial filling, shared committed-selection handling,
+private segmented verification, fresh employer rejection within an attempt,
+job label enrichment, and meaningful stage/task progress. Their design,
+callers and validation are in [APPLICATION_RUNTIME.md](APPLICATION_RUNTIME.md),
+[GREENHOUSE_RECOVERY_PLAN.md](GREENHOUSE_RECOVERY_PLAN.md) and
+[GREENHOUSE_RECOVERY_VALIDATION_2026_09_09.md](GREENHOUSE_RECOVERY_VALIDATION_2026_09_09.md).
+These documents also distinguish shared behavior from Workday/Greenhouse form
+recognition and retain the earlier deployment and evidence limitations.
+
+For the retry-policy follow-up the user prohibited new tests and further
+regression execution. Three obsolete test functions representing four cases
+were deleted; obsolete blocking assertions were removed from two broader tests.
+No new tests were added. Source/diff inspection is the review basis. The earlier
+761 passing cases belong to `184717e` and do not validate this later change.
+No production attempt was rewritten or live application used as a fixture.
+
 ## Proposed shared form recovery and human answers — 2026-09-08
 
 Employer-hosted Greenhouse validation exposed a gap between shared dropdown

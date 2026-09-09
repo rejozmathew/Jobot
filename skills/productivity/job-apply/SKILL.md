@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.6
+version: 0.5.7
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -39,7 +39,7 @@ the user's permissions, then return that choice to the helper or scoped browser.
 Spend additional time on a plausible recovery and record its timing so later
 engineering can improve the slow path. Ask the user only for information or
 verification actually requiring them. Real ownership, writer settlement,
-eligibility and uncertain-submission boundaries still apply. A helper's
+eligibility and the current attempt's submission-dispatch boundaries still apply. A helper's
 inability alone is never evidence that the application cannot proceed.
 User corrections are instructions to adjust and continue the authorized task.
 An apology or discovery of an executor mistake is not a stop request. Stop only
@@ -115,7 +115,8 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
 
 1. Verify the actual role remains eligible and the selected identity, account
    email, contact email, resume and mailbox are the approved ones. Exclusions,
-   unknown required facts and same-job submission uncertainty remain binding.
+   unknown required facts remain binding. A previous unfinished attempt does not
+   block this newly requested attempt; only recorded successful submission does.
    At a posting or application-method chooser, prefer an observed enabled
    Apply Manually, then Apply Now/Apply for this Job/Start Application/Apply.
    Follow the direct application link before an optional Chat to Apply or
@@ -249,7 +250,8 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    a request to audit the completed application.
 8. Use `finish` with the truthful outcome, evidence and observed quiescence.
    The host isolates its browser before making the workspace available again.
-   A missing post-click confirmation is `submission_unknown`; never click again.
+   A missing post-click confirmation is `submission_unknown`; do not replay that
+   click in the same attempt. A new user request can start a fresh attempt.
 
 After an uncertain click, use owned screenshot, snapshot and confirmation
 observation. The session stays open until completion, Stop, or an explicitly
@@ -269,7 +271,8 @@ document and frame. Correct the rejected field or request a fresh email code,
 then use `browser submit` again in the same session; it records a new authorized
 intent. The previous click remains recorded as executed. A stale error, failed
 helper, absent confirmation or a reconciliation label of `failed` cannot unlock
-retry. Do not manufacture rejection events from a screenshot or arbitrary label;
+another click in this same attempt. They do not block a separately requested
+fresh attempt. Do not manufacture rejection events from a screenshot or arbitrary label;
 unresolved or contradictory acceptance evidence stays protected.
 
 Headed sessions start maximized. Obscured clicks return viewport/covering metadata
@@ -303,7 +306,8 @@ the same profile, session and attempt. Read status until connected, inspect the
 page, recover sign-in/form progress and continue. A helper's automatic recovery
 limit hands the decision back to the executor; it does not forbid another
 evidence-based recovery. Reload/restart never authorize repeating a possibly
-submitted application. Pending submission remains observation/reconciliation only.
+submitted application. Pending submission remains observation/reconciliation
+within that attempt; a new user application request follows the shared retry policy.
 
 `finish` parameters are `{"outcome":"blocked","evidence":"<observed reason>",
 "quiescent":true}` (or another supported truthful outcome). Do not add invented
@@ -362,7 +366,8 @@ with its `job_id` and returned `request_id` (CLI `--job-id` and `--request-id`).
 On the fresh attempt, use `browser apply_answers` with current observed refs to
 apply exact saved answers, then continue the ordinary ATS procedure. No old
 browser ref is reusable across attempts. Changed questions/choices need a new
-answer. Applied jobs and uncertain submissions cannot enter this retry path.
+answer. Recorded successful submissions are excluded from this retry path;
+unfinished attempts, including submission-unknown history, remain retryable.
 
 ## Mail and private identity
 
@@ -420,8 +425,17 @@ provider-generated password; use the configured reusable employer credential.
 Pause/stop acknowledgement means the host stopped its owned browser activity.
 Pending control is not acknowledgement. Attach by another driver requires that
 pause to finish, then starts a fresh owned target; it does not inherit the old
-page ID. Retry creates a new attempt only after scoped stop/reconciliation and
-no uncertain submission. For all ATS types, a new session on a previously
+page ID. Retry starts a fresh attempt from the beginning and stops an older
+owned browser as part of that lifecycle. It requires no submission reconciliation
+or proof that the previous attempt was not submitted. This is the same policy
+for every ATS and proprietary URL. The runtime matches the URL to the existing
+job, classifies `application_kind` as `first_attempt` or `reattempt`, retains
+previous attempts, and suppresses ordinary duplicates only for recorded success.
+Native start calls use the observed user turn as request identity when available.
+Repeated calls in that request reuse its session. Portable callers may supply
+`--request-id` for a distinct request; `retry` explicitly requests a fresh attempt.
+Without a request ID, start reuses this driver's active session and creates a new
+one once it ends. A new conversation starts its own attempt. For all ATS types, a new session on a previously
 attempted job clears the assigned employer origin's cookies and site storage
 before opening it. This also applies to a new request/conversation and queued
 answer retries. Simplify's separate login and extension state remain; the
@@ -429,6 +443,8 @@ runtime does not create a completely empty profile or clear unrelated identity
 providers. Readiness records the cleared origin. A paused-attempt attach retains
 browser storage. Account, credential and submission history always survive.
 Changing conversations alone is not a separate browser-isolation mechanism.
+The authoritative decision table and caller responsibilities are in
+[RETRY_POLICY.md](../../../docs/jobbot-v1/RETRY_POLICY.md).
 Heartbeats report activity and never extend local
 permission. A normal reasoning gap is allowed; stalled/disconnected activity is
 visible. No progress is inferred from a live host or recent heartbeat.

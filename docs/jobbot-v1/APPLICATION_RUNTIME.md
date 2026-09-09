@@ -5,6 +5,14 @@ September 2026. Older HTTP accept/claim/lease startup is **compatibility only**.
 Historical failures in REVIEW_HANDOFF remain historical evidence. Actual delivery
 checks and unresolved acceptance are in [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md).
 
+The current cross-portal request and retry contract is in
+[RETRY_POLICY.md](RETRY_POLICY.md). A new request matches the existing job and
+starts a fresh attempt unless successful submission is recorded. Failed,
+interrupted and submission-unknown history remain intact and do not prevent
+another attempt. Actual browser cleanup is a separate lifecycle responsibility.
+This September 9 follow-up supersedes earlier cross-attempt uncertainty guards;
+the previous 761-test checkpoint does not validate this later change.
+
 The [first-principles stop-condition audit](STOP_CONDITION_AUDIT.md) challenges
 the necessity and placement of the restrictions described here. It distinguishes
 current behavior from proposed simplification and includes a source catalog and
@@ -156,9 +164,11 @@ time, from the completed `browser.submit` action. The observer must see a new
 scoped validation error after dispatch; baseline errors, cross-document errors,
 missing confirmation and arbitrary failed outcomes do not resolve pending state.
 The previous dispatch is never relabeled not-executed. A resolved rejection allows
-correction and a new authorized intent; accepted or unknown submission suppresses
-retry through service intake/retry, local sessions and host write guards.
-Contradictory confirmation retains acceptance/uncertainty protection.
+correction and a new authorized intent within the same attempt. Pending or accepted
+dispatch state prevents automatic Submit replay within that attempt. Across
+attempts, only recorded success suppresses a new request: unfinished and unknown
+history require no reconciliation. Accepted confirmation remains success evidence
+even if a later outcome label contradicts it.
 
 `enrich_job` and owned `observe_job_metadata` fill missing company/title from one
 scoped posting or unambiguous Simplify job card, preserving nonempty labels and
@@ -212,7 +222,8 @@ occupied workspace, bounded by configuration. No renewal loop grants permission.
 | HTTP | Existing authenticated compatibility API; cannot seize locally configured profiles/sessions |
 
 One absolute configured `db_path` remains authoritative. `legacy_history_paths`
-are read-only duplicate/uncertainty sources; missing sources fail closed. There
+are read-only successful-submission sources; unfinished history does not suppress
+a new request. Missing configured sources fail closed. There
 is no cwd-selected database or second outcome store. `prepare_local` checks the
 instance and makes an integrity-checked SQLite backup before additive migration
 16. Existing accounts, attempts and submissions remain. Transactions are short
@@ -313,7 +324,8 @@ Generic local service calls use `run_applier.py managed call --config <path>
    authorization; exclusions and duplicate policy still apply.
 2. `SessionServices.reserve_session` atomically records preparing/capacity_wait,
    candidate, resume, request/model evidence and an idempotency key. No attempt is
-   created before readiness; repeated start returns the same session/target.
+   created before readiness; repeated start for the same request returns that
+   session/target. A fresh request starts a new attempt under RETRY_POLICY.
 3. `ensure_host` automatically launches the no-model host. It checks ownership,
    launches the configured browser, verifies actual process arguments, profile,
    mode, endpoint and fresh operable target. It observes Simplify on the application
@@ -330,7 +342,8 @@ Generic local service calls use `run_applier.py managed call --config <path>
    and selected-asset verification remain intact.
 7. Existing submission_intent precedes one submit; finish records exact employer
    evidence. The host stops its browser before releasing the slot. Missing
-   confirmation means submission_unknown. The executor must not repeat Submit.
+   confirmation means submission_unknown. The executor must not replay Submit
+   automatically within that attempt. A later user request can start a fresh one.
 
 Native Hermes jobbot operations are convenience calls to the same functions.
 Hooks can record observed provider/model/effort; requested settings remain
@@ -349,7 +362,7 @@ Detect the application platform automatically—Workday, Greenhouse, iCIMS, or a
 
 I authorize submission. Continue through supported recoveries and handle required fields using approved facts. Ask only for an unresolved verification challenge or missing required information. Do not change code, skills, or configuration.
 
-Follow the canonical submission and confirmation procedure without adding a final resume or field audit. Never repeat an uncertain submission.
+Follow the canonical submission and confirmation procedure without adding a final resume or field audit. Do not automatically replay an uncertain Submit within this attempt. A new user request can start a fresh attempt unless success is recorded.
 
 Report the outcome and evidence source—or the exact unresolved blocker—with total elapsed time and session/attempt IDs.
 ```
@@ -384,7 +397,7 @@ This is an origin-scoped reset, not a new empty browser profile: unrelated origi
 including separate third-party identity-provider origins, are preserved.
 
 Validation passed all 694 managed cases before removing 15 redundant ATS URL
-combinations. The suite now collects 679 cases; the eight retained retry cases
+combinations. That storage-cleanup checkpoint collected 679 cases; the eight retained retry cases
 passed again after that test-only pruning. Browser lifecycle fixtures now wait
 for actual pause acknowledgement and continue a normal authentication `waiting`
 response, retaining their account-count, ownership and confirmation assertions.
@@ -401,8 +414,9 @@ account that rejects manual sign-in.
 Pause/stop acknowledgement follows actual owned process-tree termination and
 abortion of active actions. Startup observes pending control before connecting.
 Explicit attach requires completed pause and creates a fresh target for the new
-driver on the same attempt; the previous driver is rejected. Retry requires ended
-ownership and no unresolved submission dispatch. After a crash, a replacement host
+driver on the same attempt; the previous driver is rejected. Retry stops the
+previous browser through shared control, then starts a fresh attempt. An old
+unresolved submission dispatch does not prevent this new request. After a crash, a replacement host
 checks recorded process identities before classifying the lost session. It never
 replays an uncertain command. Orphan activity/unconfirmed host launch remains
 isolated with an actionable reason; a definitely unstarted failure releases its slot.
@@ -416,8 +430,9 @@ startup time are available separately. Ten minutes is a measured target.
 
 Two distinct configured directories/endpoints allow two independent sessions.
 A third gets capacity_wait and occupants; repeated start retries capacity with
-the same request. Paused sessions retain their slot. Same-job uncertainty blocks
-that job across email identities, not another workspace. concurrency_limit caps use.
+the same request. Paused sessions retain their slot until stop or a new application
+request closes that session. Same-job successful submission suppresses duplicates
+across email identities. Earlier uncertainty does not. concurrency_limit caps use.
 
 ### Headless execution and visual evidence
 
@@ -465,19 +480,19 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 
 | Component | Scope and consumer |
 |---|---|
-| application_runtime.py | Shared startup/control and actionable platform guidance; scoped browser exceptions, field-task attribution, Autofill timing and answer/metadata capture |
-| managed_sessions.py / migration 15 | Existing ledger session/workspace/account coordination, history-derived retry storage policy and mixed-version guards |
+| application_runtime.py | Shared request identity, start/retry and control_session stop/pause lifecycle; successful legacy-history matching, platform guidance, scoped browser exceptions, field-task attribution, Autofill timing and answer/metadata capture |
+| managed_sessions.py / migration 15 | Existing ledger session/workspace/account coordination, first-attempt/reattempt metadata, history-derived retry storage policy and mixed-version guards |
 | workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, scoped JSON dispatch; no model |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
 | managed_identity.py | Shared Workday host/site/full-requisition parser, comparison identity, history equivalence, diagnostic match states and job_requisition for confirmation; no display-location/title/step allowlist |
-| managed_shared.submission_pending / managed_events._submission_pending | One dispatch interpretation for service attempts/context, browser/Workday, host stop/finish and answer recovery; ordered existing ledger events, no new database |
+| managed_shared.submission_state / submission_pending and managed_events._submission_state / _submission_pending | One per-attempt evidence projection from existing ordered events; pending/accepted protects current-attempt dispatch, accepted alone suppresses a new requested attempt |
 | workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
 | browser_controls.py / browser_helpers/form_controls.js | Shared form reader, exact committed-selection verification, posting metadata and document-local private verification groups; used by browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
-| managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent |
+| managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
 | application_answers.py | Interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | Shared authorized dispatch capture, native/Simplify confirmation and fresh employer rejection tied to action/document/frame; local browser and Workday callers |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
@@ -486,11 +501,11 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | managed_credentials.py / managed_documents.py / hermes_gmail.py | Private account and transient verification filling, correlated configured mail, complete-group screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |
 | managed_shared.py / managed_events.py / managed.py | Common submission resolution, strict evidence ledger, progress convenience, existing job metadata enrichment and previewable backfill |
 | managed_reports.py / managed_sessions.py / managed_views.py | Stage/task projection from the same events and actions, explicit waits/action overlap, shared labels and first-Autofill timing |
-| hermes_plugin.py / integration entry | Convenience, actual session/model and optional messaging capability metadata, observed human-reply provenance; no alternative form logic |
+| hermes_plugin.py / integration entry | Convenience, actual conversation/model and observed request-turn identity, current session binding after retry, optional messaging capability metadata and observed human-reply provenance; no alternative form logic |
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js / jobbot.css | Shared posting labels and stage/task progress, persistent expansion and collapsed technical debug, independent application controls |
 
-Common policy is job-apply v0.5.6; Workday policy is workday-simplify v0.3.14, in
+Common policy is job-apply v0.5.7; Workday policy is workday-simplify v0.3.15, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision
@@ -613,8 +628,9 @@ the configured candidate; an ordinary authorized harness starts each with the
 returned job/request IDs. `session_connected` marks its request started. No
 scheduler or extra LLM is created. `browser apply_answers` checks current refs and
 the exact question before applying a saved answer and recording its provenance.
-Same-job applied/uncertain history and ownership gates still block retries across
-email identities. Queue changes cannot reconcile a submission.
+Same-job recorded success suppresses retries across email identities. Actual
+browser ownership must end before queueing. Uncertain history remains retryable;
+queueing does not rewrite or reconcile the earlier submission evidence.
 
 ### Learning from successful and blocked applications
 
@@ -715,7 +731,7 @@ the latter cannot be traversed using ordinary parent-document selectors.
 | Frame discovery and routing | Associate the frame with the owned parent target and verified employer/requisition. Do not select arbitrary frames, ads, challenges or another job solely because they contain inputs. |
 | Control references | Bind each observed ref to its document/frame and observation. Resolve selection, checking, filling and pointer validation in that document; reject detached, navigated or ambiguous frames. Keep Simplify panel refs distinct from employer-form refs. |
 | Value operations | Reuse native-select and associated-menu behavior, including exact option matching and read-back. Preserve frame offsets and coverage checks for pointer input; do not substitute guessed coordinates or force clicks. |
-| Submission and evidence | Route the observed frame control through the existing one-click submission boundary. Arm confirmation capture before dispatch, retain parent Simplify and native frame evidence with their sources, and never replay an uncertain submission. |
+| Submission and evidence | Route the observed frame control through the existing one-click submission boundary. Arm confirmation capture before dispatch, retain parent Simplify and native frame evidence with their sources, and do not automatically replay an uncertain dispatch within the same attempt. A new requested attempt follows the shared retry policy. |
 | Redirects and job identity | Recognize the same requisition across verified posting/form routes, including meaningful query identifiers. Reject conflicting job identifiers; do not authorize every same-host path. Link verified aliases through the existing identity system without rewriting historical jobs. |
 | ATS recognition | Use observed embedding evidence for custom hosts. Recognition may select ATS-specific procedures, but generic form operations should not depend on a Greenhouse hostname or employer name. |
 | Answer policy | Present approved facts, explicit user answers and existing answer defaults consistently to the executor. Preserve contrary facts, question-type boundaries and configured exclusions. Record whether an answer came from a fact, user instruction or approved default. |
@@ -755,8 +771,8 @@ for a later batch; **Save and retry** requests an ordinary managed continuation.
 Keep unresolved jobs out of that batch. Match saved answers to fresh questions
 and options; old DOM references must not survive into a new session. Answers are
 application-scoped unless the user explicitly approves broader reuse. An
-uncertain prior submission remains a reconciliation case, not an answer-driven
-retry.
+uncertain prior submission remains truthful history and can receive a fresh
+answer-driven attempt unless successful submission is recorded.
 
 Hermes Discord can be an optional notification/reply channel over those same
 question records, rather than a separate workflow or bot service. Deployment

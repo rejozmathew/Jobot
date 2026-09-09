@@ -138,21 +138,6 @@ def test_messaging_capability_is_session_metadata_not_a_core_discord_dependency(
     assert context['human_input']['fallback']=='answer_queue'
 
 
-@pytest.mark.parametrize('outcome',['submission_unknown','failed'])
-def test_answers_never_make_uncertain_submission_retryable(tmp_path,outcome):
-    service,session,owner,asset,_=connected(tmp_path)
-    question=request(service,owner)
-    service.answer_questions(answers=[{'question_id':question['id'],'answer':'yes','expected_revision':0}])
-    service.report_upload(**owner,asset_id=asset['id'],status='upload_attempted',evidence='Synthetic approved upload dispatch')
-    service.report_upload(**owner,asset_id=asset['id'],status='upload_confirmed',evidence='Synthetic uploaded file name verified')
-    service.submission_intent(**owner,fixture=True,evidence='Synthetic submission intent; no employer contacted')
-    with pytest.raises(ProtocolError,match='submission_pending_read_only'):service.park_questions(**owner)
-    service.finish(**owner,outcome=outcome,evidence='Synthetic uncertain dispatch',quiescent=False)
-    service.session_stopped(session['id'],reason='Synthetic browser stopped',browser_stopped=True)
-    with pytest.raises(ProtocolError):service.queue_answer_retries(job_ids=[session['job_id']],identity_id='candidate')
-    assert service.answer_retries(identity_id='candidate')['requests']==[]
-
-
 def test_answers_are_not_reused_for_another_job(tmp_path):
     service,session,owner,asset,jobs=connected(tmp_path)
     first=request(service,owner)

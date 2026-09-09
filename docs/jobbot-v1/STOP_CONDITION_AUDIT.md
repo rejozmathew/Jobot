@@ -2,6 +2,13 @@
 
 Assessment date: 2026-09-09. **Historical assessment; implementation is recorded below.**
 
+Later decision: [RETRY_POLICY.md](RETRY_POLICY.md) supersedes this assessment's
+cross-attempt uncertainty restrictions, including the original G05 and G16
+recommendations. A new application request can start another attempt unless
+success is recorded. Submission uncertainty remains evidence for its own attempt;
+actual browser cleanup is separate. The historical findings below are retained
+to explain the evolution, not to reintroduce the superseded retry policy.
+
 ## Implementation follow-up — 2026-09-09
 
 The assessment and companion catalog below describe the original source snapshot.

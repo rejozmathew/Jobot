@@ -72,7 +72,7 @@ def resolve_failure_reason(db, attempt, events=None):
     # Submission unknown must override earlier pre-submit failures
     if outcome == 'submission_unknown':
         ev = (attempt.get('evidence') or '').strip()
-        return ev if ev else 'Submit clicked; employer confirmation not verified. Do not retry.'
+        return ev if ev else 'Submit clicked; employer confirmation was not recorded. A new application request starts a separate attempt.'
 
     ev_rows = events
     if ev_rows is None and db is not None:

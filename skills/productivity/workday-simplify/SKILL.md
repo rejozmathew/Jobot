@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.14
+version: 0.3.15
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -208,7 +208,9 @@ from scoped posting metadata; existing labels and historical outcomes remain.
    authorized; finish without another review or email wait.
 8. `applied`: read the report; do not submit or finish again. `already_applied`
    requires exact native evidence and no new submit. `submission_unknown` allows
-   observation/reconciliation only. `ready_for_review` applies only in review mode.
+   observation/reconciliation within that attempt. A new user application request
+   starts a fresh attempt under the shared job-apply retry policy unless success
+   is recorded. `ready_for_review` applies only in review mode.
 
 No in-run PDF extraction, resume search, career/education reconstruction or shared
 code/skill changes. Never compete with active writers; recover unknown state

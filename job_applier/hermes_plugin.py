@@ -279,6 +279,7 @@ class PluginController:
             observed=self.runtime.get(sid,{})
             metadata={k:observed.get(k) for k in ('model','provider','reasoning_effort','response_model')}
             metadata['human_input']=self.human_input.get(sid,{'messaging':{'available':False}})
+            if self.user_turns.get(sid):metadata['request_turn_id']=self.user_turns[sid]['turn_id']
             result=start(cfg,driver_id=sid,metadata=metadata,**params)
             self.local_sessions[sid]=result['session_id'];return result
         session_id=params.pop('session_id',None) or self.local_sessions.get(sid)
@@ -299,7 +300,7 @@ class PluginController:
         operation=aliases.get(op,op)
         if operation=='event':params.setdefault('event_id',uid())
         result=session_call(cfg,session_id,operation,params,sid)
-        self.local_sessions[sid]=session_id
+        self.local_sessions[sid]=result.get('session_id',session_id)
         return result
 
     def close(self):
