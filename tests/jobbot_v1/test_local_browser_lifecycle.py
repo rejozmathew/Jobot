@@ -83,9 +83,10 @@ def test_headed_cold_start_gap_parallel_stop_and_crash(tmp_path):
             assert result['committed']
         before=service.session_status(a['session_id'])['last_verified_progress_at']
         time.sleep(65)  # Real elapsed time beyond the old 60-second lease, no heartbeat call.
+        assert service.session_status(a['session_id'])['last_verified_progress_at']==before
         result=session_call(cfg,a['session_id'],'browser',{'method':'fill','selector':'#fixture','value':'after gap'},a['driver_id'])
         assert result['committed']
-        assert service.session_status(a['session_id'])['last_verified_progress_at']==before
+        assert service.session_status(a['session_id'])['last_verified_progress_at']>before
         observations['reasoning_gap_seconds']=65
         # Crash one actual host. Windows owns and kills its whole browser tree.
         record=workspace_record(service,a['workspace_id'])

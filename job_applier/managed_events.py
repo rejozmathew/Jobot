@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import re
 import time
 from datetime import datetime, timezone
 from .managed_shared import ProtocolError, dumps
@@ -13,16 +14,77 @@ EVENT_TYPES = frozenset({'tool_started','tool_finished','model_finished','naviga
 PROGRESS_TYPES = frozenset({'navigation_verified','field_verified','account_verified'})
 
 
+def field_task_context(question,*,page='form',document=''):
+    """Question labels are semantic context; selected/candidate values are excluded."""
+    question=safe_text(question).strip().rstrip('*').strip()
+    if not question or question=='[REDACTED]':return {}
+    key=hashlib.sha256(dumps([page,document,question]).encode()).hexdigest()[:20]
+    page=re.sub(r'[^A-Za-z0-9_.:/-]','_',str(page))[:120] or 'form'
+    return {'page':page,'field':key,'category':'required_question','field_label':question,
+            'stage_id':'remaining_questions','task_id':'field:'+key,'parent_id':'remaining_questions',
+            'activity':'Review and fill “'+question+'”' if '?' in question else 'Fill '+question[:1].lower()+question[1:],
+            'task_state':'in_progress','source':'shared_form'}
+
+
 def seconds(end, start):
     return (datetime.fromisoformat(end)-datetime.fromisoformat(start)).total_seconds()
 
 
 class EventServices:
+    def progress(self,attempt_id,*,worker_id,fence,stage,activity,task_id=None,state='in_progress',
+                 evidence=None,next_step=None,source='executor',action_id=None):
+        """Convenience for executor intent; strict external event timestamps are unchanged."""
+        from .managed_reports import STAGE_TITLES
+        from .managed_shared import uid
+        if stage not in STAGE_TITLES or state not in ('in_progress','completed','recovering','awaiting_input','unsuccessful'):
+            raise ProtocolError('invalid_application_progress')
+        if not isinstance(activity,str) or not activity.strip():raise ProtocolError('progress_activity_required')
+        if state=='completed' and (not isinstance(evidence,str) or not safe_text(evidence).strip() or safe_text(evidence)=='[REDACTED]'):
+            raise ProtocolError('progress_completion_evidence_required')
+        task_id=task_id or 'activity:'+hashlib.sha256(activity.encode()).hexdigest()[:20]
+        if not isinstance(task_id,str) or not re.fullmatch(r'[A-Za-z0-9_.:/-]{1,120}',task_id):raise ProtocolError('invalid_progress_task_id')
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence)
+            return self._append_event(db,a,worker_id=worker_id,fence=fence,event_id=uid(),action_id=action_id,
+                event_type='checkpoint',observed_at=self.now(),duration_seconds=None,payload={
+                    'stage_id':stage,'parent_id':stage,'task_id':task_id,'task_state':state,'phase':stage,
+                    'activity':activity,'evidence':evidence,'next_step':next_step,'source':source})
+
     def _submission_pending(self, db, attempt):
         from .managed_shared import submission_pending
         if not attempt['submit_intent_at']:return False
-        rows=db.execute('SELECT payload_json,stale FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt['id'],)).fetchall()
+        rows=db.execute('SELECT payload_json,stale,observed_at FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt['id'],)).fetchall()
         return submission_pending(attempt,rows)
+
+    def record_submission_rejection(self,attempt_id,*,worker_id,fence,proof):
+        """Resolve only the fresh employer response for the current captured click."""
+        from .managed_shared import submission_state
+        if not isinstance(proof,dict):raise ProtocolError('submission_rejection_unproven')
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence)
+            rows=db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt_id,)).fetchall()
+            current=submission_state(a,rows);dispatch=current['dispatch']
+            if current['state']=='rejected' and all(current['resolution'].get(k)==proof.get(k) for k in ('dispatch_id','document_id','frame_id')):
+                return {'state':'rejected','submission_pending':False}
+            valid=(current['state']=='pending' and dispatch and proof.get('source')=='employer' and
+                proof.get('fresh_after_dispatch') is True and proof.get('reason_code') in ('invalid_security_code','expired_security_code','required_fields') and
+                all(dispatch.get(k) and proof.get(k)==dispatch[k] for k in ('dispatch_id','document_id','frame_id')))
+            try:
+                observed=datetime.fromisoformat(proof['observed_at'].replace('Z','+00:00'))
+                sent=datetime.fromisoformat(dispatch['observed_at'].replace('Z','+00:00'))
+                valid=valid and observed.tzinfo is not None and sent<=observed<=datetime.fromisoformat(self.now())
+            except (KeyError,TypeError,ValueError):valid=False
+            action=db.execute('SELECT * FROM managed_actions WHERE id=? AND attempt_id=?',(proof.get('dispatch_id'),attempt_id)).fetchone()
+            if not valid or not action or action['tool_name']!='browser.submit' or not action['ended_at']:
+                raise ProtocolError('submission_rejection_unproven')
+            payload={k:proof[k] for k in ('dispatch_id','document_id','frame_id','source','reason_code')}
+            payload.update(operation='submission_resolution',status='rejected',phase='submission',resolution='fresh_employer_rejection',
+                stage_id='submission',task_id='submit',parent_id='submission',task_state='recovering',
+                evidence='Current employer form explicitly rejected this captured submission',
+                activity='Application needs correction before submission',next_step='Correct the rejected field or request a fresh email code, then submit once.')
+            self._append_event(db,a,worker_id=worker_id,fence=fence,event_id='submission-rejection:'+proof['dispatch_id'],
+                action_id=proof['dispatch_id'],event_type='checkpoint',observed_at=proof['observed_at'],duration_seconds=None,payload=payload)
+            return {'state':'rejected','submission_pending':False,'dispatch_id':proof['dispatch_id']}
 
     def _append_event(self, db, a, *, worker_id, fence, event_id, action_id, event_type,
                       observed_at, duration_seconds, payload):

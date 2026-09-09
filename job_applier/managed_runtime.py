@@ -16,7 +16,11 @@ class RuntimeServices:
             payload=json.loads(row['payload_json'])
             if row['event_type'] in ('navigation_verified','field_verified'):return {}
             if row['event_type']=='field_context':
-                return {k:payload[k] for k in ('page','field','category')} if payload.get('field') else {}
+                return {k:payload[k] for k in ('page','field','category','field_label','stage_id','task_id','parent_id','activity','source')
+                        if k in payload} if payload.get('field') or payload.get('task_id') else {}
+            if payload.get('stage_id') and payload.get('task_id') and row['event_type'] in ('checkpoint','phase_changed'):
+                if payload.get('task_state') in ('completed','unsuccessful'):return {}
+                return {k:payload[k] for k in ('page','field','category','field_label','stage_id','task_id','parent_id','activity','source') if k in payload}
             # Completion describes action-start attribution, never current scope.
             # Keep legacy manual event support only when no semantic marker exists.
             if legacy is None and row['event_type']=='tool_finished' and payload.get('field'):
@@ -176,6 +180,12 @@ class RuntimeServices:
                 # URL. Workday login ownership depends on the full job redirect.
                 after_url=await page.evaluate('location.href')
                 after_scope=verify_url(after_url)
+                if after_scope and before_url==after_url:
+                    try:
+                        from .browser_controls import FORM
+                        metadata=await page.evaluate_function(FORM,{'method':'metadata'})
+                        self.observe_job_metadata(attempt_id,worker_id=worker_id,fence=fence,metadata=metadata)
+                    except Exception:pass  # Discovery does not affect writer/ownership evidence.
                 if settings.get('mode')=='pilot' and after.get('source')=='fixture':
                     raise ProtocolError('official_extension_observation_required')
                 stable=before_url==after_url and all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
@@ -237,6 +247,13 @@ class RuntimeServices:
                 if detected_platform != 'unknown':
                     db.execute('UPDATE application_attempts SET platform=? WHERE id=?',(detected_platform,attempt_id))
             self.action_end(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,status='success')
+            if quiescent and match['status']=='same_job' and obs.get('status') in ('complete','needs_review'):
+                with self.tx() as db:semantic=self._field_context(db,self._get(db,'application_attempts',attempt_id))
+                if semantic.get('stage_id')=='fill_application':
+                    self.event(attempt_id,worker_id=worker_id,fence=fence,event_id=uid(),event_type='checkpoint',observed_at=self.now(),
+                        payload=dict(semantic,task_state='completed',evidence='Simplify settled on the current page; remaining questions can be reviewed'))
+            from .browser_controls import next_operation
+            guidance=next_operation(detected_platform,obs)
             return {
                 'operation':'browser_observe',
                 'status':status,
@@ -247,7 +264,8 @@ class RuntimeServices:
                     obs.get('activity',{}).get('busy_indicator') and obs.get('activity',{}).get('waiting_for_input')),
                 'observed_browser_mode':observed_mode,
                 'platform':detected_platform,
-                'company':job['company'],
+                'company':self.job(job['id'])['company'],
+                'next_operation':guidance,
                 'target_id':target['target_id'],
                 'url':target['url'],
                 'observation':obs,

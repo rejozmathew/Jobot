@@ -148,7 +148,7 @@ async def recover_screen(r,mapping):
             return result(status='progress')
         if not fresh.get('auth'):
             from .application_answers import capture_answers
-            history=await capture_answers(r.page,r.config,r.package,r.owner,page=fresh.get('step','form'),source='mapped_recovery')
+            history=await capture_answers(r.page,r.config,r.package,r.owner,page=fresh.get('step','form'),source='mapped_recovery',call=r.call)
             if history.get('answers_added'):
                 r.event('checkpoint',{'operation':'answer_history','page':fresh.get('step','form'),'source':'mapped_recovery','evidence':history['answer_history_path']})
         if mode and mode==ui.get('mode'):
@@ -185,7 +185,9 @@ def record(r,state,reference,evidence):
         credential_ref=reference,request_id=str(uuid.uuid4()),evidence=evidence)
     r.package=r.call('application_context',attempt_id=r.owner['attempt_id'],worker_id=r.owner['worker_id'])
     r.event('account_verified' if state=='confirmed' else 'phase_changed',{
-        'phase':'authentication','activity':evidence,'status':state,'source':'Workday helper'})
+        'phase':'authentication','stage_id':'authentication','task_id':'workday:authentication',
+        'activity':'Sign in to the employer','task_state':'completed' if state=='confirmed' else 'in_progress',
+        'evidence':evidence,'status':state,'source':'Workday helper'})
 
 
 async def confirm_authenticated(r,observed):

@@ -141,7 +141,9 @@ def test_runner_records_meaningful_step_and_decision_without_poll_spam():
     events=[args for op,args in h.calls if op=='event' and args['event_type']=='phase_changed']
     assert len(events)==1
     assert events[0]['payload']['page']=='my_experience'
-    assert events[0]['payload']['activity']=='Waiting for Simplify to settle'
+    assert events[0]['payload']['activity']=='Fill my experience'
+    assert events[0]['payload']['stage_id']=='fill_application'
+    assert events[0]['payload']['task_id']=='workday:my_experience'
     assert result['status']=='waiting' and not h.clicks
 
 

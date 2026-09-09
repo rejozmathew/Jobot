@@ -1,6 +1,8 @@
 """Timing projections preserve wall time and report overlap instead of inventing speed."""
 from datetime import datetime,timedelta,timezone
 import json
+import hashlib
+import re
 from .managed_shared import ProtocolError
 from .managed_redaction import safe_payload
 from .managed_views import public_attempt,attempt_timing_state,resolve_failure_reason
@@ -20,11 +22,99 @@ def union_seconds(spans):
     return sum((end-start).total_seconds() for start,end in merged)
 
 
+STAGE_TITLES={'opening':'Open the job posting','authentication':'Sign in to the employer',
+    'fill_application':'Fill application','remaining_questions':'Complete remaining questions',
+    'email_verification':'Verify email','submission':'Submit application'}
+STAGE_ALIASES={'residual_fields':'remaining_questions','native_fallback':'remaining_questions','verification':'email_verification',
+    'my_information':'fill_application','my_experience':'fill_application','application_questions':'remaining_questions',
+    'voluntary_disclosures':'remaining_questions','self_identify':'remaining_questions','review':'submission','filling':'fill_application'}
+
+
+def application_progress(events,*,actions=(),now=None,ended_at=None,limit=12):
+    """Project semantic tasks before truncating; technical chronology stays in debug."""
+    now=instant(now) if isinstance(now,str) else now or datetime.now(timezone.utc)
+    until=instant(ended_at) if ended_at else now
+    stages={};tasks={};debug=[]
+    for raw in sorted(events,key=lambda row:(row.get('observed_at',''),row.get('recorded_at',''))):
+        item=dict(raw);payload=safe_payload(item.get('payload') or json.loads(item.get('payload_json','{}')))
+        item.pop('payload_json',None);item['payload']=payload
+        debug.append(item)
+        if item.get('stale'):continue
+        try:when=instant(item['observed_at'])
+        except (KeyError,TypeError,ValueError):continue
+        stage_id=payload.get('stage_id') or STAGE_ALIASES.get(payload.get('phase'),payload.get('phase'))
+        field=payload.get('field') or payload.get('field_key')
+        if not stage_id and field:stage_id='remaining_questions'
+        if stage_id not in STAGE_TITLES:continue
+        stage=stages.setdefault(stage_id,{'id':stage_id,'title':STAGE_TITLES[stage_id],'state':'in_progress',
+            'started_at':when.isoformat(),'ended_at':None,'tasks':[]})
+        task_id=payload.get('task_id') or field
+        kind=item.get('event_type');label=payload.get('field_label');activity=payload.get('activity')
+        technical=bool(activity and re.search(r'\bhelper\b|workday_fast|\bCDP\b|pointer|quiescen|dispatch|read.?back',activity,re.I))
+        if not task_id and kind=='phase_changed' and activity and not technical:
+            task_id='activity:'+hashlib.sha256(activity.encode()).hexdigest()[:16]
+        if not task_id:
+            if payload.get('task_state'):stage['state']=payload['task_state']
+            continue
+        key=(stage_id,task_id)
+        task=tasks.get(key)
+        if task is None:
+            title=activity if activity and not technical else ('Review and fill “'+label+'”' if label and '?' in label else 'Fill '+label if label else None)
+            if not title:continue  # A tool name cannot manufacture a historical task.
+            task={'id':task_id,'parent_id':stage_id,'title':title,'state':'in_progress','started_at':when.isoformat(),
+                'ended_at':None,'debug':[],'action_ids':[],'_wait_start':None,'_waits':[]}
+            tasks[key]=task;stage['tasks'].append(task)
+        elif activity and not technical and kind!='tool_finished':task['title']=activity
+        if item.get('action_id') and item['action_id'] not in task['action_ids']:task['action_ids'].append(item['action_id'])
+        desired=payload.get('task_state') if kind!='tool_finished' else None
+        if kind in ('field_verified','account_verified') and payload.get('evidence'):desired='completed'
+        if kind=='tool_finished' or kind=='recovery' or payload.get('error_type'):
+            task['debug'].append(dict(item,resolved=False))
+            if payload.get('status') in ('failed','error','blocked','aborted'):desired='recovering'
+        if desired=='completed' and not payload.get('evidence'):desired=None
+        if desired not in ('in_progress','completed','recovering','awaiting_input','unsuccessful'):continue
+        if task['_wait_start'] and desired!='awaiting_input':
+            task['_waits'].append((task['_wait_start'],when));task['_wait_start']=None
+        if desired=='awaiting_input' and task['_wait_start'] is None:task['_wait_start']=when
+        task['state']=desired;task['ended_at']=when.isoformat() if desired in ('completed','unsuccessful') else None
+        if desired=='completed':
+            for error in task['debug']:error['resolved']=True
+    for task in tasks.values():
+        end=instant(task['ended_at']) if task['ended_at'] else until
+        start=instant(task['started_at']);task['elapsed_seconds']=max(0,(end-start).total_seconds())
+        if task['_wait_start']:task['_waits'].append((task['_wait_start'],end))
+        task['wait_seconds']=union_seconds(task.pop('_waits'));task.pop('_wait_start')
+        spans=[]
+        for raw in actions:
+            action=dict(raw);context=json.loads(action.get('semantic_context_json') or '{}')
+            if action.get('id') not in task['action_ids'] and context.get('task_id')!=task['id']:continue
+            try:
+                left=max(start,instant(action['started_at']));right=min(end,instant(action['ended_at']) if action.get('ended_at') else until)
+                spans.append((left,right))
+            except (KeyError,TypeError,ValueError):pass
+        task['action_seconds']=union_seconds(spans) if spans else None
+    for stage in stages.values():
+        children=stage['tasks']
+        if children:
+            states={task['state'] for task in children}
+            stage['state']=next((s for s in ('awaiting_input','recovering','in_progress','unsuccessful') if s in states),'completed')
+            if stage['state']=='completed':stage['ended_at']=max(t['ended_at'] for t in children)
+        end=instant(stage['ended_at']) if stage['ended_at'] else until
+        stage['elapsed_seconds']=max(0,(end-instant(stage['started_at'])).total_seconds())
+        # Keep unresolved work visible regardless of low-level polling volume.
+        active=[t for t in children if t['state']!='completed'];completed=[t for t in children if t['state']=='completed']
+        stage['tasks']=active+completed[-max(0,limit-len(active)):] if len(active)<limit else active
+        stage['omitted_completed_tasks']=len(children)-len(stage['tasks'])
+    values=list(stages.values())
+    active=next((task for stage in reversed(values) for task in reversed(stage['tasks']) if task['state']!='completed'),None)
+    return {'stages':values,'active_task':active,'details_recorded':bool(values),'debug':debug[-100:]}
+
+
 class ReportServices:
     def attempt_report(self,attempt_id,worker_id=None):
         now=instant(self.now())
         with self.tx() as db:
-            row=db.execute('SELECT a.*, j.company, j.title as job_title, j.url as job_url FROM application_attempts a JOIN jobs j ON j.id=a.job_id WHERE a.id=?',(attempt_id,)).fetchone()
+            row=db.execute('SELECT a.*, j.company, j.title as job_title, j.url as job_url, j.metadata_json as job_metadata_json FROM application_attempts a JOIN jobs j ON j.id=a.job_id WHERE a.id=?',(attempt_id,)).fetchone()
             if row is None:raise ProtocolError('not_found')
             a=dict(row)
             if a.get('platform')=='unknown' and a.get('job_url'):
@@ -34,6 +124,7 @@ class ReportServices:
             if worker_id is not None and a['worker_id']!=worker_id:raise ProtocolError('attempt_forbidden')
             a=attempt_timing_state(db,a,now)
             rows=[dict(r) for r in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY observed_at,recorded_at,id',(attempt_id,))]
+            actions=[dict(r) for r in db.execute('SELECT * FROM managed_actions WHERE attempt_id=?',(attempt_id,))]
             failure_reason = resolve_failure_reason(db, a, events=rows)
             a['failure_reason'] = failure_reason
         start=instant(a['started_at']);end=instant(a['completed_at']) if a['completed_at'] else now
@@ -162,6 +253,7 @@ class ReportServices:
             'fallback_reasons':simplify_fallbacks,'runs':simplify_runs}
 
         return {'attempt':public_attempt(a,now),'failure_reason':failure_reason,'timeline':timeline,'phases':phases,'issues':issues,
+            'progress':application_progress(timeline,actions=actions,now=now,ended_at=a['completed_at']),
             'timing':{'wall_seconds':wall,'observed_union_seconds':covered,'unattributed_seconds':max(0,wall-covered),
                 'category_seconds':{k:union_seconds(v) if v else None for k,v in categories.items()},
                 'reported_tokens':{k:sum(v) if v else None for k,v in token_values.items()},

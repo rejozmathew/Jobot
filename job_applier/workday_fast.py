@@ -165,6 +165,16 @@ class FastRunner:
 
     def event(self,kind,payload):
         try:
+            payload=dict(payload)
+            if kind=='phase_changed' and payload.get('phase'):
+                from .managed_reports import STAGE_ALIASES,STAGE_TITLES
+                phase=payload['phase'];stage=STAGE_ALIASES.get(phase,phase)
+                if stage in STAGE_TITLES:
+                    payload.update(stage_id=stage,parent_id=stage,task_id='workday:'+phase,task_state='in_progress')
+                    if stage=='fill_application':payload['activity']='Fill '+phase.replace('_',' ')
+                    elif stage=='remaining_questions':payload['activity']='Complete '+phase.replace('_',' ')
+                    elif stage=='authentication':payload['activity']='Sign in to the employer'
+                    elif stage=='submission':payload['activity']='Review and submit application'
             self.owned('event',event_id=str(uuid.uuid4()),event_type=kind,
                        observed_at=datetime.now(timezone.utc).isoformat(),payload=payload)
         except Exception as exc:
@@ -217,6 +227,9 @@ class FastRunner:
         info=await self.page.evaluate_function(WORKDAY_SOURCE,{'method':'inspect'})
         if not info.get('found') or info.get('filled'):return None
         if deadline-self.clock()<3:return {'committed':False,'waiting':True,'reason':'bounded_call_elapsed'}
+        from .managed_events import field_task_context
+        task_context=field_task_context('How did you hear about us?',page=observed['step'],document=self.state.get('document_id',''))
+        self.event('field_context',task_context)
         key=(observed.get('page_signature') or observed['step'])+':'+info['field_key']
         previous=page_state.setdefault('source_fallbacks',{}).get(key) or {}
         result={'committed':False,'path':[],'reason':'source_selection_unconfirmed','attempts':previous.get('attempts',0)+1}
@@ -294,6 +307,10 @@ class FastRunner:
                 result['waiting']=end==deadline
                 result['reason']='bounded_call_elapsed' if result['waiting'] else 'source_selection_needs_inspection'
         finally:
+            self.event('field_verified' if result.get('committed') else 'checkpoint',dict(task_context,
+                task_state='completed' if result.get('committed') else 'recovering',handler='workday_source',
+                verification_result='committed' if result.get('committed') else 'not_verified',
+                evidence='Recruiting source selection verified in the current prompt' if result.get('committed') else None))
             self.persist()
         return result
 
@@ -420,6 +437,10 @@ class FastRunner:
                 if page_state.get('advance_failed') and observed.get('fingerprint') and page_state.get('failure_fingerprint')!=observed['fingerprint']:
                     page_state['advance_failed']=False
                 if self.state.get('step') and self.state['step']!=step:
+                    from .managed_reports import STAGE_ALIASES
+                    previous=self.state['step'];stage=STAGE_ALIASES.get(previous,previous)
+                    self.event('checkpoint',{'stage_id':stage,'task_id':'workday:'+previous,'task_state':'completed',
+                        'activity':'Complete '+previous.replace('_',' '),'evidence':'Employer advanced to the next application step'})
                     self.event('navigation_verified',{'page':step,'evidence':'Workday current step changed'})
                     self.pending=None
                 self.state['step']=step
@@ -484,9 +505,6 @@ class FastRunner:
                             if source.get('waiting'):
                                 return await self.source_handoff(source)
                             if source.get('committed'):
-                                self.event('field_verified',{'page':step,'field':'How did you hear about us?',
-                                    'evidence':source.get('value') or source.get('label'),'path':source.get('path'),
-                                    'source':'User-authorized recruiting-source fallback'})
                                 self.last=None;continue
                             return await self.source_handoff(source)
                     from .application_answers import apply_policy
@@ -540,7 +558,7 @@ class FastRunner:
                     self.last=None; continue
                 if action in ('continue','native_continue'):
                     from .application_answers import capture_answers
-                    history=await capture_answers(self.page,self.config,self.package,self.owner,page=step)
+                    history=await capture_answers(self.page,self.config,self.package,self.owner,page=step,call=self.call)
                     if history.get('answers_added'):
                         self.event('checkpoint',{'operation':'answer_history','page':step,'source':'employer_form','evidence':history['answer_history_path']})
                     if history.get('answer_history_error'):
@@ -551,7 +569,13 @@ class FastRunner:
                     if not action.startswith('native_'):self.owned('writer_state',state='active')
                     if action=='autofill':
                         page_state['autofill_started']=True;self.persist()
+                    dispatched_at=datetime.now(timezone.utc).isoformat()
                     success=await self.click(action,fresh)
+                    if success and action=='autofill':
+                        self.owned('event',event_id=str(uuid.uuid4()),event_type='checkpoint',action_id=aid,observed_at=dispatched_at,
+                            payload={'operation':'autofill_dispatch','status':'executed','source':'simplify',
+                                'stage_id':'fill_application','task_id':'workday:'+step,'activity':'Fill '+step.replace('_',' '),
+                                'evidence':'Observed Autofill control activated'})
                 finally:
                     self.owned('action_end',action_id=aid,status='success' if success else 'failed',duration_seconds=self.clock()-t0,
                                observed_at=datetime.now(timezone.utc).isoformat())

@@ -39,6 +39,36 @@ function showConsole(){state.profileDirty=false;$('console').hidden=false;$('log
 function choice(id,items,value){const select=$(id),before=value??select.value;select.replaceChildren();for(const [v,label]of items){const option=el('option',label);option.value=v;select.append(option);}if(items.some(x=>x[0]===before))select.value=before;}
 function selection(){$('selection').textContent=`${state.selected.size} job(s) selected`;}
 function link(url,label){try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))return el('span',label);const a=el('a',label);a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';return a;}catch{return el('span',label);}}
+function postingLabel(job){
+ const known=[job.company,job.title||job.job_title].filter(Boolean);if(known.length)return known.join(' · ');
+ let metadata=job.metadata||{};try{if(job.metadata_json||job.job_metadata_json)metadata=JSON.parse(job.metadata_json||job.job_metadata_json);}catch{}
+ return metadata.label_discovery?.status==='unavailable'?'Company and role unavailable':'Identifying company and role';
+}
+function postingHeading(job){const n=el('div',undefined,'posting-heading');n.append(el('strong',postingLabel(job)));
+ const url=job.url||job.job_url;if(url){let hostname='View job posting';try{hostname=new URL(url).hostname;}catch{}n.append(link(url,hostname));}return n;}
+const progressExpansion=new Map();
+function rememberProgress(root){for(const node of root.querySelectorAll('details[data-progress-key]'))progressExpansion.set(node.dataset.progressKey,node.open);}
+function progressDetails(key,title,open=false,cls='progress-stage'){
+ const n=el('details',undefined,cls);n.dataset.progressKey=key;n.open=progressExpansion.has(key)?progressExpansion.get(key):open;n.append(el('summary',title));return n;
+}
+function renderProgress(progress,key){
+ const root=el('div',undefined,'application-progress');
+ const states={in_progress:'In progress',completed:'Completed',recovering:'Recovering',awaiting_input:'Awaiting your input',unsuccessful:'Unsuccessful'};
+ if(!progress?.details_recorded)root.append(el('p','Details not recorded.','progress-empty'));
+ for(const stage of progress?.stages||[]){
+  const section=progressDetails(key+':stage:'+stage.id,stage.title,stage.state!=='completed');
+  section.querySelector('summary').append(badge(states[stage.state]||'In progress'));
+  for(const task of stage.tasks||[]){
+   const row=el('div',undefined,'progress-task');row.append(el('span',task.title),badge(states[task.state]||'In progress'));
+   if(typeof task.elapsed_seconds==='number')row.append(el('small',`Elapsed ${duration(task.elapsed_seconds)}${task.wait_seconds?' · Waiting for your input '+duration(task.wait_seconds):''}${typeof task.action_seconds==='number'?' · Recorded actions '+duration(task.action_seconds):''}`));
+   section.append(row);
+  }
+  if(stage.omitted_completed_tasks)section.append(el('small',`${stage.omitted_completed_tasks} earlier completed tasks in the full application history.`));root.append(section);
+ }
+ const debug=progressDetails(key+':debug','Debug details',false,'debug-details');
+ for(const event of progress?.debug||[])debug.append(el('pre',JSON.stringify(event,null,2)));
+ root.append(debug);return root;
+}
 function renderQueue(v){
  renderSessions(v);
  renderAnswers(v);
@@ -47,10 +77,10 @@ function renderQueue(v){
  for(const job of v.jobs){
   const tr=el('tr');
   const check=el('input');check.type='checkbox';check.checked=state.selected.has(job.id);
-  check.setAttribute('aria-label','Select '+(job.title||job.id));
+  check.setAttribute('aria-label','Select '+postingLabel(job));
   check.onchange=()=>{if(check.checked)state.selected.add(job.id);else state.selected.delete(job.id);selection();};
   const cell=el('td');cell.append(check);tr.append(cell);
-  const title=el('td');title.append(link(job.url,job.title||'Untitled posting'),el('small',job.company||'Unknown company'));tr.append(title);
+  const title=el('td');title.append(postingHeading(job));tr.append(title);
   const statusTd=el('td');statusTd.append(badge(job.status));
   const unanswered=v.answer_queue?.groups.find(g=>g.job_id===job.id&&g.pending_count);
   if(unanswered){const review=el('button',`Answer ${unanswered.pending_count} question${unanswered.pending_count===1?'':'s'}`);review.onclick=()=>tab('answers');statusTd.append(review);}
@@ -66,29 +96,21 @@ function renderSessions(v){
  const runtime=v.local_runtime||{sessions:[],workspaces:[]};
  if($('start-application-btn'))$('start-application-btn').textContent=runtime.workspaces.length?'Start in your conversation':'Start application';
  $('local-sessions-card').hidden=!runtime.workspaces.length;
- $('local-sessions').replaceChildren();
+ rememberProgress($('local-sessions'));$('local-sessions').replaceChildren();
  for(const s of runtime.sessions.slice(0,12)){
   const job=v.jobs.find(j=>j.id===s.job_id)||{};
   const candidate=v.candidates.find(c=>c.id===s.identity_id)||{};
   const metadata=s.metadata||{},n=el('div',undefined,'attempt');
-  n.append(el('strong',`${job.company||'Company unknown'} · ${job.title||s.job_id}`),badge(s.state));
-  n.append(el('p',`${candidate.email||s.identity_id} · ${s.workspace_id||'Waiting for capacity'} · ${s.workspace?.mode||'Mode pending'}`));
-  n.append(el('p',`Host ${s.host_alive?'running':'offline'} · Driver ${s.driver_recently_active?'recently active':'idle or disconnected'} · Writer ${s.writer_state}`));
-  n.append(el('p',`Executor: ${metadata.provider||'unknown'} / ${metadata.model||'unknown'} · effort ${metadata.reasoning_effort||'unknown'}`));
-  const activity=s.activity?.payload;
-  if(activity){
-   n.append(el('p',`Latest step: ${activity.activity||activity.phase||activity.evidence||s.activity.event_type}`));
-   if(activity.next_step)n.append(el('p',`Next: ${activity.next_step}`));
-  }else n.append(el('p','No step update recorded by the executor yet.'));
-  if(s.steps?.length){
-   const details=el('div'),list=el('ol');details.append(el('strong','Recent application steps'));
-   for(const step of s.steps){const p=step.payload||{};list.append(el('li',`${stamp(step.observed_at)} · ${p.source||step.event_type} · ${p.activity||p.evidence||p.phase||step.event_type}${p.error_type?' · '+p.error_type:''}`));}
-   details.append(list);n.append(details);
-  }
+  n.append(postingHeading(job),badge(s.state));
+  if(candidate.email)n.append(el('p',candidate.email));
+  const progress=renderProgress(s.progress||{debug:s.steps||[]},s.id),debug=progress.querySelector('.debug-details');n.append(progress);
+  debug.append(el('p',`Host ${s.host_alive?'running':'offline'} · Driver ${s.driver_recently_active?'recently active':'idle or disconnected'} · Writer ${s.writer_state}`));
+  debug.append(el('p',`Executor: ${metadata.provider||'unknown'} / ${metadata.model||'unknown'} · effort ${metadata.reasoning_effort||'unknown'}`));
   n.append(el('small',`Requested ${stamp(s.requested_at)} · Connected ${stamp(s.connected_at)} · Ended ${stamp(s.ended_at)} · Total ${duration(s.elapsed_seconds)}`));
   n.append(el('small',`Queue ${duration(s.queue_seconds)} · Browser startup ${duration(s.startup_seconds)} · Last verified progress ${stamp(s.last_verified_progress_at)}`));
-  if(s.reason)n.append(el('p',s.reason,'job-reason'));
-  n.append(el('small',`Session ${s.id} · Attempt ${s.attempt_id||'not started'} · Config ${metadata.config_path||'unknown'}`,'mono'));
+  if(s.first_autofill_at)n.append(el('small',`First Autofill ${stamp(s.first_autofill_at)} · Ready to Autofill ${duration(s.ready_to_autofill_seconds)}`));
+  if(s.reason)debug.append(el('p',s.reason,'job-reason'));
+  debug.append(el('small',`Session ${s.id} · Attempt ${s.attempt_id||'not started'} · Config ${metadata.config_path||'unknown'}`,'mono'));
   if(s.run_id&&!s.ended_at){
    for(const command of ['pause','stop']){
     const button=el('button',command==='pause'?'Pause this application':'Stop this application');
@@ -127,7 +149,7 @@ function renderAnswers(v){
  for(const group of groups){
   const card=el('article',undefined,'answer-application');
   const heading=el('div',undefined,'section-title');
-  const title=el('h3');title.append(link(group.url,`${group.company||'Company unknown'} · ${group.title||'Application'}`));heading.append(title);
+  const title=el('h3');title.append(link(group.url,postingLabel(group)));heading.append(title);
   heading.append(badge(group.pending_count?'Needs your answer':group.retry?.state==='queued'?'Queued for retry':'Answers saved'));card.append(heading);
   card.append(el('p',`${group.email} · ${group.pending_count} required question${group.pending_count===1?'':'s'} remaining`,'answer-meta'));
   for(const question of group.questions.filter(q=>q.state!=='superseded')){
@@ -198,8 +220,13 @@ function renderRun(v){
  const workerInfo=actualModel?`${connected?'Connected worker':'Last worker'}: ${actualModel} · verified effort ${verifiedEffort}`:'Model execution not yet verified';
  $('run-owner').textContent=`Requested: ${reqModel} (${reqEffort}) | ${workerInfo}`;
  if(r.state!=='awaiting_worker'&&$('notice').textContent.startsWith('Application run started;'))notice('');
- $('focused-context').replaceChildren();const focused=r.focused_context;
- if(focused){$('focused-context').append(el('strong',`${focused.is_active?'Current job':'Last completed job'}: ${focused.job.company||'Unknown'} · ${focused.job.title||focused.job.id}`),el('p',`Page: ${focused.page||'Unknown'} · Activity: ${focused.activity||'Unknown'}`),el('p',`Skill ${focused.worker_metadata.skill_version||'Unknown'} · ${focused.worker_metadata.provider||'Unknown'} / ${focused.worker_metadata.model||'Unknown'} · effort ${focused.actual_reasoning_effort||focused.worker_metadata.reasoning_effort||'low'}`,'mono'));if(focused.latest_unresolved_issue)$('focused-context').append(el('p','Issue: '+focused.latest_unresolved_issue));if(focused.uncertain_duration)$('focused-context').append(badge('uncertain timing'));}
+ rememberProgress($('focused-context'));$('focused-context').replaceChildren();const focused=r.focused_context;
+ if(focused){
+  $('focused-context').append(el('p',focused.is_active?'Current job':'Last completed job'),postingHeading(focused.job));
+  const progress=renderProgress(focused.progress,'focus:'+focused.attempt_id),debug=progress.querySelector('.debug-details');
+  debug.append(el('p',`Page: ${focused.page||'Unknown'} · Activity: ${focused.activity||'Unknown'}`),el('pre',JSON.stringify(focused.worker_metadata,null,2)));
+  if(focused.latest_unresolved_issue)debug.append(el('p',focused.latest_unresolved_issue));$('focused-context').append(progress);
+ }
  $('target-list').replaceChildren();for(const t of r.targets||[]){const n=el('p');n.append(badge(t.state),document.createTextNode(` · attempt ${t.attempt_id} · ${t.target_id} · `),link(t.url,t.url));$('target-list').append(n);}
  $('extension-list').replaceChildren();for(const e of r.budget_extensions||[])$('extension-list').append(el('p',`Attempt ${e.attempt_id}: +${e.seconds}s · ${e.reason} · ${stamp(e.created_at)}`));
  for(const a of r.attempts){
@@ -285,7 +312,7 @@ async function renderProfile(v){
  }
 }
 
-async function loadAttempt(id){state.attempt=id;try{const report=await api('attempt_report',{attempt_id:id});const a=report.attempt,t=report.timing;const loc=[a.company,a.platform].filter(Boolean).join(' · ');$('attempt-summary').textContent=`Attempt ${id}${loc?' · '+loc:''} · ${a.outcome||'active'} · ${duration(t.wall_seconds)} wall time · ${stamp(a.started_at)} → ${stamp(a.completed_at)}`;$('events').replaceChildren();
+async function loadAttempt(id){state.attempt=id;try{const report=await api('attempt_report',{attempt_id:id});const a=report.attempt,t=report.timing;const loc=postingLabel(a);$('attempt-summary').textContent=`Attempt ${id}${loc?' · '+loc:''} · ${a.outcome||'active'} · ${duration(t.wall_seconds)} wall time · ${stamp(a.started_at)} → ${stamp(a.completed_at)}`;rememberProgress($('events'));$('events').replaceChildren(postingHeading(a));const projected=renderProgress(report.progress,'attempt:'+id);const debug=projected.querySelector('.debug-details');$('events').append(projected);
  const reasonText=a.failure_reason||report.failure_reason;
  if(reasonText){
   const p=el('p',undefined,'attempt-failure-prominent');
@@ -293,19 +320,19 @@ async function loadAttempt(id){state.attempt=id;try{const report=await api('atte
   p.append(strong,document.createTextNode(reasonText));
   $('events').append(p);
  }
- $('events').append(el('p',`Observed coverage ${duration(t.observed_union_seconds)}; unattributed ${duration(t.unattributed_seconds)}. Tool ${duration(t.category_seconds.tool)}; model ${duration(t.category_seconds.model)}. ${t.uncertainty?'Some timing is uncertain.':''}`),el('p',t.overlap_note));if(a.profile_hash)$('events').append(el('p',`Attempt profile hash: ${a.profile_hash}`,'mono'));
- const table=el('table'),body=el('tbody');for(const phase of report.phases){const r=el('tr');r.append(el('td',phase.phase),el('td',duration(phase.duration_seconds)));body.append(r);}table.append(body);$('events').append(table);
+ debug.append(el('p',`Observed coverage ${duration(t.observed_union_seconds)}; unattributed ${duration(t.unattributed_seconds)}. Tool ${duration(t.category_seconds.tool)}; model ${duration(t.category_seconds.model)}. ${t.uncertainty?'Some timing is uncertain.':''}`),el('p',t.overlap_note));if(a.profile_hash)debug.append(el('p',`Attempt profile hash: ${a.profile_hash}`,'mono'));
+ const table=el('table'),body=el('tbody');for(const phase of report.phases){const r=el('tr');r.append(el('td',phase.phase),el('td',duration(phase.duration_seconds)));body.append(r);}table.append(body);debug.append(table);
  if(report.fields&&Object.keys(report.fields).length){
   const fTable=el('table'),fBody=el('tbody');
   fBody.append(el('tr',undefined,undefined,[el('th','Field'),el('th','Elapsed'),el('th','Actions'),el('th','Status')]));
   for(const [k,f] of Object.entries(report.fields)){
    fBody.append(el('tr',undefined,undefined,[el('td',f.field_key),el('td',f.elapsed_seconds!=null?duration(f.elapsed_seconds):'unknown'),el('td',String(f.action_count)),el('td',f.verified?'verified':'unverified')]));
   }
-  fTable.append(fBody);$('events').append(el('h4','Field Telemetry'),fTable);
+  fTable.append(fBody);debug.append(el('h4','Field Telemetry'),fTable);
  }
  if(report.simplify&&report.simplify.runs_count){
   const s=report.simplify;
-  $('events').append(el('p',`Simplify runs: ${s.runs_count} · Total duration: ${duration(s.total_duration_seconds)}${s.fallback_reasons.length?' · Fallback reasons: '+s.fallback_reasons.join(', '):''}`));
+  debug.append(el('p',`Simplify runs: ${s.runs_count} · Total duration: ${duration(s.total_duration_seconds)}${s.fallback_reasons.length?' · Fallback reasons: '+s.fallback_reasons.join(', '):''}`));
  }
  if(report.problems&&report.problems.length){
   const pTable=el('table'),pBody=el('tbody');
@@ -313,9 +340,9 @@ async function loadAttempt(id){state.attempt=id;try{const report=await api('atte
   for(const p of report.problems){
    pBody.append(el('tr',undefined,undefined,[el('td',p.category||'-'),el('td',p.field_key||'-'),el('td',p.fallback_reason||'-'),el('td',p.source||'native'),el('td',p.status||'-'),el('td',p.resolution||'-')]));
   }
-  pTable.append(pBody);$('events').append(el('h4','Problems & Recoveries'),pTable);
+  pTable.append(pBody);debug.append(el('h4','Problems & Recoveries'),pTable);
  }
- for(const e of report.timeline){const row=el('details',undefined,'event');row.append(el('summary',`${stamp(e.observed_at)} · ${e.payload.activity||e.payload.evidence||e.event_type} · ${duration(e.duration_seconds)}${e.stale?' · late metadata':''}`),el('pre',JSON.stringify(e.payload,null,2)));$('events').append(row);}if(!report.timeline.length)$('events').append(el('p','No events recorded.'));}catch(e){notice(e.message,true);}}
+ for(const e of report.timeline){const row=el('details',undefined,'event');row.append(el('summary',`${stamp(e.observed_at)} · ${e.payload.activity||e.payload.evidence||e.event_type} · ${duration(e.duration_seconds)}${e.stale?' · late metadata':''}`),el('pre',JSON.stringify(e.payload,null,2)));debug.append(row);}if(!report.timeline.length)debug.append(el('p','No events recorded.'));}catch(e){notice(e.message,true);}}
 
 async function refresh(){if(!state.instance||state.busy)return;state.busy=true;try{const v=await api('view',state.run?{run_id:state.run}:{});state.view=v;$('instance').textContent=`Instance ${v.health.instance_id} · DB ${v.health.db_path}`;$('mode').textContent=v.settings.values.mode+' / '+v.settings.values.submission_mode;$('mode').dataset.state=v.settings.values.mode;
  choice('candidate',v.candidates.filter(c=>c.state==='active').map(c=>[c.id,c.email]));

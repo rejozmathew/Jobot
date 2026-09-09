@@ -144,6 +144,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                     db.execute('UPDATE jobs SET namespace=?,requisition_id=? WHERE id=?',(namespace,str(requisition_id),job_id))
             for alias_key in {key,url_key}:
                 db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(alias_key,job_id,safe_text(identity_evidence or 'normalized_url')))
+            if row and (company is not None or title is not None):
+                self._enrich_job(db,row,company=company,title=title,source='explicit_intake',url=canonical)
             if query_key:
                 # Retain every historical job row and link existing duplicates so
                 # an older applied/uncertain attempt cannot be bypassed by a form URL.
@@ -152,6 +154,66 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                                  (query_key,related_id,'consistent_requisition_identity'))
             db.execute('INSERT OR IGNORE INTO job_sources VALUES (?,?,?,?,?,?)',(uid(),job_id,source_type,source_id or canonical,urlunsplit(urlsplit(url.strip())._replace(fragment='')),now))
             return dict(db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone())
+
+    def _enrich_job(self,db,job,*,url,company=None,title=None,source,preview=False):
+        """Keep identity/outcomes and explicit labels; retain per-label provenance."""
+        from .managed_identity import is_same_application_scope
+        if not is_same_application_scope(job['url'],url):
+            alias=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',
+                (job['id'],job_key(canonical_url(url)))).fetchone()
+            if not alias:raise ProtocolError('metadata_job_mismatch')
+        if source not in ('employer_posting','simplify_job_card','retained_answer_history','explicit_intake'):
+            raise ProtocolError('metadata_source_required')
+        reject_secrets([company,title])
+        proposed={};conflicts=[]
+        for field,value in {'company':company,'title':title}.items():
+            if value is None:continue
+            if not isinstance(value,str) or not value.strip() or len(value)>300:raise ProtocolError('invalid_job_label')
+            value=' '.join(value.split())
+            if not job[field]:proposed[field]=value
+            elif job[field]!=value:conflicts.append(field)
+        if proposed and not preview:
+            meta=json.loads(job['metadata_json'] or '{}');sources=meta.setdefault('label_sources',{})
+            for field in proposed:sources[field]={'source':source,'url':canonical_url(url),'observed_at':self.now()}
+            meta['label_discovery']={'status':'identified','observed_at':self.now()}
+            db.execute('UPDATE jobs SET company=?,title=?,metadata_json=?,updated_at=? WHERE id=?',
+                (proposed.get('company',job['company']),proposed.get('title',job['title']),dumps(meta),self.now(),job['id']))
+        return {'changed':bool(proposed) and not preview,'proposed':proposed,'conflicts':conflicts,
+                'job':dict(self._get(db,'jobs',job['id']))}
+
+    def enrich_job(self,job_id,*,url,company=None,title=None,source,preview=False):
+        with self.tx() as db:
+            return self._enrich_job(db,self._get(db,'jobs',job_id),url=url,company=company,title=title,source=source,preview=preview)
+
+    def observe_job_metadata(self,attempt_id,*,worker_id,fence,metadata):
+        if not isinstance(metadata,dict):raise ProtocolError('invalid_job_metadata')
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence);job=self._get(db,'jobs',a['job_id'])
+            if metadata:
+                return self._enrich_job(db,job,**{k:metadata.get(k) for k in ('url','company','title','source')})
+            meta=json.loads(job['metadata_json'] or '{}')
+            if not meta.get('label_discovery'):
+                meta['label_discovery']={'status':'unavailable','observed_at':self.now()}
+                db.execute('UPDATE jobs SET metadata_json=? WHERE id=?',(dumps(meta),job['id']))
+            return {'changed':False,'job':dict(job)}
+
+    def backfill_job_metadata(self,*,records,apply=False):
+        """Operator-selected retained evidence; preview is the default, no outcome edits."""
+        if type(apply) is not bool or not isinstance(records,list) or len(records)>500:raise ProtocolError('invalid_metadata_backfill')
+        rows=[]
+        with self.tx() as db:
+            for record in records:
+                try:
+                    job=self._get(db,'jobs',record['job_id'])
+                    attempt=self._get(db,'application_attempts',record['attempt_id'])
+                    if attempt['job_id']!=job['id']:raise ProtocolError('metadata_attempt_mismatch')
+                    result=self._enrich_job(db,job,url=record['job_url'],company=record.get('company'),
+                        title=record.get('job_title'),source='retained_answer_history',preview=not apply)
+                    rows.append({'job_id':job['id'],**{k:result[k] for k in ('changed','proposed','conflicts')}})
+                except (KeyError,TypeError,ProtocolError) as exc:
+                    rows.append({'job_id':record.get('job_id') if isinstance(record,dict) else None,
+                                 'skipped':getattr(exc,'code','invalid_metadata_record')})
+        return {'preview':not apply,'rows':rows}
 
     @staticmethod
     def _get(db, table, key):
@@ -226,6 +288,9 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
     def _assert_not_suppressed(self, db, job_id):
         prior=db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id LEFT JOIN submission_ledger l ON l.job_id=r.id WHERE l.job_id IS NOT NULL OR j.status IN ('applied','already_applied') LIMIT 1",(job_id,)).fetchone()
         if prior:raise ProtocolError('already_applied')
+        attempts=db.execute(RELATED+'SELECT a.* FROM related r JOIN application_attempts a ON a.job_id=r.id WHERE a.submit_intent_at IS NOT NULL',
+                            (job_id,)).fetchall()
+        if any(self._submission_pending(db,attempt) for attempt in attempts):raise ProtocolError('reconciliation_required')
 
     def _assert_no_owner(self, db, job_id, exclude_session=None):
         if self._has_local_schema(db):
@@ -399,9 +464,11 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             # fixture is allowed only in an explicitly synthetic development instance.
             if not (fixture and settings['mode']=='development') and settings['submission_mode']!='submit':
                 raise ProtocolError('submission_not_authorized')
-            if a['submit_intent_at']: raise ProtocolError('reconciliation_required')
+            if a['submit_intent_at'] and self._submission_pending(db,a): raise ProtocolError('reconciliation_required')
             if not evidence: raise ProtocolError('evidence_required')
             db.execute('UPDATE application_attempts SET submit_intent_at=? WHERE id=?',(self.now(),attempt_id))
+            self._append_event(db,a,worker_id=worker_id,fence=fence,event_id=uid(),action_id=None,event_type='checkpoint',
+                observed_at=self.now(),duration_seconds=None,payload={'operation':'submission_intent','status':'pending','phase':'submission'})
             return dict(self._get(db,'application_attempts',attempt_id))
 
     def _complete(self, db, a, outcome, evidence, *, quiescent, finish_key, reconciled=False):

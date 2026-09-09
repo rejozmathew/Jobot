@@ -138,12 +138,22 @@ class SessionServices:
                 "SELECT event_type,observed_at,payload_json FROM managed_events WHERE attempt_id=? AND stale=0 AND event_type IN ('phase_changed','navigation_verified','account_verified','recovery','outcome') ORDER BY recorded_at DESC,id DESC LIMIT 12",
                 (s['attempt_id'],))] if attempt else []
             for step in steps:step.pop('payload_json')
+            events=[dict(row) for row in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY rowid',(s['attempt_id'],))] if attempt else []
+            actions=[dict(row) for row in db.execute('SELECT * FROM managed_actions WHERE attempt_id=?',(s['attempt_id'],))] if attempt else []
+        from .managed_reports import application_progress
+        progress=application_progress(events,actions=actions,now=self.now(),ended_at=s['ended_at'])
+        autofill_times=[event['observed_at'] for event in events if not event['stale'] and
+            (payload:=json.loads(event['payload_json'])).get('operation')=='autofill_dispatch' and payload.get('status')=='executed']
+        first_autofill=min(autofill_times) if autofill_times else None
         from .workspace_process import process_matches
         host_alive=bool(workspace and workspace['host_identity_json'] and process_matches(json.loads(workspace['host_identity_json'])))
         now=datetime.fromisoformat(self.now())
         def age(value):return max(0,(now-datetime.fromisoformat(value)).total_seconds()) if value else None
         cfg=json.loads(workspace['config_json']) if workspace else None
         return {**s,'transport':'local','workspace':cfg,'host_alive':host_alive,
+                'progress':progress,
+                'first_autofill_at':first_autofill,
+                'ready_to_autofill_seconds':max(0,(datetime.fromisoformat(first_autofill)-datetime.fromisoformat(s['connected_at'])).total_seconds()) if first_autofill and s['connected_at'] else None,
                 'activity':steps[0] if steps else None,'steps':list(reversed(steps)),
                 'host_seen_at':workspace['host_seen_at'] if workspace else None,
                 'driver_age_seconds':age(s['driver_seen_at']),

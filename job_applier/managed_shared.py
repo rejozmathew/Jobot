@@ -5,18 +5,38 @@ from functools import wraps
 
 
 def submission_pending(attempt, events=()):
-    """An intent is uncertain unless the latest dispatch is proven not executed.
+    """Conservative write guard shared by every submission/retry consumer."""
+    return submission_state(attempt,events)['state'] in ('pending','accepted')
 
-    Events arrive in ledger insertion order. An absent result never authorizes
-    replay; old/stale telemetry cannot settle a current submission.
+
+def submission_state(attempt,events=()):
+    """Dispatch truth and employer resolution are separate immutable evidence.
+
+    A new intent supersedes an earlier resolved dispatch. Legacy dispatches
+    without a scope stay uncertain; a failed outcome alone cannot resolve them.
     """
-    if not dict(attempt).get('submit_intent_at'):return False
-    for row in reversed(list(events)):
-        row=dict(row)
+    attempt=dict(attempt);state='pending' if attempt.get('submit_intent_at') else 'none'
+    dispatch=None;resolved=None;accepted=attempt.get('outcome') in ('applied','already_applied')
+    for raw in events:
+        row=dict(raw)
         if row.get('stale'):continue
-        payload=json.loads(row['payload_json'])
-        if payload.get('operation')=='submission_click':return payload.get('status')!='not_executed'
-    return True
+        payload=json.loads(row.get('payload_json','{}'));operation=payload.get('operation')
+        if operation=='submission_confirmed' and payload.get('status') in ('applied','already_applied'):accepted=True
+        if operation=='submission_reconciled' and payload.get('status') in ('applied','already_applied'):accepted=True
+        if operation=='submission_intent':state='pending';dispatch=None;resolved=None
+        elif operation=='submission_click':
+            dispatch=dict(payload,observed_at=row.get('observed_at'));resolved=None
+            state='not_executed' if payload.get('status')=='not_executed' else 'pending'
+        elif operation=='submission_resolution' and payload.get('status')=='rejected' and dispatch:
+            if (payload.get('source')=='employer' and payload.get('resolution')=='fresh_employer_rejection' and
+                payload.get('reason_code') in ('invalid_security_code','expired_security_code','required_fields') and
+                all(dispatch.get(k) and payload.get(k)==dispatch[k] for k in ('dispatch_id','document_id','frame_id'))):
+                from datetime import datetime
+                try:
+                    if datetime.fromisoformat(row['observed_at'].replace('Z','+00:00'))<datetime.fromisoformat(dispatch['observed_at'].replace('Z','+00:00')):continue
+                except (KeyError,TypeError,ValueError):continue
+                state='rejected';resolved=payload
+    return {'state':'accepted' if accepted else state,'dispatch':dispatch,'resolution':resolved}
 
 
 class ProtocolError(ValueError):

@@ -231,13 +231,19 @@ class WorkspaceHost:
                     except asyncio.TimeoutError:
                         await asyncio.sleep(.4);continue
                     if obs.get('panel') and obs.get('source')!='fixture':
-                        readiness['simplify']='official_panel_observed';break
+                        readiness['simplify']='official_panel_observed'
+                        readiness['observation']={k:obs.get(k) for k in ('status','controls','document_id','page_signature')}
+                        break
                     await asyncio.sleep(.4)
                 else:
                     readiness['simplify']='not_observed'
                     recovery=recovery or {'reason':'simplify_setup_required',
                         'instruction':'Inspect loading on the owned tab. If Simplify remains missing, use browser reload; if still unusable, use session restart and continue. This applies to every portal. Recover the configured extension or use approved native controls after fresh writer observation; do not finish merely because the panel is missing.'}
             if recovery:readiness['recovery']=recovery
+            from .browser_controls import next_operation
+            from .managed_context import platform_for_url
+            readiness['next_operation']=next_operation(platform_for_url(job['url']),readiness.get('observation'))
+            readiness['observed_at']=self.service.now()
             return target,readiness
         finally:await browser.close()
 
@@ -341,16 +347,20 @@ class WorkspaceHost:
         if op in ('browser','credentials'):
             package=service.application_context(attempt['id'])
             if op=='credentials':
-                service.coordinate_account(session['id'])
-                from .managed_credentials import handle_credentials
+                if attempt['submission_pending']:raise ProtocolError('submission_pending_read_only')
+                if params.get('mode')!='verification':service.coordinate_account(session['id'])
+                from .managed_credentials import handle_credentials,credential_progress
                 gate=client.call('browser_observe',**own,target_id=session['target_id'],cdp_url=cfg['cdp_url'])
                 if not gate.get('native_takeover_authorized',gate.get('quiescent')):
                     raise ProtocolError('simplify_input_or_settlement_required',
                         'Observe or cancel ongoing Simplify work. For a broken page or missing panel before submission, use browser reload or session restart, then inspect and continue.')
                 action=uid();started=time.monotonic();result={}
+                credential_progress(client.call,own,params)
                 client.call('action_start',**own,action_id=action,tool_name='credentials')
                 try:result=handle_credentials(cfg,package,dict(params,target_id=session['target_id']));return result
-                finally:client.call('action_end',**own,action_id=action,status='success' if result.get('values_committed') else 'failed',duration_seconds=time.monotonic()-started)
+                finally:
+                    client.call('action_end',**own,action_id=action,status='success' if result.get('values_committed') or result.get('resend_requested') or params.get('action')=='inspect' and result.get('groups') else 'failed',duration_seconds=time.monotonic()-started)
+                    credential_progress(client.call,own,params,result=result,action_id=action)
             from .application_runtime import browser_action
             return browser_action(cfg,client,own,package,session['target_id'],params)
         from .managed_api import WORKER

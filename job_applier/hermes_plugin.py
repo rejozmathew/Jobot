@@ -13,6 +13,7 @@ from .managed_shared import ProtocolError, uid
 HOOKS=('pre_tool_call','post_tool_call','pre_api_request','post_api_request','api_request_error')
 OPERATIONS=('start','attach','pause','stop','restart','retry','reconcile','browser','account_lock','status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy','browser_observe','credentials','fast_forward')
 OPERATIONS=OPERATIONS+('answer','answer_retries','park_questions','questions_for_attempt','answer_from_user')
+OPERATIONS=OPERATIONS+('progress',)
 SCHEMA={'name':'jobbot','description':'Start one local application from a URL, use its owned browser and shared helpers, and record verified outcomes. No model is launched.',
     'parameters':{'type':'object','properties':{'operation':{'type':'string','enum':list(OPERATIONS)},'parameters':{'type':'object'}},'required':['operation'],'additionalProperties':False}}
 
@@ -197,11 +198,12 @@ class PluginController:
                         state=adapter._state();state['attempt']=None
                         with adapter._db() as db:adapter._put(db,'state',state)
                 elif op=='credentials':
-                    from .managed_credentials import handle_credentials
+                    from .managed_credentials import handle_credentials,credential_progress
                     package=adapter.client.call('application_context',attempt_id=context['attempt_id'],worker_id=adapter.worker_id)
                     # Binding enforces attempt ownership before the private write.
                     adapter.client.call('bind_target',**context,target_id=params['target_id'],url=package['job']['url'])
                     action_id=uid()
+                    credential_progress(adapter.client.call,context,params)
                     adapter.client.call('action_start',**context,action_id=action_id,tool_name='credentials')
                     import time
                     from datetime import datetime,timezone
@@ -211,8 +213,9 @@ class PluginController:
                         result=handle_credentials(cfg,package,params)
                     finally:
                         adapter.client.call('action_end',**context,action_id=action_id,
-                            status='success' if result.get('values_committed') else 'failed',
+                            status='success' if result.get('values_committed') or result.get('resend_requested') or params.get('action')=='inspect' and result.get('groups') else 'failed',
                             duration_seconds=time.monotonic()-started,observed_at=datetime.now(timezone.utc).isoformat())
+                        credential_progress(adapter.client.call,context,params,result=result,action_id=action_id)
                 elif op=='context':
                     if set(params)-{'platform','namespace'}:raise ProtocolError('invalid_payload')
                     result=adapter.client.call('application_context',attempt_id=context['attempt_id'],worker_id=adapter.worker_id,**params)
@@ -227,6 +230,8 @@ class PluginController:
                     result=adapter.client.call('event',**context,event_id=params.get('event_id') or uid(),
                         event_type=params['event_type'],observed_at=params['observed_at'],
                         payload=params.get('payload',{}),duration_seconds=None,action_id=None)
+                elif op=='progress':
+                    result=adapter.client.call('progress',**context,**params)
                 elif op=='account_strategy':
                     attempt=adapter.client.call('attempt_status',attempt_id=context['attempt_id'])
                     result=adapter.client.call('account_strategy',identity_id=attempt['identity_id'],namespace=params['namespace'])

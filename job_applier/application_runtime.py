@@ -184,6 +184,21 @@ def handle(service, session_id, *, include_context=True):
         package=service.application_context(state['attempt_id'])
         result['context']=package
     result['workspace']=state['workspace'];result['metadata']=state['metadata']
+    from .hermes_gmail import mailbox_handoff
+    result['mailbox']=mailbox_handoff(state['metadata'].get('credential_sources',{}))
+    from .browser_controls import next_operation
+    from .managed_context import platform_for_url
+    job=result.get('context',{}).get('job') or service.job(state['job_id'])
+    readiness=state['metadata'].get('readiness',{})
+    if state['state'] in ('connected','waiting'):
+        # Startup controls describe the initial document only. Once execution
+        # begins, status requests direct a fresh observation instead of replaying
+        # an old enabled Autofill recommendation.
+        progressed=bool(state['attempt_id'] and service.events(state['attempt_id']))
+        result['next_operation']=next_operation(result.get('context',{}).get('platform') or platform_for_url(job['url']),
+            {} if progressed else readiness.get('observation'))
+    else:
+        result['next_operation']={'operation':'status','parameters':{},'instruction':'Wait for session readiness while reading the detected ATS reference.'}
     if state['metadata'].get('readiness',{}).get('recovery'):
         result['startup_recovery']=state['metadata']['readiness']['recovery']
     return result
@@ -265,7 +280,7 @@ def browser_action(config,client,ownership,package,target_id,params):
     reads=method in ('snapshot','screenshot')
     async def execute():
         nonlocal method,params
-        aid=None;started=time.monotonic();succeeded=False
+        aid=None;started=time.monotonic();succeeded=False;task_context={};result={}
         redirected_from=None
         browser=await CDPBrowser.connect(config['cdp_url'],target_id=target_id,expected_mode=config.get('browser_mode','headed'))
         try:
@@ -273,13 +288,18 @@ def browser_action(config,client,ownership,package,target_id,params):
             page.application_package=package
             async def remember_answers(page_name='form',source='employer_form'):
                 from .application_answers import capture_answers
-                history=await capture_answers(page,config,package,ownership,page=page_name,source=source,basis=params.get('answer_basis'))
+                history=await capture_answers(page,config,package,ownership,page=page_name,source=source,basis=params.get('answer_basis'),call=client.call)
                 if history.get('answers_added'):
                     try:
                         client.call('event',**ownership,event_id=uid(),event_type='checkpoint',observed_at=datetime.now(timezone.utc).isoformat(),
                             payload={'operation':'answer_history','source':source,'page':page_name,'evidence':history['answer_history_path']})
                     except Exception as exc:history['diagnostic_error']=type(exc).__name__
                 return history
+            def record_autofill(when):
+                client.call('event',**ownership,event_id=uid(),event_type='checkpoint',action_id=aid,observed_at=when,
+                    payload={'operation':'autofill_dispatch','status':'executed','stage_id':'fill_application',
+                        'task_id':task_context.get('task_id','fill:form'),'activity':'Fill application details','source':'simplify',
+                        'evidence':'Observed Autofill control activated'})
             pending=package['attempt'].get('submission_pending',bool(package['attempt'].get('submit_intent_at')))
             identity=application_match(package['job']['url'],url)
             recovery_navigation=(method=='reload' and is_same_application_scope(package['job']['url'],url)) or (method=='navigate' and is_same_application_scope(package['job']['url'],params.get('url','')))
@@ -332,6 +352,20 @@ def browser_action(config,client,ownership,package,target_id,params):
                 if not extension_action and not permitted:
                     raise ProtocolError('simplify_input_or_settlement_required',
                         'Observe active work or use an enabled Simplify Stop/Cancel. If the page is broken or Simplify failed to initialize, use browser method reload or session restart to cancel old activity, then inspect and continue. This is a recovery handoff, not an application outcome.')
+            if method in ('fill','select','check','press') and target:
+                from .browser_frames import resolve_control
+                from .managed_events import field_task_context
+                document,local=await resolve_control(page,target)
+                question=await document.evaluate_function(FORM,dict(local,method='question'))
+                if not question.get('reason'):
+                    task_context=field_task_context(question.get('question',''),page=question.get('context',{}).get('page','form'),
+                        document=question.get('context',{}).get('document',''))
+            elif method=='simplify' or method=='click' and params.get('source')=='simplify':
+                task_context={'stage_id':'fill_application','task_id':'fill:'+str(await page.evaluate('location.pathname')),
+                    'parent_id':'fill_application','activity':'Fill application details','task_state':'in_progress','source':'shared_form'}
+            if task_context:
+                client.call('event',**ownership,event_id=uid(),event_type='field_context' if task_context.get('field') else 'checkpoint',
+                    observed_at=datetime.now(timezone.utc).isoformat(),payload=task_context)
             aid=uid()
             action_name='simplify_stop' if method=='simplify' and params.get('action')=='stop' else method
             client.call('action_start',**ownership,action_id=aid,tool_name='local_browser.'+action_name,writes_browser=not reads)
@@ -350,7 +384,19 @@ def browser_action(config,client,ownership,package,target_id,params):
                             'identity':identity,'recovery_only':identity['status']!='same_job',
                             'instruction':'Confirmation observation only. Do not submit again.'}
                     if not pending:result['instruction']='Inspect this owned tab or navigate back to the assigned job before form writes.'
-                else:result=inventory(await observe(page,package),package)
+                else:
+                    observed=await observe(page,package)
+                    metadata=observed.get('job_metadata')
+                    if metadata is None:
+                        metadata=await page.evaluate_function(FORM,{'method':'metadata'})
+                    try:client.call('observe_job_metadata',**ownership,metadata=metadata)
+                    except Exception:pass  # Optional labels cannot disguise a browser action.
+                    result=inventory(observed,package)
+                    if result.get('verification'):
+                        from .hermes_gmail import mailbox_handoff
+                        result['verification']['mailbox']=mailbox_handoff(config)
+                        result['verification']['next_operation']={'operation':'credentials',
+                            'parameters':{'mode':'verification','action':'inspect','refs':result['verification']['groups'][0]['refs']}}
                 result['title']=await page.evaluate('document.title')
                 result['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
                 if pending:
@@ -379,8 +425,8 @@ def browser_action(config,client,ownership,package,target_id,params):
                 await page.press_key(params['key']);succeeded=True;return {'pressed':True}
             if method in ('fill','select','check','press'):
                 result=await form_action(page,params)
-                succeeded=bool(result.get('committed') or result.get('pressed'))
-                if succeeded and method!='press':result.update(await remember_answers(source='executor_'+method))
+                succeeded=bool(result.get('committed') or result.get('pressed') and 'committed' not in result)
+                if result.get('committed'):result.update(await remember_answers(source='executor_'+method))
                 return result
             if method=='apply_policy':
                 from .application_answers import apply_policy
@@ -418,7 +464,15 @@ def browser_action(config,client,ownership,package,target_id,params):
                     else:
                         action={'method':{'text':'fill','select':'select','check':'check'}[kind],
                                 'ref':item['ref'],**(answer if kind=='select' else {'value':answer})}
+                    from .managed_events import field_task_context
+                    semantic=field_task_context(data['question'],page=data['context'].get('page','form'),document=data['context'].get('document',''))
+                    client.call('event',**ownership,event_id=uid(),event_type='field_context',action_id=aid,
+                        observed_at=datetime.now(timezone.utc).isoformat(),payload=semantic)
                     applied=await form_action(page,action)
+                    client.call('event',**ownership,event_id=uid(),event_type='field_verified' if applied.get('committed') else 'checkpoint',action_id=aid,
+                        observed_at=datetime.now(timezone.utc).isoformat(),payload=dict(semantic,
+                        task_state='completed' if applied.get('committed') else 'recovering',
+                        evidence='Saved answer verified in the current control' if applied.get('committed') else None))
                     result['fields'].append({'question_id':question['id'],'revision':question['revision'],
                         'committed':applied.get('committed',False),'reason':applied.get('reason')})
                     if applied.get('committed'):
@@ -436,7 +490,9 @@ def browser_action(config,client,ownership,package,target_id,params):
                 from .browser_controls import simplify_document
                 document,_,selected=await simplify_document(page,ref=params.get('ref'),operation=params.get('action','autofill'))
                 client.call('writer_state',**ownership,state='active')
+                dispatched_at=datetime.now(timezone.utc).isoformat()
                 result=await SimplifyBoundary(document,budget_seconds=45,fast=True).perform(params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
+                if params.get('action','autofill')=='autofill' and result.get('execution')=='clicked':record_autofill(dispatched_at)
                 if selected and selected.get('recovery'):result['control_recovery']=selected['recovery']
                 if redirected_from:
                     result.update(requested_action_performed=False,redirected_from=redirected_from,
@@ -457,7 +513,9 @@ def browser_action(config,client,ownership,package,target_id,params):
                             'use_scoped_simplify_sign_in_with_credential_evidence'}
                     from .browser_controls import simplify_document
                     document,extension,local=await simplify_document(page,ref=control['ref'])
+                    dispatched_at=datetime.now(timezone.utc).isoformat()
                     result=await document.evaluate_function(CLICK,{'ref':local['ref'],'operation':local['operation'],'url':extension['url'],'page_ref':extension.get('page_ref')})
+                    if local['operation']=='autofill' and (result.get('clicked') or result.get('status')=='clicked'):record_autofill(dispatched_at)
                 else:result=await click_control(page,{'ref':params['ref']},step=observed['step'],page_signature=observed['page_signature'])
                 succeeded=bool(result.get('clicked') or result.get('status')=='clicked')
                 if succeeded and params.get('source')!='simplify' and not observed.get('auth'):
@@ -482,7 +540,15 @@ def browser_action(config,client,ownership,package,target_id,params):
                 if succeeded:result.update(await remember_answers(source='executor_click'))
                 return result
         finally:
-            if aid:client.call('action_end',**ownership,action_id=aid,status='success' if succeeded else 'failed',duration_seconds=time.monotonic()-started)
+            if aid:
+                client.call('action_end',**ownership,action_id=aid,status='success' if succeeded else 'failed',duration_seconds=time.monotonic()-started)
+                if task_context:
+                    verified=bool(result.get('committed'))
+                    client.call('event',**ownership,event_id=uid(),event_type='field_verified' if verified else 'checkpoint',
+                        action_id=aid,observed_at=datetime.now(timezone.utc).isoformat(),payload=dict(task_context,
+                        task_state='completed' if verified else 'in_progress' if succeeded else 'recovering',handler='shared_form',
+                        execution=result.get('execution'),verification_result='committed' if verified else 'not_verified',
+                        evidence='Intended answer verified in the current control' if verified else None))
             await browser.close()
     return asyncio.run(execute())
 

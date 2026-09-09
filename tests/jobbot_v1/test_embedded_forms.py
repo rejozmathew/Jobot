@@ -103,9 +103,18 @@ async def fixture_browser(tmp_path, mode='cross', *, entry_url=None, submit_outc
     try:
         portfile = profile / 'DevToolsActivePort'
         deadline = time.monotonic() + 15
-        while not portfile.exists() and time.monotonic() < deadline:
-            await asyncio.sleep(.05)
-        port = int(portfile.read_text().splitlines()[0])
+        while True:
+            try:
+                port = int(portfile.read_text().splitlines()[0])
+                if not 0 < port < 65536:
+                    raise ValueError('Invalid browser port')
+                break
+            except (FileNotFoundError, PermissionError, IndexError, ValueError):
+                # Windows can expose the file before Chrome releases its write
+                # handle or finishes writing it. Wait for readable readiness.
+                if time.monotonic() >= deadline:
+                    raise TimeoutError('Synthetic browser did not publish a readable debugging port') from None
+                await asyncio.sleep(.05)
         endpoint = f'http://127.0.0.1:{port}'
         with urllib.request.urlopen(endpoint + '/json/list') as response:
             tabs = json.load(response)

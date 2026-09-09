@@ -7,6 +7,8 @@ PAYLOAD_FIELDS = frozenset({
     'reason_code', 'provider', 'model', 'response_model', 'input_tokens', 'output_tokens', 'operation',
     'source', 'fallback_reason', 'residual_fields', 'field_key', 'field_label', 'elapsed_seconds',
     'field_attribution', 'activity', 'next_step',
+    'dispatch_id','document_id','frame_id',
+    'stage_id','task_id','parent_id','task_state','handler','execution','verification_result',
 })
 SECRET = re.compile(r'''(?ix)(?:\b(?:password|passwd|otp|(?:access_|refresh_|reset_)?token|api[_-]?key|cookie|authorization|secret)[\\"']*\s*[=:]|\bbearer\s+\S+)''')
 
@@ -15,6 +17,7 @@ def safe_text(value, limit=300):
     if not isinstance(value, str): return ''
     # Reject the entire secret-bearing text, including quoted/escaped JSON values.
     if SECRET.search(value): return '[REDACTED]'
+    if re.search(r'(?i)(?:security|verification|authentication)[\s_-]*code\s*(?::|=|is\b)\s*[\w-]+',value):return '[REDACTED]'
     value=re.sub(r'\b\d{4,8}\b','[NUMBER]',value)
     value=re.sub(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}','[EMAIL]',value)
     return value[:limit]

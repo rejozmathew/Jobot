@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.5
+version: 0.5.6
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -72,6 +72,14 @@ ATS skill now, then check `status`; when connected, retrieve `context` once if
 start did not already return it. While preparing, continue waiting on this
 session. Never open another browser because readiness is still running.
 
+Read `next_operation` from readiness/status and fresh browser observations.
+Workday routes to `fast_forward` with `{"seconds":60}`. Greenhouse and other
+shared forms route to `browser` with `{"method":"simplify","action":"autofill"}`
+when the observed Autofill is enabled. Act promptly after readiness. Do not call
+the Workday runner on Greenhouse. `browser_observe` accepts empty parameters;
+`method` belongs to `browser`. After execution begins, status requests a fresh
+observation instead of reusing the original document's Autofill control.
+
 `HERMES_SESSION_ID` identifies this conversation. If the shell does not expose
 it, pass `--driver-id <this-conversation-id>` on local commands, consistently for
 this conversation. Another conversation uses its own ID. Never adopt an existing
@@ -96,7 +104,7 @@ that session automatically. The portable equivalent is:
 ```
 
 Portable operation names include `context`, `report`, `browser_observe`,
-`fast_forward`, `credentials`, `browser`, `restart`, `event`, `record_account_event`,
+`fast_forward`, `credentials`, `browser`, `restart`, `event`, `progress`, `record_account_event`,
 `report_upload`, `submission_intent`, `finish`, `request_mail_for_attempt`,
 `match_mail_for_attempt`, and `account_lock`. No attempt/fence/target/CDP fields
 belong in their parameters. Native `milestone` maps to `event`, `observe` to
@@ -190,6 +198,13 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    selection. `check` accepts boolean `value` and never toggles an already correct
    box. `fill` and `press` also accept refs; keys include Tab, Shift+Tab, Space,
    Escape, Enter, PageUp, PageDown and Control+A. Unassociated or ambiguous options return evidence.
+   Separate selected labels/chips count as committed answers even with an empty
+   search input or open menu. Typed filter text and highlighted options do not.
+   Preserve an existing correct selection. For a keyboard correction pass the
+   intended `label` (and `value` if known) with `press`; inspect `committed` after
+   read-back. `pressed:true` or `execution:executed` alone proves no answer.
+   A mismatch returns the actual selection and scoped options for recovery.
+   Veteran and disability fields use this same API and approved facts.
    Use this SAME API for Workday, other ATSs, native selects and custom dropdowns,
    including embedded application frames. Pass the opaque observed ref unchanged;
    the runtime resolves its document and rechecks ownership. Do not choose a
@@ -247,6 +262,15 @@ actual user's confirmation when using user_reported. It stops a still-owned
 session before correction and preserves the original attempt duration. Portable:
 `application_runtime reconcile <session-id> --outcome applied --source user_reported --evidence "<actual confirmation>"`.
 Reconciliation never submits or creates a retry. Cross-job URLs are not proof.
+
+`submission_rejected` with `submission_pending:false` means the shared capture
+recorded a fresh, explicit employer form rejection tied to that Submit action,
+document and frame. Correct the rejected field or request a fresh email code,
+then use `browser submit` again in the same session; it records a new authorized
+intent. The previous click remains recorded as executed. A stale error, failed
+helper, absent confirmation or a reconciliation label of `failed` cannot unlock
+retry. Do not manufacture rejection events from a screenshot or arbitrary label;
+unresolved or contradictory acceptance evidence stays protected.
 
 Headed sessions start maximized. Obscured clicks return viewport/covering metadata
 and use only an uncovered point on the actual control. Inspect and use an observed
@@ -342,6 +366,31 @@ answer. Applied jobs and uncertain submissions cannot enter this retry path.
 
 ## Mail and private identity
 
+An emailed security code is a supported private verification flow when the
+configured mailbox and observed controls match. Startup exposes `mailbox` with
+availability and `wrapper_argv`; snapshot exposes verification groups and the
+next credentials operation. Do not send security codes to `request_answers` or
+ask the user to retrieve mail that the configured private helper can retrieve.
+
+Finish other form corrections first. Use `credentials` with
+`{"mode":"verification","action":"inspect","refs":["<observed-ref>"]}`.
+Keep the returned group's complete ordered `refs` and opaque `challenge_ref`.
+For a fresh challenge use `action:"fill"` with those fields; the helper resolves
+the correlated message privately and fills one input or every segment together.
+For the initial challenge, `requested_at` may identify an actual observed request
+time; never invent one. After an interruption or explicit code rejection, use
+`action:"resend"` with the group's observed `resend_ref`, then use the returned
+fresh group in `action:"fill"`. Resend records the request time automatically.
+Submit promptly once `values_committed:true`. There is no assumed provider TTL.
+
+The helper checks recipient, sender/portal, employer, code purpose and request
+time; unrelated, stale or multiple matching messages require recovery. Stale or
+incomplete refs cause no partial fill. Never include a code in command arguments,
+ordinary browser fill, progress, answer history or messages. Values remain inside
+the private credential boundary; output contains only group commitment and
+message/request timing. A genuine CAPTCHA or unsupported verification remains an
+evidenced executor handoff. The private mode does not bypass challenges.
+
 The selected config supplies `gmail_script` and `mailbox_token_path`. Use the
 existing mailbox capability from the same conversation:
 
@@ -394,6 +443,20 @@ existing `event` operation with `event_type:"phase_changed"` and payload `phase`
 observed `model`/`provider` when known. Record verified outcomes with the matching
 verification event. These updates appear on the session card and attempt timeline;
 the engineering conversation's progress messages are not a substitute.
+
+Prefer the `progress` convenience operation for executor activities:
+`{"stage":"remaining_questions","task_id":"source","activity":"Review and fill How did you hear about us?","state":"in_progress"}`.
+It supplies valid event identity and UTC time. Stages are `opening`,
+`authentication`, `fill_application`, `remaining_questions`, `email_verification`
+and `submission`. Task states are `in_progress`, `completed`, `recovering`,
+`awaiting_input` and `unsuccessful`; `completed` requires actual `evidence`.
+Reuse the task ID through recovery. Describe what the application needs, using
+question labels without answers. Reserve `awaiting_input` for an actual missing
+human answer. Shared field, private verification, Workday and submission helpers
+record their semantic activities automatically. Supply intent they cannot infer.
+The portal groups tasks before limiting recent history, keeps completed stages
+compact, preserves expansion on refresh and places technical chronology in
+collapsed Debug details. Old attempts may honestly show Details not recorded.
 
 A helper exception is not an employer rejection. Record `event_type:"recovery"`
 with its observed `error_type`, concise `evidence`, and the safe `next_step`.

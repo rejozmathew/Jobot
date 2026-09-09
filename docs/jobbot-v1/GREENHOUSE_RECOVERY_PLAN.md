@@ -1,12 +1,14 @@
 # Greenhouse recovery and application progress plan
 
-Status: saved plan only, September 9, 2026. No changes in this plan have been
-implemented. The preceding Workday and shared-runtime checkpoint is `68a7865`
-(`Improve application recovery and Workday advancement`), saved locally before
-this investigation. Its syntax and diff checks passed. Regression was deferred
-when this plan was saved, then separately authorized for the current code; see
-[September 9 checkpoint regression](REGRESSION_2026_09_09.md). No new application
-was run for this plan, and none of its proposed features is implemented yet.
+Status: implemented and validated September 9, 2026; final managed suite: 761 passed, no failures or skips.
+The six tracks below were authorized for implementation after the original saved
+plan and checkpoint regression. The original evidence and design are retained
+here for traceability. Implemented contracts and helper ownership are documented
+in [Application runtime](APPLICATION_RUNTIME.md#shared-recovery-and-progress-contracts).
+This work uses synthetic fixtures only; it does not change attempt 45, retry a
+live application, access live mail or backfill production records.
+[Implementation validation](GREENHOUSE_RECOVERY_VALIDATION_2026_09_09.md) records the checks and fixes.
+
 
 ## Intended result
 
@@ -67,7 +69,7 @@ in `0afbf59`, both before the latest `68a7865` checkpoint. The inspected code
 supports an incomplete metadata-persistence path; it does not show the latest
 credential changes erasing previously populated company names.
 
-## Planned changes
+## Authorized design and implemented scope
 
 ### 1. Route initial filling from observed platform and controls
 
@@ -153,8 +155,9 @@ Define the opaque verification-value contract before implementing it.
 
 ### 4. Represent explicit employer rejection separately from click dispatch
 
-The following names describe the proposed semantics, not implemented API enum
-values. Resolve exact schema/API names during implementation.
+The table describes the semantics. The implemented ledger projection uses
+`none`, `not_executed`, `pending`, `rejected` and `accepted`; the browser returns
+`submission_rejected` when a captured rejection resolves its dispatch.
 
 | Dispatch/result evidence | Submission interpretation | Next action |
 | --- | --- | --- |
@@ -258,7 +261,7 @@ Likely files: `managed_events.py`, `managed_sessions.py`, `managed_reports.py`,
 `workday_auth.py`, `browser_helpers/workday_source.js`, `static/jobbot.js`, `static/jobbot.html`
 and its stylesheet, plus canonical progress-reporting guidance.
 
-## Implementation order and validation to perform later
+## Implementation order and validation
 
 1. Add focused failing synthetic regressions for dropdown read-back and exact
    post-keyboard commitment; implement shared selection changes first.
@@ -272,7 +275,7 @@ and its stylesheet, plus canonical progress-reporting guidance.
    caller. Preserve legacy callers until their use is established; a new path is
    not evidence that an older helper is unused.
 
-Planned acceptance coverage:
+Acceptance coverage:
 
 | Area | Focused acceptance cases |
 | --- | --- |
@@ -291,9 +294,9 @@ as fixtures. Existing test homes include `test_application_runtime.py`,
 `test_operator_ui.py`, `test_configured_credentials.py`, `test_local_sessions.py`
 and the Workday dropdown/confirmation coverage in `tests/jobbot_v1`.
 
-Current-code regression is recorded in the linked checkpoint report. When this
-plan's implementation is requested, first demonstrate the focused failures,
-implement each bounded change, run relevant checks, then one final managed suite through the repository
+Earlier current-code regression is recorded in the checkpoint report. This
+implementation demonstrated focused synthetic failures, added the bounded
+changes and relevant checks, and uses one final managed suite through the repository
 virtualenv: `.venv/Scripts/python.exe -m pytest tests/jobbot_v1 -q`. Follow the
 repository's configured validation delegation and independently inspect its
 results. Any later live acceptance uses a separately authorized real application
@@ -302,12 +305,13 @@ and records its actual result; synthetic success is not live ATS acceptance.
 ## Decisions and limits retained
 
 - Work in the user's original checkout. The checkpoint is local; no push is
-  requested. This follow-up changes documentation only.
+  requested. This follow-up implements the authorized recovery and progress changes.
 - Simplify remains the bulk filler, and the executor handles exceptions with
   approved facts. No resume reconstruction or new helper edits during a run.
 - Dropdown correctness, metadata persistence and clear progress are shared
   responsibilities; provider-specific markup/challenge recognition stays scoped.
 - This plan does not assert the original verification code expired, silently
   repair attempt 45, restart its browser, access new mail or retry submission.
-- Exact widget selectors, private verification-value API and rejection evidence
-  schema remain implementation decisions to validate with focused fixtures.
+- The private verification-value API and rejection evidence schema are documented
+  in APPLICATION_RUNTIME.md and validated with synthetic fixtures; they do not
+  establish live ATS acceptance.

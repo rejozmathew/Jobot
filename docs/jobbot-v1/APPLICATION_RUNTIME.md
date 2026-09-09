@@ -106,13 +106,82 @@ Antigravity/Gemini: 695 managed tests passed, with no failures or skips and four
 existing deprecation warnings. Test corrections, added coverage and independently
 checked evidence are in [September 9 checkpoint regression](REGRESSION_2026_09_09.md).
 No new live application was run for this checkpoint or regression. The Greenhouse
-follow-up is a separate planning task.
+follow-up implementation and its synthetic validation are recorded separately below.
 
-The saved [Greenhouse recovery and application progress plan](GREENHOUSE_RECOVERY_PLAN.md)
-investigates attempt 45 and the portal's missing company labels. It proposes
-shared dropdown verification, prompt private email verification, explicit
-employer-rejection recovery, metadata persistence, and meaningful stage/task
-progress with collapsed debug details. It is a plan, not implemented behavior.
+The [Greenhouse recovery and application progress plan](GREENHOUSE_RECOVERY_PLAN.md)
+retains the evidence and requirements from attempt 45. The implementation adds
+shared committed-selection read-back, private email-code handling, dispatch-scoped
+employer rejection, authoritative metadata enrichment and semantic progress.
+Synthetic validation is distinct from live acceptance; attempt 45 and production
+application/mail records were not changed by this engineering work. Detailed test evidence and
+remaining live-acceptance limits are in [Greenhouse validation](GREENHOUSE_RECOVERY_VALIDATION_2026_09_09.md).
+
+### Shared recovery and progress contracts
+
+Readiness and browser observations return `next_operation` with the actual
+operation and parameter shape. Workday uses `fast_forward`; other forms use
+shared Simplify controls. A fresh observation after work begins prevents a stale
+startup Autofill recommendation. Readiness time and the first confirmed Autofill
+dispatch boundary are recorded separately; `ready_to_autofill_seconds` measures
+that gap without calling it model thinking.
+
+The shared form reader associates selected labels/chips with one combobox.
+Inventory, question capture, answer history and verification use that reader.
+Native SELECT still compares the exact intended label/value. Search input text
+and menu highlighting are not commitment. After activation, selection reacquires
+a uniquely described control and requires two stable exact reads within the
+existing bounded call. Results distinguish execution from answer commitment.
+The executor decides recovery from scoped current options; the helper does not
+turn a mismatch into an application outcome.
+
+Private verification extends `credentials` with `mode:verification` and
+`action:inspect|resend|fill`. It uses an observed opaque `challenge_ref`, complete
+ordered `refs`, optional observed `resend_ref`, and an actual `requested_at` when
+needed for an initial challenge. Resend records a fresh request time itself.
+The document-local group holds exact elements, so unlabeled segments remain
+stable during repeated reads and changed groups cannot partially fill. A private
+resolver checks configured mailbox availability, recipient, sender/portal,
+employer, security-code purpose, request time and one matching message. The
+transient value stays inside the private fill call; public results include only
+commitment, challenge/message identity and timing. No reusable account is created
+for a code. Ordinary fills, answer queues/history and screenshots exclude every
+segment. Unsupported lengths/delivery and ambiguous/stale mail remain handoffs;
+there is no assumed universal provider expiry or newest-message fallback.
+
+`submission_state` derives one state from the immutable attempt/event ledger:
+`none`, `not_executed`, `pending`, `rejected` or `accepted`. Each new intent starts
+a new dispatch cycle. `record_submission_rejection` accepts only a fresh captured
+employer rejection with matching dispatch/action ID, document ID, frame ID and
+time, from the completed `browser.submit` action. The observer must see a new
+scoped validation error after dispatch; baseline errors, cross-document errors,
+missing confirmation and arbitrary failed outcomes do not resolve pending state.
+The previous dispatch is never relabeled not-executed. A resolved rejection allows
+correction and a new authorized intent; accepted or unknown submission suppresses
+retry through service intake/retry, local sessions and host write guards.
+Contradictory confirmation retains acceptance/uncertainty protection.
+
+`enrich_job` and owned `observe_job_metadata` fill missing company/title from one
+scoped posting or unambiguous Simplify job card, preserving nonempty labels and
+recording provenance/conflicts in the existing job metadata. Normal shared and
+Workday observations and answer capture call this path. `backfill_job_metadata`
+defaults to preview and validates exact job/attempt association with retained
+answer-history evidence; it changes labels only when explicitly applied. No
+production backfill is implicit in startup, migration or tests. Queue, session,
+focused-job and attempt views read these labels; unresolved discovery shows the
+posting link and an honest identifying/unavailable label.
+
+`progress(stage,activity,task_id?,state?,evidence?,next_step?,source?,action_id?)`
+uses the existing event ledger and supplies valid event ID/time. Completion needs
+evidence. Strict externally supplied `event` identity/time requirements remain.
+Shared field actions, saved-answer application, required-question requests,
+private credentials, Workday source/steps and submission emit stable stage/task
+context with question labels only. Actions retain this context at start; outcomes
+verify commitment independently of tool dispatch. Reports project all events
+before limiting completed tasks. Unresolved tasks stay visible, recovered errors
+close, raw chronology stays under Debug details, and refresh preserves expansion.
+Elapsed wall time, explicit input waits and unioned action intervals are separate;
+unobserved gaps remain unattributed. Legacy attempts show Details not recorded
+when semantic evidence is absent.
 
 ## Before and after
 
@@ -396,7 +465,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 
 | Component | Scope and consumer |
 |---|---|
-| application_runtime.py | Shared high-level startup/control and timing, scoped browser exceptions/reload, history |
+| application_runtime.py | Shared startup/control and actionable platform guidance; scoped browser exceptions, field-task attribution, Autofill timing and answer/metadata capture |
 | managed_sessions.py / migration 15 | Existing ledger session/workspace/account coordination, history-derived retry storage policy and mixed-version guards |
 | workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, scoped JSON dispatch; no model |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
@@ -406,20 +475,22 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
-| browser_controls.py / browser_helpers/form_controls.js | Shared form/approved-answer and selected-value inventory, post-reload readiness observations, verified text/select/check/keyboard exceptions; Workday retains its question labels and scoped Autofill recovery |
+| browser_controls.py / browser_helpers/form_controls.js | Shared form reader, exact committed-selection verification, posting metadata and document-local private verification groups; used by browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent |
 | application_answers.py | Interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
-| submission.py / browser_helpers/submission_observe.js | Shared one-click boundary, transient native/Simplify confirmation capture, scoped redirect inspection, private evidence and truthful outcome |
+| submission.py / browser_helpers/submission_observe.js | Shared authorized dispatch capture, native/Simplify confirmation and fresh employer rejection tied to action/document/frame; local browser and Workday callers |
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | browser_helpers/workday_source.js | Workday-only recruiting-source field/menu association, live option inventory and virtualized-menu scrolling; workday_fast drives pointer actions and verifies commitment |
-| managed_credentials.py / managed_documents.py / hermes_gmail.py | Private credentials and shared screenshot masking (local and legacy callers), hash-checked selected-asset uploads, configured correlated mailbox |
+| managed_credentials.py / managed_documents.py / hermes_gmail.py | Private account and transient verification filling, correlated configured mail, complete-group screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |
+| managed_shared.py / managed_events.py / managed.py | Common submission resolution, strict evidence ledger, progress convenience, existing job metadata enrichment and previewable backfill |
+| managed_reports.py / managed_sessions.py / managed_views.py | Stage/task projection from the same events and actions, explicit waits/action overlap, shared labels and first-Autofill timing |
 | hermes_plugin.py / integration entry | Convenience, actual session/model and optional messaging capability metadata, observed human-reply provenance; no alternative form logic |
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
-| static/jobbot.html / jobbot.js | Existing dashboard, parallel session/process/driver/model/progress and independent controls |
+| static/jobbot.html / jobbot.js / jobbot.css | Shared posting labels and stage/task progress, persistent expansion and collapsed technical debug, independent application controls |
 
-Common policy is job-apply v0.4.8; Workday policy is workday-simplify v0.3.6, in
+Common policy is job-apply v0.5.6; Workday policy is workday-simplify v0.3.14, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision
@@ -442,7 +513,8 @@ possibly dispatched submit is never replayed. Native and Simplify proof carry
 separate sources; absence of approved evidence returns uncertainty. Local hosts
 retain that page until completion, requested Stop or the configured maximum
 runtime; there is no additional two-minute inspection deadline. Proven
-`not_executed` dispatch permits recovery in the same attempt. An intent with no
+`not_executed` dispatch or a fresh dispatch-scoped employer rejection permits
+recovery in the same attempt. An intent with no
 dispatch result remains uncertain. Reconcile supports the native plugin and portable CLI, records a
 separate source/timestamp event, and preserves historical completion/duration.
 Headed browser startup requests and verifies maximization; no automatic refresh.

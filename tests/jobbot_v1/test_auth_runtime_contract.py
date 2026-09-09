@@ -47,18 +47,19 @@ class Input {
  Object.defineProperty(this,'value',{get:()=>this._value,set:v=>{writes++;this._value=v;this.tracker=v;}});}
  get value(){return this._value;} set value(v){this._value=v;}
  getBoundingClientRect(){return {width:100,height:20};}
+ hasAttribute(){return false;} getAttribute(){return null;}
  focus(){} blur(){}
  dispatchEvent(e){if(e.type==='input'&&this._value!==this.tracker){this.committed=this._value;this.tracker=this._value;}}
 }
 const email=new Input('email'), p1=new Input('password'),p2=new Input('password'), all=[email,p1,p2];
 const c={HTMLInputElement:Input,Event:class {constructor(type){this.type=type;}},
- document:{querySelectorAll:s=>s.includes('password')?[p1,p2]:[email],body:{innerText:'Create Account'}},
+ document:{querySelectorAll:s=>s==='input,textarea,[data-credential]'?all:s.includes('password')?[p1,p2]:[email],body:{innerText:'Create Account'}},
  getComputedStyle:()=>({visibility:'visible'}),requestAnimationFrame:f=>f(),setTimeout};c.window=c;
 vm.createContext(c);
 (async()=>{const result=await vm.runInContext(d.auth,c)({email:'synthetic@example.test',password:'synthetic-test-pass'});
 const committed=email.committed==='synthetic@example.test'&&[p1,p2].every(p=>p.committed==='synthetic-test-pass');
-writes=0;vm.runInContext(d.mask,c);vm.runInContext(d.unmask,c);
-console.log(JSON.stringify({committed,screenshot_readonly:writes===0,verified:result.verified}));})();
+writes=0;const masked=vm.runInContext(d.mask,c),hidden=[p1,p2].every(p=>p.style.visibility==='hidden');vm.runInContext(d.unmask,c);
+console.log(JSON.stringify({committed,screenshot_readonly:writes===0&&masked.masked_count===2&&hidden&&[p1,p2].every(p=>p.style.visibility===undefined),verified:result.verified}));})();
 '''
     result = subprocess.run([node, '-e', code], input=json.dumps({
         'auth': worker.AUTH_FIND_AND_FILL, 'mask': worker.MASK_CREDENTIALS,

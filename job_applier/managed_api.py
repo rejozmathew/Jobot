@@ -16,9 +16,13 @@ OPERATOR=frozenset({'identity','intake','eligibility','request_run','control','r
 OPERATOR=OPERATOR|frozenset({'lesson_observe','lesson_set_status','lesson_record_outcome','helper_register','helper_activate','register_asset','select_asset','register_assessment','namespace_alias','preview_archive','archive'})
 OPERATOR=OPERATOR|frozenset({'sessions_view','session_status'})
 OPERATOR=OPERATOR|frozenset({'answer_queue','answer_questions','queue_answer_retries','answer_retries','questions_for_attempt'})
+OPERATOR=OPERATOR|frozenset({'enrich_job','backfill_job_metadata'})
 WORKER=frozenset({'accept_run','claim','heartbeat','event','action_start','action_end','writer_state','submission_intent','finish','ack_control','ack_run_control','checkpoint','resume_run'})|READS
 WORKER=WORKER|frozenset({'observe_owned_lesson','report_upload','record_account_event','extend_budget','bind_target','target_state','request_mail_for_attempt','match_mail_for_attempt','browser_observe'})
 WORKER=WORKER|frozenset({'request_question','park_questions','answer_from_user','questions_for_attempt'})
+WORKER=WORKER|frozenset({'observe_job_metadata'})
+WORKER=WORKER|frozenset({'record_submission_rejection'})
+WORKER=WORKER|frozenset({'progress'})
 READS=READS|frozenset({'questions_for_attempt'})
 
 

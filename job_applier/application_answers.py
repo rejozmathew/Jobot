@@ -38,7 +38,7 @@ def _save_answer_history(config,package,attempt_id,answers,*,page,source,basis=N
     for answer in answers:
         row={key:answer.get(key,'') for key in ('field','question','answer')}
         if any(not isinstance(v,str) or not v.strip() for v in row.values()):continue
-        if re.search(r'password|passwd|\botp\b|token|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card',row['question']+' '+row['field'],re.I):continue
+        if re.search(r'password|passwd|\botp\b|(?:security|verification|authentication)[\s_-]*code|one[\s_-]?time|token|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card',row['question']+' '+row['field'],re.I):continue
         row.update(page=answer.get('page') or page,source=source,answer_basis=basis or 'not_recorded')
         try:reject_secrets(row)
         except ValueError:continue
@@ -53,9 +53,9 @@ def _save_answer_history(config,package,attempt_id,answers,*,page,source,basis=N
     return {'answer_history_path':str(path),'answers_added':added} if path.is_file() else {}
 
 
-async def capture_answers(browser_page,config,package,ownership,*,page='form',source='employer_form',basis=None):
+async def capture_answers(browser_page,config,package,ownership,*,page='form',source='employer_form',basis=None,call=None):
     # Called during filling/advancement, never as an extra final-review pass.
-    if not config.get('spool_dir'):return {}
+    if not config.get('spool_dir') and call is None:return {}
     from .browser_controls import FORM
     try:
         captured=await browser_page.evaluate_function(FORM,{'method':'answers','page':page})
@@ -68,7 +68,13 @@ async def capture_answers(browser_page,config,package,ownership,*,page='form',so
             for frame in router.frames.values():
                 child=await frame.evaluate_function(FORM,{'method':'answers','page':page})
                 captured['answers'].extend(child['answers'])
+                if not captured.get('context') and child.get('context'):captured['context']=child['context']
         context=captured.get('context',{});job=dict(package['job'])
+        if call:
+            try:
+                result=call('observe_job_metadata',**ownership,metadata={k:context[k] for k in ('url','company','title','source') if k in context})
+                job=result['job'];package['job']=job
+            except Exception:pass  # Audit/metadata errors do not change the form result.
         if not job.get('company') and context.get('company'):
             job.update(company=context['company'],company_source=context.get('source'))
         if not job.get('title') and context.get('job_title'):job['title']=context['job_title']

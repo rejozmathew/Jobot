@@ -7,7 +7,7 @@ from .managed_identity import RELATED, canonical_url
 from .managed_redaction import reject_secrets
 from .managed_shared import ProtocolError, dumps, uid
 
-PRIVATE = re.compile(r'password|passwd|\botp\b|one.?time.?code|verification.?code|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card', re.I)
+PRIVATE = re.compile(r'password|passwd|\botp\b|one.?time.?code|(?:verification|security|authentication).?code|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card', re.I)
 
 
 def human_input_capabilities(metadata=None):
@@ -83,6 +83,11 @@ class QuestionServices:
                 if old['field']==field and old['context']==data['context'] and old['question_key']!=key:
                     db.execute("UPDATE application_questions SET state='superseded' WHERE id=?",(old['id'],))
             existing=next((q for q in siblings if q['question_key']==key),None)
+            from .managed_events import field_task_context
+            semantic=field_task_context(data['question'],page=data['context'].get('page','form'),document=data['context'].get('document',''))
+            self._append_event(db,attempt,worker_id=worker_id,fence=fence,event_id=uid(),action_id=None,
+                event_type='checkpoint',observed_at=self.now(),duration_seconds=None,payload=dict(semantic,
+                    task_state='in_progress' if existing and existing['answer'] is not None else 'awaiting_input',source='answer_queue'))
             if existing:
                 db.execute('UPDATE application_questions SET last_attempt_id=?,last_seen_at=?,state=? WHERE id=?',
                     (attempt_id,self.now(),'answered' if existing['answer'] is not None else 'pending',existing['id']))

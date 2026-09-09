@@ -198,20 +198,23 @@ class ViewServices:
                 current['focused_context']=None
                 if focus:
                     job=self._get(db,'jobs',focus['job_id'])
-                    events=db.execute('SELECT payload_json FROM managed_events WHERE attempt_id=? ORDER BY observed_at DESC,recorded_at DESC,id DESC',(focus['id'],)).fetchall()
-                    payloads=[json.loads(e[0]) for e in events]
+                    events=[dict(e) for e in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY observed_at DESC,recorded_at DESC,id DESC',(focus['id'],))]
+                    payloads=[json.loads(e['payload_json']) for e in events]
                     latest=next((p for p in payloads if any(p.get(k) for k in ('phase','activity','page','url','tool_name'))),{})
                     issue=next((p.get('error_type') or p.get('reason_code') or p.get('category') for p in payloads if p.get('status') in ('failed','error','blocked','aborted')),None)
                     versions=json.loads(focus['versions_json'] or '{}')
                     from .managed_context import platform_for_url
                     current['focused_context']={'is_active':not bool(focus['completed_at']),'state':'active' if not focus['completed_at'] else 'last_completed',
-                        'attempt_id':focus['id'],'job':{k:job[k] for k in ('id','company','title','url')},
+                        'attempt_id':focus['id'],'job':{k:job[k] for k in ('id','company','title','url','metadata_json')},
                         'platform':focus.get('platform') or platform_for_url(job['url']),
                         'page':latest.get('page') or latest.get('url') or job['url'],'activity':latest.get('activity') or latest.get('phase') or latest.get('tool_name') or focus.get('activity'),
                         'worker_metadata':{k:versions.get(k) for k in ('skill_version','provider','model','protocol','reasoning_effort')},
                         'actual_reasoning_effort':versions.get('reasoning_effort'),
                         'latest_unresolved_issue':focus.get('failure_reason') or issue or (focus.get('evidence') if focus.get('outcome') not in ('applied','already_applied') else None),
                         'settings_hash':focus['settings_hash'],'uncertain_duration':focus['uncertain_duration']}
+                    from .managed_reports import application_progress
+                    current['focused_context']['progress']=application_progress(events,now=self.now(),ended_at=focus['completed_at'],
+                        actions=[dict(a) for a in db.execute('SELECT * FROM managed_actions WHERE attempt_id=?',(focus['id'],))])
             schema=db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
         return {'health':dict(self.health(),schema_version=schema),'settings':self.settings_view(),
             'jobs':jobs,'runs':runs,'accounts':accounts,'candidates':candidates,'current_run':current,

@@ -1,7 +1,7 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.13
+version: 0.3.14
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [windows]
@@ -25,6 +25,14 @@ The portable equivalent resolves everything from the returned session:
 Optional `--config <absolute-json>` and `--driver-id <conversation-id>` follow the
 shared skill. The ordinary conversation remains the application executor. The
 runner contains no model and retains one CDP connection during its bounded call.
+
+The runner records application stages and meaningful tasks in the shared
+timeline. Recruiting-source repair attaches its full question to native actions
+and completes only after the selected value commits. Ordinary step transitions
+close the prior step; technical retries remain in Debug details. Use the canonical
+`progress` operation to supply executor intent when a manual recovery needs it.
+Normal observations and answer capture also enrich missing job company/title
+from scoped posting metadata; existing labels and historical outcomes remain.
 
 1. Confirm role, identity, approved asset and submission authorization once.
 2. Call the runner for routine observe/act/wait/advance. It checks controls and

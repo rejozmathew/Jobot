@@ -8,6 +8,27 @@ FORM=(ROOT/'form_controls.js').read_text(encoding='utf-8')
 POINTER=(ROOT/'workday_click.js').read_text(encoding='utf-8')
 
 
+def next_operation(platform, observed=None):
+    """Actionable guidance from actual readiness; all actions retain their own guards."""
+    observed=observed or {};status=observed.get('status')
+    if platform=='workday':
+        return {'operation':'fast_forward','parameters':{'seconds':60},
+                'instruction':'Continue the owned Workday application with its routine runner.'}
+    if status in ('active','unknown'):
+        return {'operation':'browser_observe','parameters':{},
+                'instruction':'Observe the current writer until it settles. Inspect an unusable page with the shared recovery controls.'}
+    for action in ('continue','autofill'):
+        if observed.get('controls',{}).get(action,{}).get('enabled'):
+            return {'operation':'browser','parameters':{'method':'simplify','action':action},
+                    'instruction':('Start enabled Autofill now; inspect remaining questions after filling settles.' if action=='autofill' else
+                                   'Use enabled Continue and inspect the next application step.')}
+    if status in ('complete','needs_review','unsupported'):
+        return {'operation':'browser','parameters':{'method':'snapshot'},
+                'instruction':'Inspect remaining required questions. Preserve existing selections and use approved facts with shared select/check/fill operations.'}
+    return {'operation':'browser_observe','parameters':{},
+            'instruction':'Read the owned page and Simplify controls, then follow the returned next operation.'}
+
+
 async def observe(page, package):
     from .managed_context import platform_for_url
     if platform_for_url(package['job']['url'])=='workday':
@@ -39,6 +60,11 @@ async def observe(page, package):
                     dict(control,ref=frame.wrap(control.get('ref'))))
             native['blocking_errors'].extend(child['blocking_errors'])
             native['auth']=native.get('auth') or child.get('auth')
+            if not native.get('job_metadata') and child.get('job_metadata'):native['job_metadata']=child['job_metadata']
+            for group in child.get('verification',{}).get('groups',[]):
+                native.setdefault('verification',{}).setdefault('groups',[]).append(dict(group,
+                    refs=[frame.wrap(ref) for ref in group['refs']],
+                    **({'resend_ref':frame.wrap(group['resend_ref'])} if group.get('resend_ref') else {})))
         native['application_frames']={'count':len(router.frames),'diagnostics':router.diagnostics}
         shared=_merge_writers(shared,writers,router.diagnostics)
     return dict(shared,**native,simplify_inventory=simplify_inventory)
@@ -101,6 +127,8 @@ async def observe_writers(page,package):
 def inventory(observed, package):
     from .workday_fast import screen_inventory
     result=screen_inventory(observed,package)
+    result['next_operation']=next_operation(package.get('platform'),observed)
+    if observed.get('verification',{}).get('groups'):result['verification']=observed['verification']
     result['instruction']=('Use observed refs with browser select, check, fill, press or click. Values come from approved facts or explicit user choices. '
         'Complete required questions using answer_context.standard_answers, approved profile facts and saved answers before requesting human input. '
         'A helper mismatch or failed selection is a recovery handoff, not an application outcome. Inspect actual options, refresh stale controls, '
@@ -131,10 +159,27 @@ async def form_action(page, params):
         args={'ref':ref} if ref else dict(target)
         args['expected_url']=await page.evaluate('location.href')
         return await page.click_observed(POINTER,args)
+    async def verify_selection(value=None,label=None):
+        previous=None;stable=0;result={}
+        # Rerendered controls are reacquired by their unique saved descriptor.
+        # Two matching reads avoid treating a transient input update as a commit.
+        for _ in range(10):
+            result=await command('verify_select',value=value,label=label)
+            signature=(result.get('value'),result.get('label'))
+            stable=stable+1 if result.get('committed') and signature==previous else int(bool(result.get('committed')))
+            if stable>=2:return dict(result,execution='executed')
+            previous=signature
+            await asyncio.sleep(.1)
+        options=await command('select_options')
+        return dict(result,committed=False,execution='executed',reason=result.get('reason') or 'selection_mismatch',
+                    options=options.get('options',[]))
     if method=='press':
         focused=await command('focus')
         if not focused.get('committed'):return {'committed':False,'reason':'control_focus_unconfirmed'}
-        await page.press_key(params['key']);return {'pressed':True}
+        await page.press_key(params['key'])
+        if 'label' in params or 'value' in params:
+            return dict(await verify_selection(params.get('value'),params.get('label',params.get('value'))),pressed=True)
+        return {'pressed':True,'execution':'executed','answer_verified':False}
     if method=='fill':
         result=await command('fill',value=params.get('value'))
         await asyncio.sleep(.15)
@@ -154,13 +199,12 @@ async def form_action(page, params):
     supplied={k:params[k] for k in ('value','label') if k in params}
     if not supplied or any(not isinstance(v,str) for v in supplied.values()):raise ValueError('exact_option_required')
     wanted=params.get('label',params.get('value'))
-    if before.get('expanded')!='true' and wanted in (before.get('value'),before.get('label')):
+    if wanted in (before.get('value'),before.get('label')):
         return {'committed':True,'unchanged':True,'value':before.get('value'),'label':before.get('label')}
     if before['tag']=='SELECT':
         result=await command('select_native',**supplied)
         if not result.get('committed'):return result
-        await asyncio.sleep(.15)
-        return await command('verify_select',value=result['value'],label=result['label'])
+        return await verify_selection(result['value'],result['label'])
     # Workday, Greenhouse and custom ARIA comboboxes use the same association rules.
     if before.get('role')!='combobox' and before.get('haspopup') not in ('listbox','true','menu'):
         return {'committed':False,'reason':'select_control_unrecognized'}
@@ -175,8 +219,7 @@ async def form_action(page, params):
         if len(matches)==1:
             result=await click(matches[0]['ref'])
             if not result.get('clicked'):return result
-            await asyncio.sleep(.2)
-            return await command('verify_select',value=matches[0]['value'],label=matches[0]['label'])
+            return await verify_selection(matches[0]['value'],matches[0]['label'])
         if attempt==0 and before['tag']=='INPUT':
             await command('fill',value=wanted)
         await asyncio.sleep(.15)

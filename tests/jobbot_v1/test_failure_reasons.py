@@ -457,11 +457,14 @@ class FakeElement {{
   }}
   setAttribute(attr, val) {{ this.attributes[attr] = String(val); }}
   getAttribute(attr) {{ return this.attributes[attr] !== undefined ? this.attributes[attr] : null; }}
+  querySelector(sel) {{ return this.querySelectorAll(sel)[0] || null; }}
   querySelectorAll(sel) {{
     const res = [];
     function scan(el) {{
       for (const c of el.children) {{
-        if (c.tagName && sel.toUpperCase().includes(c.tagName)) res.push(c);
+        if (c.tagName && (sel.startsWith('.') ? c.className.split(' ').includes(sel.slice(1)) :
+          sel.startsWith('details[') ? c.tagName==='DETAILS' && 'progressKey' in c.dataset :
+          sel.toUpperCase()===c.tagName)) res.push(c);
         scan(c);
       }}
     }}
