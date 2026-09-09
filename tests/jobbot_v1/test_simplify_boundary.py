@@ -123,7 +123,7 @@ def test_decide_ready_enabled_autofill_preferred():
         "status": "ready",
         "controls": {
             "autofill": {"ref": "btn-auto-1", "enabled": True},
-            "continue": {"ref": "btn-cont-1", "enabled": True},
+            "continue": {"ref": "btn-cont-1", "enabled": False},
         },
         "source": "observed_dom",
     }
@@ -208,7 +208,8 @@ def test_decide_no_inference_that_all_controls_available_means_complete():
     }
     decision = cls.decide(obs, already_attempted=False)
     assert decision["action"] != "complete"
-    assert decision["action"] == "autofill"
+    assert decision["action"] == "continue"
+    assert obs["status"] == "ready"
 
 
 def test_decide_auth_and_final_submission_not_part_of_helper():

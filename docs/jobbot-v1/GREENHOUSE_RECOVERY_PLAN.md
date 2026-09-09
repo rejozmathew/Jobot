@@ -3,8 +3,10 @@
 Status: saved plan only, September 9, 2026. No changes in this plan have been
 implemented. The preceding Workday and shared-runtime checkpoint is `68a7865`
 (`Improve application recovery and Workday advancement`), saved locally before
-this investigation. Its syntax and diff checks passed; regression tests remain
-deferred under the user's instruction. No new application was run for this plan.
+this investigation. Its syntax and diff checks passed. Regression was deferred
+when this plan was saved, then separately authorized for the current code; see
+[September 9 checkpoint regression](REGRESSION_2026_09_09.md). No new application
+was run for this plan, and none of its proposed features is implemented yet.
 
 ## Intended result
 
@@ -289,9 +291,9 @@ as fixtures. Existing test homes include `test_application_runtime.py`,
 `test_operator_ui.py`, `test_configured_credentials.py`, `test_local_sessions.py`
 and the Workday dropdown/confirmation coverage in `tests/jobbot_v1`.
 
-No regression suite is run for this saved plan. When implementation and testing
-are requested, first demonstrate the focused failures, implement each bounded
-change, run relevant checks, then one final managed suite through the repository
+Current-code regression is recorded in the linked checkpoint report. When this
+plan's implementation is requested, first demonstrate the focused failures,
+implement each bounded change, run relevant checks, then one final managed suite through the repository
 virtualenv: `.venv/Scripts/python.exe -m pytest tests/jobbot_v1 -q`. Follow the
 repository's configured validation delegation and independently inspect its
 results. Any later live acceptance uses a separately authorized real application

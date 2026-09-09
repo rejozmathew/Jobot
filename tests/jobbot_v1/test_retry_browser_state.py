@@ -66,6 +66,7 @@ def test_cleanup_precedes_navigation_and_does_not_clear_on_attach(tmp_path, monk
     monkeypatch.setattr(workspace_host, 'browser_command', command)
     monkeypatch.setattr(CDPBrowser, 'connect', connect)
     host = workspace_host.WorkspaceHost.__new__(workspace_host.WorkspaceHost)
+    host.startup_timing = {}
     host.workspace = {'cdp_url': 'http://127.0.0.1:12345', 'user_data_dir': str(tmp_path), 'mode': 'headless'}
     host.config = {'require_simplify': False}
     host.service = SimpleNamespace(job=lambda _: {'url': job_url}, now=lambda: '2026-09-09T00:00:00+00:00')
@@ -116,6 +117,7 @@ def test_real_retry_clears_employer_data_but_preserves_another_origin(tmp_path, 
 
             monkeypatch.setattr(workspace_host, 'browser_command', command)
             host = workspace_host.WorkspaceHost.__new__(workspace_host.WorkspaceHost)
+            host.startup_timing = {}
             host.workspace = {'cdp_url': page.fixture_endpoint, 'user_data_dir': str(tmp_path / 'browser-top'), 'mode': 'headless'}
             host.config = {'require_simplify': False}
             host.service = SimpleNamespace(job=lambda _: {'url': url}, now=lambda: '2026-09-09T00:00:00+00:00')

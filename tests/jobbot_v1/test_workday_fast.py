@@ -22,7 +22,7 @@ def test_continue_before_review_warning():
 
 
 def test_native_continue_skips_simplify_review_of_already_filled_fields():
-    s=snapshot(review_count=2);s['native']={'continue':{'enabled':True}}
+    s=snapshot(review_count=2);s['controls']={};s['native']={'continue':{'enabled':True}}
     assert module().choose(s,{})=='native_continue'
 
 
@@ -32,9 +32,10 @@ def test_unknown_or_active_writer_never_advanced(status):
     assert m.choose(snapshot(status), {}) == 'wait'
 
 
-def test_retry_requires_failed_advancement_and_is_bounded():
+def test_failed_advancement_does_not_repeat_a_completed_page_autofill():
     m=module(); s=snapshot(); s['controls']={'autofill': {'enabled':True}}
-    assert m.choose(s, {'fills':1, 'advance_failed':True})=='retry'
+    assert m.choose(s, {'advance_failed':True})=='autofill'
+    assert m.choose(s, {'fills':1, 'advance_failed':True})=='blocked'
     assert m.choose(s, {'fills':2, 'advance_failed':True})=='blocked'
 
 
@@ -165,12 +166,14 @@ def test_candidate_home_controls_never_authorize_writes():
     assert m.choose(s,{})=='confirm_only'
 
 
-def test_pending_advancement_survives_a_bounded_call():
+def test_pending_advancement_survives_a_bounded_call(monkeypatch):
     h=Harness([snapshot()]);r=h.runner()
     asyncio.run(r.run(seconds=1))
     assert h.clicks==['continue']
     assert r.state.get('pending')==['my_experience','continue']
     r2=h.runner();r2.state=r.state;r2.pending=tuple(r.state['pending']);r2.last_action=h.now
+    async def no_source(*args,**kwargs):return None
+    monkeypatch.setattr(r2,'fill_source',no_source)
     asyncio.run(r2.run(seconds=8))
     assert h.clicks==['continue']
 

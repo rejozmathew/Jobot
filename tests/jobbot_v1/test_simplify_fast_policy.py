@@ -251,8 +251,8 @@ class DOMSeamPort:
 # ===========================================================================
 
 
-def test_decide_fast_mode_advances_needs_review_with_continue():
-    """In fast mode, quiescent needs_review with enabled Continue advances despite warnings."""
+def test_enabled_continue_advances_needs_review_in_both_boundary_modes():
+    """Both boundary modes prefer enabled Continue after writer settlement."""
     obs = {
         "url": "https://example.wd1.myworkdayjobs.com/apply",
         "status": "needs_review",
@@ -261,9 +261,9 @@ def test_decide_fast_mode_advances_needs_review_with_continue():
             "autofill": {"ref": None, "enabled": False},
         },
     }
-    # Conservative mode (default) returns review
+    # Shared policy applies to the default boundary as well as the fast runner.
     dec_conservative = SimplifyBoundary.decide(obs, fast=False)
-    assert dec_conservative["action"] == "review"
+    assert dec_conservative["action"] == "continue"
 
     # Fast mode advances
     dec_fast = SimplifyBoundary.decide(obs, fast=True)

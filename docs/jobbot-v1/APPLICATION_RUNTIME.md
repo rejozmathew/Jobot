@@ -38,7 +38,7 @@ continue with an executor-selected label. Native application entry prefers
 Apply Manually and other direct Apply controls over chat. These changes are
 included in the September 9 checkpoint. Attempt 44 exercised the flow and
 submitted with user intervention; its remaining issues motivated the follow-up
-changes below. The checkpoint has not had a regression suite run.
+changes below. The checkpoint's subsequent regression results are recorded below.
 
 Workday prioritizes enabled Simplify Continue after settlement. If advancement
 cannot proceed, it uses available page Autofill once before manual repair. Its
@@ -64,7 +64,7 @@ Choosing answers remains executor reasoning governed by the common job-apply
 skill, not arbitrary yes/no generation. The human queue is invoked
 only explicitly and still reuses policy/exact saved answers. These changes are
 included in the requested local checkpoint; the final follow-up changes still
-need live and regression validation.
+need live validation.
 
 Page recovery is shared across every ATS. `browser` method `reload` deliberately
 cancels the current document, so an unknown Simplify writer cannot deadlock the
@@ -100,9 +100,13 @@ These distinguish runtime delay from executor time before the start call; the
 runtime cannot measure prompt-to-tool latency on its own. For historical attempt
 43, reservation to connected was 8.85 seconds; earlier executor/preflight time
 was not captured. The user requested a local checkpoint before Greenhouse work.
-Python/JavaScript syntax and diff checks passed. Regression tests remain deferred
-under the user's prior instruction; no new live application was run for this
-checkpoint. The Greenhouse follow-up is a separate planning task.
+Python/JavaScript syntax and diff checks passed. Regression was initially deferred
+under the user's prior instruction, then authorized and completed through
+Antigravity/Gemini: 695 managed tests passed, with no failures or skips and four
+existing deprecation warnings. Test corrections, added coverage and independently
+checked evidence are in [September 9 checkpoint regression](REGRESSION_2026_09_09.md).
+No new live application was run for this checkpoint or regression. The Greenhouse
+follow-up is a separate planning task.
 
 The saved [Greenhouse recovery and application progress plan](GREENHOUSE_RECOVERY_PLAN.md)
 investigates attempt 45 and the portal's missing company labels. It proposes

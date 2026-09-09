@@ -158,7 +158,7 @@ def test_slow_page_and_missing_extension_remain_available_for_recovery(tmp_path,
     monkeypatch.setattr(CDPBrowser,'connect',connect)
     monkeypatch.setattr(SimplifyBoundary,'observe',observe)
     h=workspace_host.WorkspaceHost.__new__(workspace_host.WorkspaceHost)
-    h.workspace=workspace;h.config={'require_simplify':True}
+    h.workspace=workspace;h.config={'require_simplify':True};h.startup_timing={}
     h.service=SimpleNamespace(job=lambda job_id:{'url':job_url},now=lambda:'2026-09-09T00:00:00+00:00')
     target,readiness=asyncio.run(h.prepare_target({'job_id':'job'}))
     assert target=='owned' and readiness['target_operable']
@@ -242,12 +242,13 @@ def test_optional_progress_event_failure_does_not_abort_runner(tmp_path):
     assert h.runner.state.get('diagnostic_error')=='OSError'
 
 
-def test_new_form_evidence_can_trigger_another_fill_after_earlier_retries():
+def test_changed_field_values_do_not_restart_autofill_on_the_same_page():
     from job_applier.workday_fast import choose
     observed={'step':'my_information','status':'ready','fingerprint':'changed-required-fields',
         'controls':{'autofill':{'enabled':True}}}
     state={'fills':2,'fill_attempts':{'earlier-fields':2},'advance_failed':True}
-    assert choose(observed,state) in ('retry','autofill')
+    assert choose(observed,state)=='blocked'
+    assert choose(observed,{})=='autofill'
 @pytest.mark.parametrize('known_source',['saved_answer','configured_policy_control_failure'])
 def test_known_answers_do_not_create_new_human_questions(tmp_path,monkeypatch,known_source):
     from unittest.mock import AsyncMock
