@@ -15,6 +15,7 @@
 
 ## Engineering
 
+- Ask the user for explicit approval before adding any new application-execution restriction, refusal condition, retry limit, approval requirement or blocking rule in code, database constraints, helpers or executor instructions. Explain the concrete behavior it would prevent. Do not silently add such rules while fixing another problem; removal of an existing unnecessary veto does not require renewed approval.
 - Read `docs/jobbot-v1/APPLICATION_RUNTIME.md` for helper responsibilities, shared versus Workday scope, and data ownership before adding another helper.
 - Preserve dirty user changes. Never use live applications as fixtures or alter private production records to make tests pass.
 - Add a focused failing regression, implement the bounded fix, then run the relevant tests and one final suite. Standard managed-suite command: `python -m pytest tests/jobbot_v1 -q`.

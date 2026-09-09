@@ -9,7 +9,7 @@ Preserved reliable approaches:
 - Prefer native widget interactions for Ashby-style Yes/No buttons. Changing a hidden checkbox does not reliably update framework state.
 - A required conditional follow-up may need a truthful “not applicable” value, but only when the selected facts justify it.
 - Preferred-name fields can be present or required. File input values may remain empty for browser privacy; verify the attachment chip and selected document identity instead.
-- Emailed security codes use `credentials` mode `verification`: inspect the observed group, request a fresh code through its observed resend control after interruption, then fill the complete group privately and submit promptly. Pass refs and challenge identity only; never issue one ordinary fill call per character or expose a code to the human-answer queue.
+- Read security emails through Hermes Gmail. The LLM chooses the relevant code closest to the request time, rechecking delayed mail as needed. Enter it with ordinary browser fill or pass `value` with the observed group to `credentials` mode `verification`; then submit and follow the employer response. No separate mailbox verifier decides whether entry is allowed.
 
 In approved submit mode, after material fields are correct and submission intent exists, use the enabled Submit control without a redundant full audit. Confirmation URL/text or an authoritative already-applied signal establishes outcome. A rejected form remains unsubmitted even if every visible input appears filled. Legacy successful forms are historical evidence, not universal current compatibility.
 

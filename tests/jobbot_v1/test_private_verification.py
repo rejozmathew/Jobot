@@ -21,7 +21,7 @@ def test_every_verification_segment_is_private_and_excluded_from_answer_history(
                               {'method':'answers','page':'application_questions'}])
     group=result['results'][0]['groups'][0]
     assert group['kind']=='email_code' and group['length']==8 and len(group['refs'])==8
-    assert result['results'][1]['reason']=='use_private_credentials_helper'
+    assert result['results'][1]['committed'] is True
     assert all(f['private'] for f in result['observation']['inventory'])
     assert result['results'][2]['answers']==[]
 
@@ -65,43 +65,6 @@ def test_eight_segments_fill_together_and_return_only_commitment():
     assert 'ABCD2345' not in json.dumps(result['result'])
 
 
-def mail_fixture(**updates):
-    return dict({'id':'fixture-message','from':'Example <verify@greenhouse.io>',
-        'to':'Candidate <candidate@example.test>','date':'Wed, 09 Sep 2026 12:00:05 +0000',
-        'subject':'Verify your Example application','body':'Example Director application. Your security code is ABCD2345.'},**updates)
-
-
-def resolve_mail(monkeypatch, messages):
-    def fake_mail(config,*args):
-        if args[0]=='search':return [{'id':message['id']} for message in messages]
-        return next(m for m in messages if m['id']==args[1])
-    monkeypatch.setattr(hermes_gmail,'_gmail_json',fake_mail)
-    package={'job':{'company':'Example','title':'Director','url':'https://boards.greenhouse.io/example/jobs/12345'},
-        'platform':'greenhouse','attempt':{'profile_json':{'identity':{'email':'candidate@example.test'}}}}
-    return hermes_gmail.verification_value({},package,{'requested_at':'2026-09-09T12:00:00+00:00','length':8},
-        now=datetime(2026,9,9,12,1,tzinfo=timezone.utc))
-
-
-@pytest.mark.parametrize('changes',[
-    {'to':'other@example.test'}, {'date':'Wed, 09 Sep 2026 11:59:59 +0000'},
-    {'from':'unrelated@another.test'}, {'subject':'Password reset','body':'Your reset code is ABCD2345.'},
-    {'body':'Other company application. Your security code is ABCD2345.'},
-])
-def test_mail_must_match_recipient_portal_purpose_employer_and_current_request(monkeypatch,changes):
-    with pytest.raises(ValueError,match='correlated_verification_mail_unavailable'):
-        resolve_mail(monkeypatch,[mail_fixture(**changes)])
-
-
-def test_multiple_correlated_messages_are_not_resolved_by_newest(monkeypatch):
-    with pytest.raises(ValueError,match='ambiguous_verification_mail'):
-        resolve_mail(monkeypatch,[mail_fixture(),mail_fixture(id='another-message')])
-
-
-def test_correlated_code_is_resolved_only_inside_private_filler(monkeypatch):
-    result=resolve_mail(monkeypatch,[mail_fixture()])
-    assert result['value']=='ABCD2345' and result['message_id']=='fixture-message'
-
-
 def test_verification_errors_do_not_include_mail_or_code(monkeypatch):
     async def fail(*args,**kwargs):raise RuntimeError('ABCD2345 body and token should never escape')
     monkeypatch.setattr(managed_credentials,'fill_page_verification',fail)
@@ -139,13 +102,6 @@ def test_real_segmented_group_resend_fresh_fill_and_stale_refs_are_private(tmp_p
     html=SEGMENTS.replace('</fieldset>','<button type="button" id="resend">Resend code</button></fieldset>')+'''
 <script>resend.onclick=e=>{if(e.isTrusted)document.body.dataset.resent='true'};</script>'''
     monkeypatch.setattr(fixture,'FORM_HTML',html)
-    calls=[]
-    def private_value(config,package,challenge):
-        assert challenge['requested_at'] and challenge['length']==8
-        calls.append(challenge)
-        return {'value':'ABCD2345','message_id':'synthetic','requested_at':challenge['requested_at'],
-                'received_at':datetime.now(timezone.utc).isoformat()}
-    monkeypatch.setattr(hermes_gmail,'verification_value',private_value)
     async def run():
         async with fixture.fixture_browser(tmp_path,mode=mode) as (page,package,submissions):
             screen=await browser_controls.observe(page,package);group=screen['verification']['groups'][0]
@@ -156,10 +112,10 @@ def test_real_segmented_group_resend_fresh_fill_and_stale_refs_are_private(tmp_p
             document,_=await resolve_control(page,{'ref':group['refs'][0]})
             assert await document.evaluate("document.body.dataset.resent==='true'")
             wrong=await managed_credentials.fill_page_verification({},package,page,dict(base,refs=group['refs'][:-1],action='fill'))
-            assert wrong['error']=='verification_group_changed' and calls==[]
+            assert wrong['error']=='verification_group_changed'
             assert await document.evaluate("[...document.querySelectorAll('input')].every(e=>!e.value)")
-            filled=await managed_credentials.fill_page_verification({},package,page,dict(base,action='fill'))
-            assert filled['values_committed'] and len(calls)==1
+            filled=await managed_credentials.fill_page_verification({},package,page,dict(base,action='fill',value='ABCD2345'))
+            assert filled['values_committed']
             mask=await document.evaluate(managed_credentials.MASK_CREDENTIALS)
             assert mask['masked_count']==8
             assert await document.evaluate("[...document.querySelectorAll('input')].every(e=>e.style.visibility==='hidden')")

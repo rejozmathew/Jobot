@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.8
+version: 0.5.9
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -374,30 +374,27 @@ unfinished attempts, including submission-unknown history, remain retryable.
 
 ## Mail and private identity
 
-An emailed security code is a supported private verification flow when the
-configured mailbox and observed controls match. Startup exposes `mailbox` with
-availability and `wrapper_argv`; snapshot exposes verification groups and the
-next credentials operation. Do not send security codes to `request_answers` or
-ask the user to retrieve mail that the configured private helper can retrieve.
+Read the verification email using the existing Hermes Gmail skill. The LLM
+identifies the relevant message and extracts the code. With multiple relevant
+messages, choose the one closest to the observed request timestamp. If the email
+has not arrived, check again in this same application. A helper miss does not
+mean the user must retrieve or enter the code, and does not end the application.
 
-Finish other form corrections first. Use `credentials` with
-`{"mode":"verification","action":"inspect","refs":["<observed-ref>"]}`.
-Keep the returned group's complete ordered `refs` and opaque `challenge_ref`.
-For a fresh challenge use `action:"fill"` with those fields; the helper resolves
-the correlated message privately and fills one input or every segment together.
-For the initial challenge, `requested_at` may identify an actual observed request
-time; never invent one. After an interruption or explicit code rejection, use
-`action:"resend"` with the group's observed `resend_ref`, then use the returned
-fresh group in `action:"fill"`. Resend records the request time automatically.
-Submit promptly once `values_committed:true`. There is no assumed provider TTL.
+Enter the selected code with ordinary `browser fill` on the observed input refs,
+or use the convenience operation `credentials` with `mode:"verification"`,
+`action:"fill"`, the group's `challenge_ref` and ordered `refs`, and `value` set
+to the code. `action:"inspect"` provides the current group; `action:"resend"`
+uses an observed resend control when needed. The fill helper enters the supplied
+code and reports whether the fields accepted it. It does not read the mailbox,
+classify the delivery channel or decide whether a message is allowed. The
+challenge ref identifies form elements; it is not an email correlation token.
 
-The helper checks recipient, sender/portal, employer, code purpose and request
-time; unrelated, stale or multiple matching messages require recovery. Stale or
-incomplete refs cause no partial fill. Never include a code in command arguments,
-ordinary browser fill, progress, answer history or messages. Values remain inside
-the private credential boundary; output contains only group commitment and
-message/request timing. A genuine CAPTCHA or unsupported verification remains an
-evidenced executor handoff. The private mode does not bypass challenges.
+Use the normal submit operation after entering the code. The employer's response
+determines whether it is accepted or expired. If rejected, inspect the latest
+email or request another code and continue. Keep codes out of progress messages,
+reusable answer history and user-facing summaries; do not create a human-answer
+queue item for email the executor can read. Code fields remain excluded from
+answer history and masked in private screenshots, without prohibiting entry.
 
 The selected config supplies `gmail_script` and `mailbox_token_path`. Use the
 existing mailbox capability from the same conversation:
@@ -406,8 +403,10 @@ existing mailbox capability from the same conversation:
 .venv/Scripts/python.exe -m job_applier.hermes_gmail --script <configured-script> --token-file <configured-token-file> gmail search <narrow-query> --max 5
 ```
 
-The same prefix supports `gmail get <message-id>`. Correlate portal, actual account
-recipient, purpose and request time. Use codes/links privately; never log mailbox
+The same prefix supports `gmail get <message-id>`. This invokes the existing
+Hermes Gmail script with the selected mailbox credential. The LLM reads the
+message and decides which code fits the current application; no JobBot mailbox
+verifier runs during field entry. Use codes/links privately; never log mailbox
 bodies, passwords, OTPs or reset tokens. Do not use another personal mailbox.
 Routine account creation, relevant verification and approved uploads/submission
 follow standing configured authorization. Respect actual provider permissions.

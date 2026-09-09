@@ -7,6 +7,13 @@ Branch: `codex/runtime-simplification`
 Date: September 9, 2026. Resolve and record the branch HEAD before auditing.
 This document is a starting point, not a claim that every restriction is removed.
 
+Later September 9 follow-up: email selection now belongs entirely to the LLM
+using Hermes Gmail. The `email_code` delivery-label veto and JobBot's automatic
+mailbox verifier were deleted. The executor chooses the relevant message closest
+to the request timestamp and supplies its code to normal browser fill or the
+grouped field helper. The user also explicitly requires approval before any new
+execution restriction or refusal condition is added; this is recorded in AGENTS.md.
+
 ## Problem and desired behavior
 
 The product should complete the user's authorized job application. Helpers are
@@ -37,6 +44,7 @@ Use Git history to see the removed conditions and trace all surviving callers.
 
 | Removed or relaxed restriction | Implemented behavior and source |
 | --- | --- |
+| A page-label classification or programmatic email verifier refuses an executor-selected code | Removed `verification_delivery_unconfirmed`, automatic Gmail lookup and sender/company/template/timestamp/ambiguity filtering from code entry. Hermes reads mail; the LLM selects; the browser enters the supplied code. `managed_credentials.py`, `hermes_gmail.py`, `browser_helpers/form_controls.js`. |
 | Prior failed/interrupted/unknown attempt requires non-submission reconciliation before retry | A new request starts another attempt unless success is recorded. Historical evidence is preserved. `managed.py`, `application_runtime.py`, `managed_questions.py`, `static/jobbot.js`; checkpoint `0383482`. |
 | A Submit click permanently disables fields, answers, credentials and recovery | Removed `submission_pending_read_only` conditions from browser, host, answer and reload paths. `application_runtime.py`, `workspace_host.py`, `managed_events.py`, `managed_questions.py`. |
 | Only a specially scoped rejection proof permits another Submit | Shared `submission.py` reports ordinary `application_incomplete` work and allows another explicit current-control submission. It checks delayed confirmation first. The compatibility rejection endpoint is no longer a prerequisite. |

@@ -180,11 +180,11 @@ FILL_VERIFICATION = r"""async args => {
 
 
 async def fill_page_verification(config,package,page,params):
-    """Resolve a transient value from configured mail; no reusable account record."""
+    """Enter the executor-selected code; mailbox interpretation belongs to the LLM."""
     from .browser_controls import FORM,click_control
     from .browser_frames import resolve_control,FramePage
-    from .hermes_gmail import mailbox_handoff,verification_value
-    allowed={'target_id','mode','action','refs','challenge_ref','requested_at','resend_ref'}
+    from .hermes_gmail import mailbox_handoff
+    allowed={'target_id','mode','action','refs','challenge_ref','requested_at','resend_ref','message_id','received_at','value'}
     if set(params)-allowed:return {'values_committed':False,'error':'invalid_verification_parameters'}
     if not is_same_application_scope(package['job']['url'],await page.evaluate('location.href')):
         return {'values_committed':False,'error':'verification_target_scope_mismatch'}
@@ -204,12 +204,11 @@ async def fill_page_verification(config,package,page,params):
         **({'resend_ref':document.wrap(g['resend_ref'])} if g.get('resend_ref') else {})) if isinstance(document,FramePage) else g
         for g in observed['groups']]
     handoff={'groups':public_groups,'mailbox':mailbox_handoff(config),
-             'instruction':'Complete other form corrections first. Use the observed resend control after an interruption; fill this challenge privately and submit promptly. A code value never belongs in browser fill or the human-answer queue.'}
+             'instruction':'Read the email with the existing Hermes Gmail skill. Choose the relevant code closest to the request timestamp and pass it as value with these refs, or fill the observed code fields with browser fill. Recheck delayed mail in this same application. This helper only enters the selected code; it does not verify email eligibility. Do not finalize blocked or ask for manual entry merely because a helper did not recognize the message.'}
     action=params.get('action','fill')
     if action=='inspect':return dict(handoff,values_committed=False)
     group=next((g for g in observed['groups'] if g['challenge_ref']==params.get('challenge_ref')),None)
     if not group or group['refs']!=local_refs:return dict(handoff,values_committed=False,error='verification_group_changed')
-    if group['kind']!='email_code':return dict(handoff,values_committed=False,error='verification_delivery_unconfirmed')
     if action=='resend':
         current,local=await resolve_control(page,{'ref':params.get('resend_ref','')})
         if current is not document or not group.get('resend_ref') or local['ref']!=group['resend_ref']:
@@ -229,17 +228,12 @@ async def fill_page_verification(config,package,page,params):
             if current_group.get('resend_ref'):current_group['resend_ref']=document.wrap(current_group['resend_ref'])
         return {'values_committed':False,'resend_requested':True,'requested_at':requested,'group':current_group}
     if action!='fill':return {'values_committed':False,'error':'invalid_verification_action'}
-    challenge=dict(group,requested_at=group.get('requested_at') or params.get('requested_at'))
-    try:secret=await asyncio.to_thread(verification_value,config,package,challenge)
-    except ValueError as exc:
-        known={'correlated_verification_mail_unavailable','ambiguous_verification_mail','observed_verification_request_required',
-               'configured_mailbox_unavailable','configured_mailbox_identity_unavailable','mailbox_read_failed','mailbox_response_unrecognized'}
-        return dict(handoff,values_committed=False,error=str(exc) if str(exc) in known else 'verification_mail_unavailable')
+    if 'value' not in params:return dict(handoff,values_committed=False)
     result=await document.evaluate_function(FILL_VERIFICATION,{
-        'refs':local_refs,'challenge_ref':group['challenge_ref'],'value':secret['value']})
+        'refs':local_refs,'challenge_ref':group['challenge_ref'],'value':params['value']})
     # `value` is intentionally never copied out of this private call.
-    return dict(result,challenge_ref=group['challenge_ref'],message_id=secret['message_id'],
-                requested_at=secret['requested_at'],received_at=secret['received_at'],
+    return dict(result,challenge_ref=group['challenge_ref'],message_id=params.get('message_id'),
+                requested_at=group.get('requested_at') or params.get('requested_at'),received_at=params.get('received_at'),
                 instruction='Submit promptly using the existing authorized submission boundary.' if result.get('values_committed') else
                 'Reinspect the current verification group before recovery; no input value is returned.')
 

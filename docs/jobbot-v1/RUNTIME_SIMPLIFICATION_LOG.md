@@ -1,5 +1,29 @@
 # Runtime simplification implementation log
 
+## Executor-selected email codes - 2026-09-09
+
+The follow-up Philo transcript exposed `verification_delivery_unconfirmed`.
+This was a field-label heuristic refusing `kind != email_code` before any
+mailbox lookup, not an employer rejection or a failed email/challenge match.
+The repository interpreter also lacked the Google client library used by the
+existing Hermes Gmail script, while the executor's ordinary Hermes read worked.
+
+Removed the delivery-label veto and the entire automatic mailbox selection/
+verification function. The LLM reads mail with Hermes, chooses the relevant
+code closest to the request timestamp, and enters it with ordinary browser
+fill or supplies `value` to the grouped code-field helper. No sender, company,
+template, request-time or multiple-message rule in JobBot approves that choice.
+The helper does not read mail. Browser fill no longer refuses code fields;
+existing screenshot masking and exclusion from reusable answers remain.
+
+The missing Google library is declared and installed in the repository environment
+for the existing Hermes script wrapper. Canonical instructions and the helper map
+reflect executor ownership of email interpretation. Three obsolete mailbox-rule
+test functions were removed and existing entry expectations aligned. No new tests
+or regression runs. No live application or mailbox was used as a fixture.
+The user's new standing instruction is recorded in AGENTS.md: obtain explicit
+approval before adding any new application-execution restriction or refusal rule.
+
 ## Current-form continuation and removal of posting/account locks - 2026-09-09
 
 The earlier same-attempt uncertainty restrictions below are superseded by

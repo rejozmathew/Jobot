@@ -201,7 +201,7 @@
  }
  if(!visible(el)||!native(el)||!enabled(el))return {committed:false,reason:'control_unavailable',execution:'not_executed'};
  if(args.ref)scope.bindings.set(args.ref,key(el));
- if(privateControl(el))
+ if(el.type==='password')
   return {committed:false,reason:'use_private_credentials_helper',execution:'not_executed'};
  const value=()=>el.tagName==='SELECT'?{value:el.value,label:el.selectedOptions[0]?.text||''}:
   {value:choice(el)?selectedValue(el):(/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el)),

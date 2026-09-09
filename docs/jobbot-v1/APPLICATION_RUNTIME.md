@@ -142,19 +142,20 @@ existing bounded call. Results distinguish execution from answer commitment.
 The executor decides recovery from scoped current options; the helper does not
 turn a mismatch into an application outcome.
 
-Private verification extends `credentials` with `mode:verification` and
-`action:inspect|resend|fill`. It uses an observed opaque `challenge_ref`, complete
-ordered `refs`, optional observed `resend_ref`, and an actual `requested_at` when
-needed for an initial challenge. Resend records a fresh request time itself.
-The document-local group holds exact elements, so unlabeled segments remain
-stable during repeated reads and changed groups cannot partially fill. A private
-resolver checks configured mailbox availability, recipient, sender/portal,
-employer, security-code purpose, request time and one matching message. The
-transient value stays inside the private fill call; public results include only
-commitment, challenge/message identity and timing. No reusable account is created
-for a code. Ordinary fills, answer queues/history and screenshots exclude every
-segment. Unsupported lengths/delivery and ambiguous/stale mail remain handoffs;
-there is no assumed universal provider expiry or newest-message fallback.
+Verification email interpretation belongs to the executor using the existing
+Hermes Gmail skill. The LLM selects the relevant code closest to the request
+timestamp and polls again if mail is delayed. `hermes_gmail.py` is only a CLI
+wrapper for that existing script and selected mailbox credential; it contains
+no automatic message-selection or verification algorithm. The Google client
+library used by that script is included in repository requirements.
+
+The executor enters its chosen code through ordinary browser fill, or supplies
+`value` to `credentials` mode `verification` with the observed group refs. The
+helper fills the fields and returns commitment without a mailbox lookup or
+email-eligibility decision. It does not require an `email_code` classification.
+Optional message/timing metadata records the executor's selection. Code fields
+remain masked in screenshots and excluded from saved answers. Employer feedback
+establishes acceptance or expiry; a helper miss is a continuation, not an outcome.
 
 `submission_state` projects `none`, `not_executed`, `pending`, `incomplete`,
 `rejected` or `accepted` from the existing evidence. It is reporting, never form
@@ -505,14 +506,14 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | browser_helpers/workday_source.js | Workday-only recruiting-source field/menu association, live option inventory and virtualized-menu scrolling; workday_fast drives pointer actions and verifies commitment |
-| managed_credentials.py / managed_documents.py / hermes_gmail.py | Private account and transient verification filling, correlated configured mail, complete-group screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |
+| managed_credentials.py / managed_documents.py / hermes_gmail.py | Account filling, executor-supplied code entry, existing Hermes Gmail CLI wrapper, code screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |
 | managed_shared.py / managed_events.py / managed.py | Common submission resolution, strict evidence ledger, progress convenience, existing job metadata enrichment and previewable backfill |
 | managed_reports.py / managed_sessions.py / managed_views.py | Stage/task projection from the same events and actions, explicit waits/action overlap, shared labels and first-Autofill timing |
 | hermes_plugin.py / integration entry | Convenience, actual conversation/model and observed request-turn identity, current session binding after retry, optional messaging capability metadata and observed human-reply provenance; no alternative form logic |
 | managed_hermes_worker.py / native_hermes_session.py / hermes_adapter.py | Existing explicit legacy worker integration; never launched by local start |
 | static/jobbot.html / jobbot.js / jobbot.css | Shared posting labels and stage/task progress, persistent expansion and collapsed technical debug, independent application controls |
 
-Common policy is job-apply v0.5.8; Workday policy is workday-simplify v0.3.16, in
+Common policy is job-apply v0.5.9; Workday policy is workday-simplify v0.3.16, in
 skills/productivity. Hermes discovery is thin. Source fingerprint/revision and
 canonical skill hash are recorded at start. No shared helper/skill edits during
 an application benchmark. Review observations afterward and load the revision
