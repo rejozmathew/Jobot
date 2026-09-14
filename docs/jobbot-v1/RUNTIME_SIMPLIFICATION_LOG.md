@@ -1,5 +1,23 @@
 # Runtime simplification implementation log
 
+## Workday privacy acknowledgement and manual authentication - 2026-09-14
+
+Rakuten attempt 61 loaded both canonical skills, but the privacy acknowledgement
+was unchecked when account creation was attempted. Its wording used "read and
+understood" without an HTML required flag. The observer now recognizes that
+routine acknowledgement while preserving the marketing/job-alert exclusions.
+
+The executor's manual recovery omitted page signatures and targeted the BUTTON
+under Workday's labelled click_filter. Ref clicks now use a fresh owned inventory
+when no signature was supplied; an explicit mismatch returns current evidence.
+The shared pointer helper also recognizes the matching wrapper in the same
+authentication form, retaining hit testing and unrelated-overlay handling.
+
+Hermes's turn was interrupted before editing. No new tests or regression suite
+were added/run, following the user's earlier instruction. Syntax and diff checks
+are the local engineering checks; employer acceptance is a separate live attempt.
+The interrupted session's records were not rewritten to manufacture success.
+
 ## iCIMS route identity and visual recovery - 2026-09-09
 
 The supplied ComPsych transcript and screenshots show two misses: Apply was

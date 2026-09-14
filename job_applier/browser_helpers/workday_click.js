@@ -60,9 +60,23 @@
   // Small bounded interior search also handles a panel covering only the center.
   const points=[[.5,.5],[.2,.5],[.8,.5],[.5,.2],[.5,.8]];
   let covering=null;
+  // A manual ref/selector can name Workday's visible auth BUTTON while the
+  // actual pointer target is its labelled click_filter. Recognize the same
+  // auth-form wrapper as the observer, including when its child receives input.
+  // All other covering elements still go through the normal obscured result.
+  const authWrapperHit=hit=>{
+   if(el.tagName!=='BUTTON'||!['signInSubmitButton','createAccountSubmitButton'].includes(el.getAttribute('data-automation-id')))return false;
+   const root=el.closest('form,[role="dialog"]');
+   const wrapper=hit.closest('[data-automation-id="click_filter"][role="button"]');
+   if(!root||!root.querySelector('input[type="password"]')||!wrapper||wrapper.closest('form,[role="dialog"]')!==root||
+      wrapper.getAttribute('aria-disabled')==='true')return false;
+   const label=(el.getAttribute('aria-label')||el.innerText||el.textContent||'').trim().toLowerCase();
+   return ['sign in','create account'].includes(label)&&(wrapper.getAttribute('aria-label')||'').trim().toLowerCase()===label;
+  };
   for(const [fx,fy] of points){
    const x=left+(right-left)*fx,y=top+(bottom-top)*fy,hit=document.elementFromPoint(x,y);
    if(hit&&(hit===el||el.contains(hit)))return {pointer_ready:true,x,y,...credentialCheck};
+   if(hit&&authWrapperHit(hit))return {pointer_ready:true,x,y,control_resolution:'workday_auth_wrapper',...credentialCheck};
    if(!covering&&hit)covering={tag:hit.tagName,role:hit.getAttribute('role'),
      simplify:!!hit.closest('.simplify-jobs-shadow-root,[id*="simplify"]')};
   }

@@ -557,7 +557,12 @@ def browser_action(config,client,ownership,package,target_id,params):
             if method=='click' and params.get('ref'):
                 from .simplify_boundary import CLICK
                 observed=await observe(page,package)
-                if params.get('page_signature')!=observed.get('page_signature'):return {'execution':'not_executed','reason':'stale_screen'}
+                # A ref is resolved against the fresh owned inventory below.
+                # An omitted signature is not evidence that the screen changed.
+                # Preserve an explicit caller signature and return its recovery.
+                if params.get('page_signature') is not None and params['page_signature']!=observed.get('page_signature'):
+                    return {'execution':'not_executed','reason':'stale_screen','screen':inventory(observed,package),
+                        'instruction':'The supplied page signature differs from the current page. Choose the current control from this screen and retry with its ref.'}
                 if not observed.get('auth'):
                     await remember_answers(page_name=observed.get('step','form'))
                 if params.get('source')=='simplify':

@@ -125,7 +125,8 @@
   const checkboxLabel=e=>[...(e.labels||[])].map(text).join(' ')||e.getAttribute('aria-label')||
     (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)).filter(Boolean).map(text).join(' ')||text(e.closest('label')||e.parentElement);
   const consent=e=>{const t=checkboxLabel(e);return !/marketing|job alerts|talent community|send me/i.test(t)&&
-    /privacy|terms|conditions|consent|personal data/i.test(t)&&(/agree|accept/i.test(t)||e.required||e.getAttribute('aria-required')==='true');};
+    /privacy|terms|conditions|consent|personal data/i.test(t)&&
+    (/\b(?:agree|accept|acknowledge(?:d)?|understand|understood)\b|\bhave read\b/i.test(t)||e.required||e.getAttribute('aria-required')==='true');};
   const unchecked=e=>!e.checked&&e.getAttribute('aria-checked')!=='true';
   const pendingConsent=checkboxes.filter(e=>consent(e)&&unchecked(e));
   authControl('auth_consent',pendingConsent);

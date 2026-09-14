@@ -305,6 +305,16 @@ checkpoint, helper report and timeline retain only match/refill booleans. No
 password, password hash or reusable credential value enters those records.
 This closes a reproduced late-autofill gap; it does not prove that Simplify
 overwrote the password in the historical attempt.
+
+Workday privacy acknowledgements such as "I have read and understood the Privacy
+Policy" are recognized even without HTML required markers; marketing and job
+alerts retain their existing exclusions. Manual auth-button clicks use the
+matching same-form `click_filter` pointer surface, as routine auth already does.
+A browser click may omit `page_signature`: the runtime still observes the owned
+page and resolves the current ref before dispatch. An explicitly mismatched
+signature returns the fresh screen and recovery guidance. These corrections
+address Rakuten attempt 61's consent miss and manual-click failures; their
+implementation alone is not evidence of employer account acceptance.
 Synthetic regressions cover native creation/sign-in across a blank transition,
 rejection of extension credential references, a login form appearing between
 observation and click, and credential replacement after fill or hover while
