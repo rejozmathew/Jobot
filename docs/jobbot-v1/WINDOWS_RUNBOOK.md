@@ -17,8 +17,20 @@ Doctor is optional; start automatically validates history and launches/verifies
 the assigned headed browser. Ordinary Hermes follows the repository skills in
 its own conversation with the selected application model. No API token export or
 running dashboard is required. Do not run native_hermes_session as a workaround.
-The existing dashboard is http://127.0.0.1:60157; its private restart script is
-artifacts/jobbot-v1-private/runtime_dashboard.py. It reads the same managed DB.
+The existing dashboard is http://127.0.0.1:60158; its private restart script is
+artifacts/jobbot-v1-private/runtime_dashboard.py. It reads the address from
+native-app.json and uses the same managed DB. Start it from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m artifacts.jobbot-v1-private.runtime_dashboard
+```
+
+Use this private launcher for the configured dashboard. The historical
+`run_applier.py serve` command opens the legacy interface on port 8000 against
+another database. The generic `managed serve` command requires an HTTP worker
+token map; the private launcher resolves the selected local worker credential
+directly. Do not replace credentials or initialize a database to fix a wrong
+launcher.
 
 Migration makes a SQLite backup before additive schema 15. Keep active files on
 the local machine. Prepare separate Simplify-authenticated profiles/endpoints;

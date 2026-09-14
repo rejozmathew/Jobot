@@ -1,5 +1,25 @@
 # Auto Job Applier
 
+## Current JobBot dashboard
+
+Use the repository virtual environment and the existing private launcher from
+the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m artifacts.jobbot-v1-private.runtime_dashboard
+```
+
+The launcher reads the configured address and existing managed history from
+`artifacts/jobbot-v1-private/windows-review-pilot/native-app.json`. The current
+local dashboard is **http://127.0.0.1:60158**. Private configuration and credentials
+stay outside Git. See [the Windows runbook](docs/jobbot-v1/WINDOWS_RUNBOOK.md).
+
+`python run_applier.py serve` starts the historical dashboard on port 8000 with
+a separate legacy database. It does not display the current JobBot history.
+The instructions below describe that historical application.
+
+## Historical application
+
 An automated job application agent powered by [browser-use](https://github.com/browser-use/browser-use). Uses AI (local LLMs or OpenAI) to navigate job application forms and submit applications automatically.
 
 ## Features
