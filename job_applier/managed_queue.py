@@ -45,13 +45,16 @@ class QueueServices:
             control=dict(db.execute('SELECT * FROM dispatch_control WHERE id=1').fetchone())
             counts={r['state']:r['count'] for r in db.execute('SELECT state,COUNT(*) AS count FROM dispatch_queue GROUP BY state')}
             items=[dict(r) for r in db.execute('SELECT q.*,j.company,j.title,j.url FROM dispatch_queue q JOIN jobs j ON j.id=q.job_id ORDER BY q.created_at DESC,q.id DESC LIMIT 100')]
+            # Row labels need the latest request even when it is outside recent history.
+            latest={r['job_id']:dict(r) for r in db.execute('''SELECT id,job_id,state,outcome,detail
+                FROM dispatch_queue WHERE rowid IN (SELECT MAX(rowid) FROM dispatch_queue GROUP BY job_id)''')}
         from .workspace_process import process_matches
         identity=json.loads(control.pop('worker_identity_json') or '{}')
         heartbeat=control.get('heartbeat_at')
         age=(datetime.fromisoformat(self.now())-datetime.fromisoformat(heartbeat)).total_seconds() if heartbeat else None
         return {**control,'installed':True,'enabled':bool(control['enabled']),
                 'worker_online':bool(identity and process_matches(identity) and age is not None and age<30),
-                'counts':counts,'items':items,'selection':getattr(self,'dispatch_selection',None)}
+                'counts':counts,'items':items,'latest_by_job':latest,'selection':getattr(self,'dispatch_selection',None)}
 
     def queue_control(self, *, command):
         if command not in ('run_next','pause','resume'):raise ProtocolError('invalid_queue_control')

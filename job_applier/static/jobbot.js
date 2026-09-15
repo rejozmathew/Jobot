@@ -39,6 +39,15 @@ function showConsole(){state.profileDirty=false;$('console').hidden=false;$('log
 function choice(id,items,value){const select=$(id),before=value??select.value;select.replaceChildren();for(const [v,label]of items){const option=el('option',label);option.value=v;select.append(option);}if(items.some(x=>x[0]===before))select.value=before;}
 function submitted(job){return ['applied','already_applied'].includes(job.status);}
 function unfinished(job){return !submitted(job)&&job.disposition!=='canceled'&&!job.archived;}
+function latestDispatch(v,job){return v.dispatch_queue?.latest_by_job?.[job.id]||v.dispatch_queue?.items?.find(q=>q.job_id===job.id);}
+function queueJobStatus(job,queued,local){
+ if(job.disposition==='canceled')return 'Canceled';
+ if(submitted(job))return displayStatus(job.status);
+ if(queued?.state==='queued')return 'Queued';
+ if(queued?.state==='dispatched')return 'In progress';
+ const outcome=queued?.outcome==='canceled'?job.status:queued?.outcome||job.status;
+ return local&&outcome==='queued'?'Not queued':displayStatus(outcome);
+}
 function visibleJobs(v){
  const filter=$('job-filter').value,query=$('job-search').value.trim().toLocaleLowerCase();
  return v.jobs.filter(job=>{
@@ -47,7 +56,7 @@ function visibleJobs(v){
   if(filter==='submitted')return submitted(job);
   if(filter==='active')return unfinished(job);
   if(filter==='attention'){
-   const queued=v.dispatch_queue?.items?.find(q=>q.job_id===job.id);
+   const queued=latestDispatch(v,job);
    const problems=['blocked','failed','interrupted','submission_unknown','ready_for_review','skipped'];
    return unfinished(job)&&(problems.includes(job.status)||!!job.failure_reason||(queued?.state==='finished'&&problems.includes(queued.outcome)));
   }
@@ -103,7 +112,7 @@ function renderQueue(v){
  renderDispatcher(v);
  const jobs=visibleJobs(v),visibleIds=new Set(jobs.map(j=>j.id));
  for(const id of state.selected)if(!visibleIds.has(id))state.selected.delete(id);
- const key=JSON.stringify([jobs,v.answer_queue,v.dispatch_queue?.items,[...state.selected],$('job-filter').value]);if(key===state.queueKey){selection();return;}state.queueKey=key;
+ const key=JSON.stringify([jobs,v.answer_queue,v.dispatch_queue?.items,v.dispatch_queue?.latest_by_job,[...state.selected],$('job-filter').value]);if(key===state.queueKey){selection();return;}state.queueKey=key;
  rememberProgress($('queue-rows'));
  const canceledView=$('job-filter').value==='canceled';
  $('select-visible').hidden=!canceledView;$('select-unfinished').hidden=canceledView;
@@ -118,8 +127,11 @@ function renderQueue(v){
   check.onchange=()=>{if(check.checked)state.selected.add(job.id);else state.selected.delete(job.id);selection();};
   const cell=el('td');cell.append(check);tr.append(cell);
   const title=el('td');title.append(postingHeading(job));tr.append(title);
-  const queued=v.dispatch_queue?.items?.find(q=>q.job_id===job.id);
-  const statusTd=el('td');statusTd.append(badge(job.disposition==='canceled'?'Canceled':submitted(job)?displayStatus(job.status):queued?.state==='queued'?'Queued':queued?.state==='dispatched'?'In progress':job.status==='queued'&&job.eligibility==='held'?'Not queued':displayStatus(queued?.outcome==='canceled'?job.status:queued?.outcome||job.status)));
+  const queued=latestDispatch(v,job);
+  const statusTd=el('td');statusTd.append(badge(queueJobStatus(job,queued,!!v.local_runtime?.workspaces?.length)));
+  if(v.local_runtime?.workspaces?.length&&unfinished(job)&&!['queued','dispatched'].includes(queued?.state)){
+   statusTd.append(el('small',queued?.state==='finished'?'Request ended. Select this job and choose Queue selected to try again.':'Saved only. Select this job and choose Queue selected to apply.'));
+  }
   if(job.disposition==='canceled')statusTd.append(el('small',job.disposition_reason||'Canceled by you'),el('small','Last outcome: '+displayStatus(job.status)));
   const unanswered=v.answer_queue?.groups.find(g=>g.job_id===job.id&&g.pending_count);
   if(unanswered&&job.disposition!=='canceled'){const review=el('button',`Answer ${unanswered.pending_count} question${unanswered.pending_count===1?'':'s'}`);review.onclick=()=>tab('answers');statusTd.append(review);}
@@ -172,6 +184,11 @@ function renderSessions(v){
  if(past.length){$('local-sessions').append(history);history.scrollTop=historyScroll;}
 }
 function displayStatus(value){return ({connected:'In progress',preparing:'In progress',waiting:'In progress',running:'In progress',finishing:'In progress',capacity_wait:'Waiting to start',applied:'Applied',already_applied:'Already applied',ready_for_review:'Ready for review',submission_unknown:'Submission uncertain',blocked:'Needs attention',failed:'Needs attention',interrupted:'Interrupted',paused:'Paused',queued:'Queued',completed:'Completed',stopped:'Stopped',skipped:'Skipped'})[value]||value||'Not started';}
+function runNextMessage(q){
+ if(!q.counts?.queued)return q.counts?.dispatched?'An application is already in progress. No other jobs are waiting.':'No jobs are waiting to run. Select a job and choose Queue selected first.';
+ if(!q.worker_online)return 'Request saved, but the queue worker is offline. Start the JobBot queue service to run queued jobs.';
+ return q.counts?.dispatched?'Request saved. The next queued job will wait for the current application to finish.':'Request saved. The worker will start the next queued job when its browser is free.';
+}
 function renderDispatcher(v){
  const q=v.dispatch_queue||{};
  if($('main-resume-filename'))$('main-resume-filename').hidden=!!v.local_runtime?.workspaces?.length;
@@ -183,7 +200,7 @@ function renderDispatcher(v){
   choice('queue-resume',options,selected);
  }
  if($('dispatcher-status'))$('dispatcher-status').textContent=!q.installed?'Queue upgrade required: restart with the current queue dashboard launcher.':
-  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.counts?.queued||0} queued · ${q.counts?.dispatched||0} in progress · Automatic queue ${q.enabled?'on':'paused'}${q.detail?' · '+q.detail.replaceAll('_',' '):''}`;
+  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.counts?.queued||0} waiting to run · ${q.counts?.dispatched||0} in progress · Automatic queue ${q.enabled?'on':'paused'}${!q.counts?.queued&&!q.counts?.dispatched?'. No jobs are waiting to run. Select jobs and choose Queue selected.':q.detail?' · '+q.detail.replaceAll('_',' '):''}`;
  if($('queue-toggle'))$('queue-toggle').textContent=q.enabled?'Pause automatic queue':'Enable automatic queue';
  // The local queue uses Hermes' configured model and the runtime's actual workspace.
  // Do not imply that legacy model/browser controls can change that configuration.
@@ -478,7 +495,7 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{
  const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:[...state.selected],identity_id:candidateId,browser_profile:browserProfile});
  state.run=r.id;state.attempt=null;tab('run');notice('Application run started; waiting for worker acceptance.');await refresh();
 }catch(err){notice(err.message,true);}};}
-if($('queue-run-next'))$('queue-run-next').onclick=async()=>{try{await api('queue_control',{command:'run_next'});notice('Next-job request saved. The queue worker will pick it up when its browser is free.');await refresh();}catch(e){notice(e.message,true);}};
+if($('queue-run-next'))$('queue-run-next').onclick=async()=>{try{const q=await api('queue_control',{command:'run_next'});notice(runNextMessage(q));await refresh();}catch(e){notice(e.message,true);}};
 if($('queue-toggle'))$('queue-toggle').onclick=async()=>{try{await api('queue_control',{command:state.view?.dispatch_queue?.enabled?'pause':'resume'});await refresh();}catch(e){notice(e.message,true);}};
 $('run-picker').onchange=()=>{state.run=$('run-picker').value;state.attempt=null;refresh();};
 for(const b of document.querySelectorAll('[data-control]'))b.onclick=async()=>{try{const r=state.view?.current_run;if(!r)throw Error('No run selected.');await api('control',{run_id:r.run_id,command:b.dataset.control});notice('Control request recorded; observe acknowledgement.');await refresh();}catch(e){notice(e.message,true);}};

@@ -58,6 +58,19 @@ def test_queue_unknown_submission_is_not_a_new_manual_retry_lock(tmp_path):
     assert enqueue(s, asset, [jobs[0]], request='new-user-request', retry=True)['items'][0]['state'] == 'queued'
 
 
+def test_dashboard_keeps_latest_job_request_beyond_recent_history_limit(tmp_path):
+    s, asset, jobs, _, _ = setup(tmp_path)
+    waiting = enqueue(s, asset, [jobs[0]])['items'][0]
+    for index in range(101):
+        item = enqueue(s, asset, [jobs[1]], request=f'retry-{index}', retry=True)['items'][0]
+        s.queue_complete(item['id'], outcome='interrupted', detail='Synthetic executor stopped')
+    status = s.queue_status()
+    assert len(status['items']) == 100
+    assert waiting['id'] not in {item['id'] for item in status['items']}
+    assert status['latest_by_job'][jobs[0]['id']]['state'] == 'queued'
+    assert status['latest_by_job'][jobs[1]['id']]['id'] == item['id']
+
+
 def test_brief_restores_mail_ats_vision_simplify_and_one_job(tmp_path):
     from job_applier.application_brief import application_brief
     s, asset, jobs, ws, cfg = setup(tmp_path)
