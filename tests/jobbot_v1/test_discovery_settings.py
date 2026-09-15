@@ -6,6 +6,7 @@ import pytest
 
 from job_applier.harvest_runtime import run_harvest
 from job_applier.managed import Service, ProtocolError
+from job_applier.queue_runtime import executor_command
 from test_dispatch_queue import runtime_fixture
 
 
@@ -65,6 +66,49 @@ def test_discovery_exit_zero_without_records_is_not_completed(tmp_path):
     last = s.discovery_status()['last_run']
     assert last['executor_exit_code'] == 0
     assert last['state'] == 'incomplete'
+
+
+def test_discovery_uses_its_own_executor_without_changing_applications(tmp_path):
+    s, _, _, _, cfg = runtime_fixture(tmp_path)
+    cfg['hermes_command'] = ['hermes', 'chat', '--query-file', '{prompt_file}']
+    cfg['harvest_hermes_command'] = ['hermes', '--profile', 'jobbot-discovery',
+                                    'chat', '--query-file', '{prompt_file}']
+    launched = []
+    def launch(command, **kwargs):
+        launched.append(command)
+        return type('Done', (), {'returncode': 0})()
+    run_harvest(cfg, s, launcher=launch)
+    assert launched[0][:3] == ['hermes', '--profile', 'jobbot-discovery']
+    assert executor_command(cfg, 'application.md') == ['hermes', 'chat', '--query-file', 'application.md']
+    assert cfg['hermes_command'][1] == 'chat'
+
+
+@pytest.mark.parametrize('command', [[], None, 'hermes chat'])
+def test_invalid_discovery_command_does_not_fall_back_to_application_executor(tmp_path, command):
+    s, _, _, _, cfg = runtime_fixture(tmp_path)
+    cfg['harvest_hermes_command'] = command
+    with pytest.raises(ProtocolError, match='invalid_hermes_command'):
+        run_harvest(cfg, s, launcher=lambda *a, **kw: pytest.fail('must not launch'))
+
+
+def test_next_discovery_receives_unfinished_checkpoint(tmp_path):
+    s, _, _, _, cfg = runtime_fixture(tmp_path)
+    cfg['hermes_command'] = ['fixture', '{prompt_file}']
+    checkpoint = []
+    def interrupted(command, **kwargs):
+        path = Path(command[-1]).with_name('checkpoint.json')
+        path.write_text('[]', encoding='utf-8')
+        checkpoint.append(path)
+        return type('Done', (), {'returncode': 0})()
+    run_harvest(cfg, s, launcher=interrupted)
+    assert s.discovery_status()['last_run']['state'] == 'incomplete'
+    def resumed(command, **kwargs):
+        brief = Path(command[-1]).read_text(encoding='utf-8')
+        assert str(checkpoint[0]) in brief
+        Path(command[-1]).with_name('records.json').write_text('[]', encoding='utf-8')
+        return type('Done', (), {'returncode': 0})()
+    run_harvest(cfg, s, launcher=resumed)
+    assert s.discovery_status()['last_run']['state'] == 'completed'
 
 
 @pytest.mark.parametrize('changes', [

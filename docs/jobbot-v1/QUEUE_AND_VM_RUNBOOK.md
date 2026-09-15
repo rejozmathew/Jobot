@@ -152,6 +152,44 @@ not prove intake or application submission; inspect the corresponding job rows.
 Raw executor stdout is not copied into JobBot logs; ordinary Hermes conversation
 history and private task/result files remain available to the operator.
 
+### Discovery context on local models
+
+Use the optional private `harvest_hermes_command` argv to select a dedicated
+Hermes profile for discovery. It uses the same `{prompt_file}` substitution as
+`hermes_command`. When omitted, discovery retains the existing command. An
+explicit invalid override is reported rather than silently choosing another
+executor. The application queue continues to use `hermes_command`.
+
+On the inspected VM, Qwen's loaded context was 100,608 tokens. The installed
+Hermes compressor raised the configured 50% trigger to 75%, or 75,456 tokens.
+Live searches overflowed before finishing. An absolute 35,000-token trigger
+avoids that percentage floor and leaves more room for tool responses and output.
+`deploy/hermes-discovery.yaml` contains the discovery-only compression settings,
+including a shorter recent history and earlier pruning of large tool results.
+
+Create the profile with the installed CLI (no active-profile switch):
+
+```sh
+hermes profile create jobbot-discovery --clone-from default --no-alias
+```
+
+Merge the YAML fragment into that profile's private `config.yaml`, preserving
+its existing model, provider, credentials and tools. Back up the profile config
+first. Do not replace the entire config with the fragment. Set
+`harvest_hermes_command` to the existing absolute Hermes executable followed by
+`--profile jobbot-discovery chat --oneshot --pass-session-id --query-file
+{prompt_file}` (retain any existing operator CLI flags). The fragment and command
+are deployment choices; JobBot does not modify the general Hermes profile.
+
+The discovery brief keeps bulk search output in private scratch files and asks
+the executor to save verified findings to `checkpoint.json` after each role.
+The next run receives the latest unfinished run's checkpoint when present and
+must revalidate those leads against live postings and current policy. The final
+`records.json` is written only when the search is finished, then published through
+the existing intake command. A checkpoint alone remains **Incomplete** and does
+not enqueue applications. Saved findings survive context compaction and a later
+executor interruption; no successful application is replayed by this recovery.
+
 ## Existing VM cutover
 
 1. Pause application execution on the old machine and account for open sessions.
