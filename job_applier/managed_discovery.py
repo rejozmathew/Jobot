@@ -17,7 +17,8 @@ class DiscoveryServices:
         if last:
             identity=json.loads(last.pop('process_identity_json'))
             last['state']=('running' if process_matches(identity) else 'interrupted') if not last['ended_at'] else (
-                'failed' if last['error'] or last['executor_exit_code']!=0 else 'completed')
+                'failed' if last['error'] or last['executor_exit_code']!=0 else
+                'completed' if last['record_file_exists'] else 'incomplete')
             due=(datetime.fromisoformat(last['started_at'])+timedelta(hours=settings['discovery_interval_hours'])).isoformat()
         age=(datetime.fromisoformat(self.now())-datetime.fromisoformat(check)).total_seconds() if check else None
         return {'installed':installed,'batch_size':settings['discovery_batch_size'],

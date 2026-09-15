@@ -1,8 +1,8 @@
 # Single-job queue and existing Ubuntu VM rollout
 
-The existing Ubuntu deployment was inspected on September 15, 2026. The queue
-feedback and four-hour discovery changes are prepared in the Windows repository
-first; they are not yet installed on the VM. Preserve the existing VM, Hermes
+The existing Ubuntu deployment was updated on September 15, 2026. The queue
+feedback and four-hour discovery settings were validated in Windows and deployed
+to the existing VM checkout. Preserve the existing VM, Hermes
 home, authenticated providers, Himalaya account and browser extension setup.
 
 ## What runs where
@@ -146,6 +146,9 @@ or give a worker token operator privileges.
 
 Discovery remains an LLM-mediated workflow, not a guarantee of daily suitable jobs.
 CLI completion is recorded separately from actual source rows and queue entries.
+An executor that exits without saving its result file is shown as **Incomplete**,
+even when the CLI returns exit code zero. A saved result file alone still does
+not prove intake or application submission; inspect the corresponding job rows.
 Raw executor stdout is not copied into JobBot logs; ordinary Hermes conversation
 history and private task/result files remain available to the operator.
 

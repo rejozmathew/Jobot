@@ -18,6 +18,7 @@ def test_saved_discovery_settings_control_next_run_without_restarting(tmp_path):
     cfg['harvest_batch_size'] = 99  # Old private config must not override the UI.
     def launch(command, **kwargs):
         calls.append(Path(command[-1]).read_text(encoding='utf-8'))
+        Path(command[-1]).with_name('records.json').write_text('[]', encoding='utf-8')
         return type('Done', (), {'returncode': 0})()
     assert s.settings_view()['values']['discovery_batch_size'] == 5
     assert s.settings_view()['values']['discovery_interval_hours'] == 4
@@ -56,6 +57,14 @@ def test_discovery_failure_and_dead_process_are_visible(tmp_path):
     with s.tx() as db:
         db.execute('UPDATE discovery_runs SET ended_at=NULL,process_identity_json=?', ('{}',))
     assert s.discovery_status()['last_run']['state'] == 'interrupted'
+
+
+def test_discovery_exit_zero_without_records_is_not_completed(tmp_path):
+    s, _, _, _, cfg = runtime_fixture(tmp_path)
+    run_harvest(cfg, s, launcher=lambda *a, **kw: type('Done', (), {'returncode': 0})())
+    last = s.discovery_status()['last_run']
+    assert last['executor_exit_code'] == 0
+    assert last['state'] == 'incomplete'
 
 
 @pytest.mark.parametrize('changes', [
