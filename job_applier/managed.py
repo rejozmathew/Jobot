@@ -291,10 +291,14 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if prior:raise ProtocolError('already_applied')
         attempts=db.execute(RELATED+'SELECT a.* FROM related r JOIN application_attempts a ON a.job_id=r.id',
                             (job_id,)).fetchall()
-        # Only recorded success suppresses another attempt. Uncertainty belongs
-        # to the old attempt's history, not the job's future eligibility.
+        # Past attempts suppress another request only for recorded success.
+        # Uncertainty stays in history; explicit operator cancellation is below.
         if any(self._submission_state(db,attempt)['state']=='accepted' for attempt in attempts):
             raise ProtocolError('already_applied')
+        # Explicit operator cancellation is reversible and survives rediscovery.
+        # A failed attempt never sets this disposition automatically.
+        if db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id WHERE j.disposition='canceled' LIMIT 1",(job_id,)).fetchone():
+            raise ProtocolError('job_canceled')
 
     def _eligible(self, db, job_id, settings=None, exclude_session=None):
         job=self._get(db,'jobs',job_id)

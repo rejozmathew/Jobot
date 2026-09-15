@@ -430,6 +430,7 @@ class FakeElement {{
     this.attributes = {{}};
     this.dataset = {{}};
     this.hidden = false;
+    this.value = '';
     const classes = new Set();
     this.classList = {{
       classes,
@@ -457,6 +458,7 @@ class FakeElement {{
   }}
   setAttribute(attr, val) {{ this.attributes[attr] = String(val); }}
   getAttribute(attr) {{ return this.attributes[attr] !== undefined ? this.attributes[attr] : null; }}
+  closest() {{ return this; }}
   querySelector(sel) {{ return this.querySelectorAll(sel)[0] || null; }}
   querySelectorAll(sel) {{
     const res = [];

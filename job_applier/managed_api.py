@@ -18,6 +18,7 @@ OPERATOR=OPERATOR|frozenset({'sessions_view','session_status'})
 OPERATOR=OPERATOR|frozenset({'answer_queue','answer_questions','queue_answer_retries','answer_retries','questions_for_attempt'})
 OPERATOR=OPERATOR|frozenset({'enrich_job','backfill_job_metadata'})
 OPERATOR=OPERATOR|frozenset({'queue_enqueue','queue_status','queue_control'})
+OPERATOR=OPERATOR|frozenset({'set_job_disposition'})
 WORKER=frozenset({'accept_run','claim','heartbeat','event','action_start','action_end','writer_state','submission_intent','finish','ack_control','ack_run_control','checkpoint','resume_run'})|READS
 WORKER=WORKER|frozenset({'observe_owned_lesson','report_upload','record_account_event','extend_budget','bind_target','target_state','request_mail_for_attempt','match_mail_for_attempt','browser_observe'})
 WORKER=WORKER|frozenset({'request_question','park_questions','answer_from_user','questions_for_attempt'})

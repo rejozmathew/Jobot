@@ -46,8 +46,7 @@
   <!-- TAB: APPLICATIONS (QUEUE & START) -->
   <section id="tab-queue" class="tab">
     <section class="card" id="local-sessions-card" hidden>
-      <h2>Application activity</h2>
-      <p>One job at a time. Select an application to see its steps, evidence and controls.</p>
+      <div class="section-title"><h2>Application activity</h2><span id="activity-count" class="muted"></span></div>
       <div id="local-sessions"></div>
     </section>
     <section class="card">
@@ -100,7 +99,6 @@
         <button id="start-application-btn" class="primary" type="button">Queue selected</button>
         <button id="queue-run-next" type="button">Run next now</button>
         <button id="queue-toggle" type="button">Enable automatic queue</button>
-        <span id="selection">No jobs selected</span>
       </div>
       <!-- Legacy controls preserved for compatibility -->
       <div hidden>
@@ -114,6 +112,28 @@
         <h2>Jobs</h2>
         <span id="queue-count"></span>
       </div>
+      <div class="job-filters">
+        <label>Search jobs<input id="job-search" type="search" placeholder="Company, role or URL"></label>
+        <label>Show<select id="job-filter">
+          <option value="active">Unfinished</option>
+          <option value="attention">Needs attention</option>
+          <option value="submitted">Submitted</option>
+          <option value="canceled">Canceled</option>
+          <option value="all">All jobs</option>
+        </select></label>
+      </div>
+      <div class="bulk-actions">
+        <button id="select-unfinished" type="button">Select unfinished</button>
+        <button id="select-visible" type="button" hidden>Select visible canceled jobs</button>
+        <button id="clear-selection" type="button">Clear selection</button>
+        <span id="selection" role="status">No jobs selected</span>
+        <label class="cancel-reason">Reason<select id="cancel-reason" aria-label="Cancellation reason">
+          <option>Test job</option><option>Posting closed</option><option>Unable to complete</option><option>No longer interested</option>
+        </select></label>
+        <button id="cancel-selected" type="button">Cancel selected</button>
+        <button id="restore-selected" type="button" hidden>Restore selected</button>
+      </div>
+      <p class="cleanup-note">Cancel keeps job history and portal accounts. Restore makes a job available to queue again.</p>
       <div class="table-wrap">
         <table>
           <thead>

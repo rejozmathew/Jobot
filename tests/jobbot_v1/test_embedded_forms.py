@@ -398,7 +398,7 @@ def test_embedded_submission_is_captured_once_before_page_closes(tmp_path, mode)
         from job_applier.browser_controls import click_control
         from job_applier.submission import submit
         async with fixture_browser(tmp_path, mode) as (page, package, submissions):
-            screen = await observe(page, package)
+            screen = await complete_submission_fixture(page, package)
             target = {'ref': screen['native']['submit']['ref']}
             ledger = SubmissionLedger()
             async def activate():return await click_control(page, target)
@@ -415,6 +415,17 @@ def test_embedded_submission_is_captured_once_before_page_closes(tmp_path, mode)
     asyncio.run(check())
 
 
+async def complete_submission_fixture(page, package):
+    """Confirmation tests start with the fixture's required answers committed."""
+    screen = await observe(page, package)
+    fields = {c['label']: c for c in screen['inventory']}
+    for question, answer in [('I acknowledge the Candidate Privacy Statement', 'I acknowledge'),
+                             ('Do you have experience leading technology teams?', 'Yes')]:
+        result = await form_action(page, {'method': 'select', 'ref': fields[question]['ref'], 'label': answer})
+        assert result.get('committed'), result
+    return await observe(page, package)
+
+
 @pytest.mark.parametrize('outcome',['redirect','transient','unknown','wrong_job','replaced'])
 def test_embedded_confirmation_scope_and_uncertain_dispatch(tmp_path,outcome):
     async def check():
@@ -422,7 +433,7 @@ def test_embedded_confirmation_scope_and_uncertain_dispatch(tmp_path,outcome):
         from job_applier.browser_frames import resolve_control
         from job_applier.submission import submit
         async with fixture_browser(tmp_path,'same' if outcome=='replaced' else 'cross',submit_outcome=outcome) as (page,package,submissions):
-            screen=await observe(page,package);target={'ref':screen['native']['submit']['ref']}
+            screen=await complete_submission_fixture(page,package);target={'ref':screen['native']['submit']['ref']}
             ledger=SubmissionLedger()
             async def activate():
                 result=await click_control(page,target)

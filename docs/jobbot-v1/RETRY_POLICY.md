@@ -5,6 +5,11 @@ rejected blanket submission-uncertainty, same-job and account-use restrictions. 
 applies to every portal, including Greenhouse, Workday and proprietary forms.
 Login requirements do not affect whether another attempt can start.
 
+September 15 operator cleanup adds one explicit exception: jobs the user marks
+**Canceled** remain excluded until restored, including on rediscovery. Failed
+attempts do not acquire this disposition automatically. See
+[Job cleanup](JOB_CLEANUP.md) for preservation and pending-queue behavior.
+
 ## Decision
 
 Match the requested URL to a job using the existing canonical URL/requisition
@@ -17,6 +22,7 @@ an application request. An existing job may have any number of attempts.
 | Failed, blocked, stopped, interrupted or otherwise unfinished attempt | Start a fresh attempt from the beginning. |
 | Earlier Submit may have executed, with no recorded success | Preserve that uncertainty and allow a new requested attempt. |
 | Recorded successful submission, including accepted confirmation evidence | Report already applied; suppress an ordinary duplicate. |
+| Explicit operator Canceled disposition | Preserve posting/account history; suppress new work until the operator restores the job. |
 | Repeated call belonging to the same request | Return that request's existing session. |
 | New request while a prior request has an active browser | Use another configured workspace if available; otherwise report capacity. The posting itself has no exclusive owner. |
 
@@ -102,7 +108,7 @@ claim on a posting; historical uncertainty is not ownership evidence.
 | --- | --- |
 | `managed_identity.py` and `Service.intake` | Match URL aliases/requisitions to the existing durable job. |
 | `managed_events._submission_state` | Read the existing per-attempt evidence projection. |
-| `Service._assert_not_suppressed` | Suppress only recorded success, including retained accepted evidence. |
+| `Service._assert_not_suppressed` | Suppress recorded success, including retained accepted evidence, and explicit operator cancellation. |
 | `Service._eligible`, `retry`, `_complete` | Apply configured eligibility and recorded success, allow concurrent attempts, and aggregate posting status. The job-owner veto was removed. |
 | `application_runtime.start` | Resolve request identity, reuse the same request or allocate an independent workspace, and enter the shared session startup path. |
 | `application_runtime.control_session` | Reuse one stop/pause implementation for explicit control and retry of a particular session. |

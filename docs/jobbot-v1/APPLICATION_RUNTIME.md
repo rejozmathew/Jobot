@@ -909,6 +909,14 @@ performance require separate ordinary-Hermes evidence. The implementation log
 contains actual commands/results, durations and remaining blockers.
 # Queue and VM additions — 2026-09-15
 
+Operator cleanup now uses a reversible Canceled disposition in the same managed
+database (migration 19). `managed_archive.set_job_disposition` owns the mutation,
+`managed_events._control` shares run stop requests, and
+`Service._assert_not_suppressed` excludes explicitly canceled postings until
+restored. The dashboard's bulk selection, filters and collapsed session history
+are documented in [Job cleanup](JOB_CLEANUP.md). No automatic failure-based
+restriction is introduced; account and application evidence remain intact.
+
 The current runtime can now be called by `job_applier.queue_runtime`, a separate
 sequential dispatcher. `managed_queue` owns explicit queue records (migration 18),
 `application_brief` assembles one fresh job's skill/mail/vision/Simplify context,

@@ -169,7 +169,7 @@ class QuestionServices:
         with self.tx() as db:
             if not self._has_question_schema(db):return {'groups':[],'available':False}
             where='WHERE q.identity_id=?' if identity_id else ''
-            rows=db.execute('''SELECT DISTINCT q.job_id,q.identity_id,j.url,j.company,j.title,j.status,c.email
+            rows=db.execute('''SELECT DISTINCT q.job_id,q.identity_id,j.url,j.company,j.title,j.status,j.disposition,c.email
                 FROM application_questions q JOIN jobs j ON j.id=q.job_id JOIN candidates c ON c.id=q.identity_id
                 '''+where+' ORDER BY q.last_seen_at DESC', (identity_id,) if identity_id else ()).fetchall()
             groups=[]

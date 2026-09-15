@@ -37,7 +37,35 @@ function sanitizeLegacyClient(data){
 function showLogin(){state.answerDrafts.clear();state.answerKey=null;$('answer-groups')?.replaceChildren();if($('answer-count'))$('answer-count').textContent='';state.instance=null;state.view=null;state.run=null;state.attempt=null;state.queueKey=null;state.settingsVersion=null;state.profileCandidate=null;state.selected.clear();for(const id of ['queue-rows','account-rows','history','attempts','events','health','instance','run-owner','focused-context','target-list','extension-list','lesson-list','helper-list','asset-list','assessment-list','profile-import-skipped'])$(id)?.replaceChildren();for(const f of document.querySelectorAll('form'))f.reset();$('console').hidden=true;$('login-panel').hidden=false;$('refresh').hidden=true;$('mode').textContent='Disconnected';if($('profile-hash'))$('profile-hash').textContent='';if($('profile-id'))$('profile-id').textContent='';if($('profile-person-key'))$('profile-person-key').textContent='';if($('profile-resume'))$('profile-resume').textContent='None';if($('main-resume-filename'))$('main-resume-filename').textContent='None registered';}
 function showConsole(){state.profileDirty=false;$('console').hidden=false;$('login-panel').hidden=true;$('refresh').hidden=false;}
 function choice(id,items,value){const select=$(id),before=value??select.value;select.replaceChildren();for(const [v,label]of items){const option=el('option',label);option.value=v;select.append(option);}if(items.some(x=>x[0]===before))select.value=before;}
-function selection(){$('selection').textContent=`${state.selected.size} job(s) selected`;}
+function submitted(job){return ['applied','already_applied'].includes(job.status);}
+function unfinished(job){return !submitted(job)&&job.disposition!=='canceled'&&!job.archived;}
+function visibleJobs(v){
+ const filter=$('job-filter').value,query=$('job-search').value.trim().toLocaleLowerCase();
+ return v.jobs.filter(job=>{
+  if(query&&![job.company,job.title,job.url].filter(Boolean).join(' ').toLocaleLowerCase().includes(query))return false;
+  if(filter==='canceled')return job.disposition==='canceled';
+  if(filter==='submitted')return submitted(job);
+  if(filter==='active')return unfinished(job);
+  if(filter==='attention'){
+   const queued=v.dispatch_queue?.items?.find(q=>q.job_id===job.id);
+   const problems=['blocked','failed','interrupted','submission_unknown','ready_for_review','skipped'];
+   return unfinished(job)&&(problems.includes(job.status)||!!job.failure_reason||(queued?.state==='finished'&&problems.includes(queued.outcome)));
+  }
+  return true;
+ });
+}
+function selection(){
+ const selected=(state.view?.jobs||[]).filter(j=>state.selected.has(j.id));
+ const cancelable=selected.filter(unfinished),restorable=selected.filter(j=>j.disposition==='canceled');
+ $('selection').textContent=state.selected.size?`${state.selected.size} job${state.selected.size===1?'':'s'} selected`:'No jobs selected';
+ $('start-application-btn').disabled=!cancelable.length||cancelable.length!==selected.length;
+ $('cancel-selected').disabled=!cancelable.length;
+ $('restore-selected').disabled=!restorable.length;
+ $('clear-selection').disabled=!state.selected.size;
+ const visible=state.view?visibleJobs(state.view):[];
+ $('select-unfinished').disabled=!visible.some(unfinished);
+ $('select-visible').disabled=!visible.some(j=>j.disposition==='canceled');
+}
 function link(url,label){try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))return el('span',label);const a=el('a',label);a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';return a;}catch{return el('span',label);}}
 function postingLabel(job){
  const known=[job.company,job.title||job.job_title].filter(Boolean);if(known.length)return known.join(' · ');
@@ -73,33 +101,48 @@ function renderQueue(v){
  renderSessions(v);
  renderAnswers(v);
  renderDispatcher(v);
- const key=JSON.stringify([v.jobs,v.answer_queue,v.dispatch_queue?.items]);if(key===state.queueKey)return;state.queueKey=key;
- $('queue-count').textContent=`${v.jobs.length} records`;$('queue-rows').replaceChildren();
- for(const job of v.jobs){
+ const jobs=visibleJobs(v),visibleIds=new Set(jobs.map(j=>j.id));
+ for(const id of state.selected)if(!visibleIds.has(id))state.selected.delete(id);
+ const key=JSON.stringify([jobs,v.answer_queue,v.dispatch_queue?.items,[...state.selected],$('job-filter').value]);if(key===state.queueKey){selection();return;}state.queueKey=key;
+ rememberProgress($('queue-rows'));
+ const canceledView=$('job-filter').value==='canceled';
+ $('select-visible').hidden=!canceledView;$('select-unfinished').hidden=canceledView;
+ $('restore-selected').hidden=!jobs.some(j=>j.disposition==='canceled');
+ $('cancel-selected').hidden=canceledView;$('cancel-reason').closest('label').hidden=canceledView;
+ $('queue-count').textContent=`${jobs.length} shown · ${v.jobs.length} total`;$('queue-rows').replaceChildren();
+ for(const job of jobs){
   const tr=el('tr');
   const check=el('input');check.type='checkbox';check.checked=state.selected.has(job.id);
+  check.disabled=submitted(job)&&job.disposition!=='canceled';
   check.setAttribute('aria-label','Select '+postingLabel(job));
   check.onchange=()=>{if(check.checked)state.selected.add(job.id);else state.selected.delete(job.id);selection();};
   const cell=el('td');cell.append(check);tr.append(cell);
   const title=el('td');title.append(postingHeading(job));tr.append(title);
   const queued=v.dispatch_queue?.items?.find(q=>q.job_id===job.id);
-  const statusTd=el('td');statusTd.append(badge(queued?.state==='queued'?'Queued':queued?.state==='dispatched'?'In progress':job.status==='queued'&&job.eligibility==='held'?'Not queued':displayStatus(queued?.outcome||job.status)));
+  const statusTd=el('td');statusTd.append(badge(job.disposition==='canceled'?'Canceled':submitted(job)?displayStatus(job.status):queued?.state==='queued'?'Queued':queued?.state==='dispatched'?'In progress':job.status==='queued'&&job.eligibility==='held'?'Not queued':displayStatus(queued?.outcome==='canceled'?job.status:queued?.outcome||job.status)));
+  if(job.disposition==='canceled')statusTd.append(el('small',job.disposition_reason||'Canceled by you'),el('small','Last outcome: '+displayStatus(job.status)));
   const unanswered=v.answer_queue?.groups.find(g=>g.job_id===job.id&&g.pending_count);
-  if(unanswered){const review=el('button',`Answer ${unanswered.pending_count} question${unanswered.pending_count===1?'':'s'}`);review.onclick=()=>tab('answers');statusTd.append(review);}
-  if(job.failure_reason||queued?.detail){const details=el('details',undefined,'job-outcome');details.append(el('summary','Outcome details'),el('p','Reason: '+(job.failure_reason||queued.detail)));statusTd.append(details);}
+  if(unanswered&&job.disposition!=='canceled'){const review=el('button',`Answer ${unanswered.pending_count} question${unanswered.pending_count===1?'':'s'}`);review.onclick=()=>tab('answers');statusTd.append(review);}
+  if(job.failure_reason||queued?.detail){const details=progressDetails(job.id+':outcome','Outcome details',false,'job-outcome');details.append(el('p','Reason: '+(job.failure_reason||queued.detail)));statusTd.append(details);}
   tr.append(statusTd);
   const assessment=job.assessment;tr.append(el('td',assessment?(assessment.recommendation||'Assessment available'):'Unassessed'));
   $('queue-rows').append(tr);
  }
- if(!v.jobs.length){const tr=el('tr'),td=el('td','No postings in this instance.');td.colSpan=4;tr.append(td);$('queue-rows').append(tr);}
+ if(!jobs.length){const tr=el('tr'),td=el('td',v.jobs.length?'No jobs match this view.':'No postings in this instance.');td.colSpan=4;tr.append(td);$('queue-rows').append(tr);}
  selection();
 }
 function renderSessions(v){
  const runtime=v.local_runtime||{sessions:[],workspaces:[]};
  if($('start-application-btn'))$('start-application-btn').textContent=runtime.workspaces.length?'Queue selected':'Start application';
- $('local-sessions-card').hidden=!runtime.workspaces.length;
+ $('local-sessions-card').hidden=!runtime.workspaces.length&&!runtime.sessions.length;
+ const historyScroll=$('session-history')?.scrollTop||0;
  rememberProgress($('local-sessions'));$('local-sessions').replaceChildren();
- for(const s of runtime.sessions.slice(0,12)){
+ const active=runtime.sessions.filter(s=>!s.ended_at);
+ const past=runtime.sessions.filter(s=>s.ended_at);
+ $('activity-count').textContent=active.length?`${active.length} in progress`:'No application running';
+ const history=progressDetails('session-history',`Recent history · ${past.length} application${past.length===1?'':'s'}`,false,'session-history');history.id='session-history';
+ if(!active.length)$('local-sessions').append(el('p','Current work will appear here. Open recent history to review earlier applications.','activity-empty'));
+ for(const s of [...active,...past]){
   const job=v.jobs.find(j=>j.id===s.job_id)||{};
   const candidate=v.candidates.find(c=>c.id===s.identity_id)||{};
   const metadata=s.metadata||{},n=progressDetails(s.id+':application',postingLabel(job),false,'application-row');
@@ -124,8 +167,9 @@ function renderSessions(v){
     n.append(button);
    }
   }
-  $('local-sessions').append(n);
+  (s.ended_at?history:$('local-sessions')).append(n);
  }
+ if(past.length){$('local-sessions').append(history);history.scrollTop=historyScroll;}
 }
 function displayStatus(value){return ({connected:'In progress',preparing:'In progress',waiting:'In progress',running:'In progress',finishing:'In progress',capacity_wait:'Waiting to start',applied:'Applied',already_applied:'Already applied',ready_for_review:'Ready for review',submission_unknown:'Submission uncertain',blocked:'Needs attention',failed:'Needs attention',interrupted:'Interrupted',paused:'Paused',queued:'Queued',completed:'Completed',stopped:'Stopped',skipped:'Skipped'})[value]||value||'Not started';}
 function renderDispatcher(v){
@@ -147,7 +191,7 @@ function renderDispatcher(v){
   const label=$(id)?.closest?.('label');if(label)label.hidden=!!v.local_runtime?.workspaces?.length;
  }
 }
-function canQueueAnswers(group){return !group.pending_count&&!['applied','already_applied'].includes(group.status)&&group.retry?.state!=='queued';}
+function canQueueAnswers(group){return group.disposition!=='canceled'&&!group.pending_count&&!['applied','already_applied'].includes(group.status)&&group.retry?.state!=='queued';}
 function answerError(error){return ({unanswered_questions:'Answer every required question before queueing a retry.',answer_revision_conflict:'This answer changed elsewhere. Refresh and review the latest saved answer.',question_changed:'The employer changed this question. Review its current choices.',owned_elsewhere:'Save your answers now; queue a retry after the current application closes.',reconciliation_required:'The previous browser must finish closing before another attempt can start.',already_applied:'This application was already submitted.'})[error.message]||error.message;}
 async function saveAnswerGroup(group,queue){
  const changes=group.questions.filter(q=>state.answerDrafts.has(q.id)).map(q=>{const draft=state.answerDrafts.get(q.id);return {question_id:q.id,answer:draft.value,expected_revision:draft.revision};});
@@ -164,7 +208,7 @@ async function saveAnswerGroup(group,queue){
 }
 function renderAnswers(v){
  if(!$('answer-groups'))return;
- const groups=v.answer_queue?.groups||[];
+ const groups=(v.answer_queue?.groups||[]).filter(g=>g.disposition!=='canceled');
  const pending=groups.reduce((count,g)=>count+g.pending_count,0);
  $('answer-count').textContent=pending?`(${pending})`:'';
  $('queue-answered-batch').disabled=!groups.some(canQueueAnswers);
@@ -379,6 +423,22 @@ async function refresh(){if(!state.instance||state.busy)return;state.busy=true;t
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!=='tab-'+name);document.querySelectorAll('[data-tab]').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));}
 $('reconnect').onclick=()=>location.reload();
 $('refresh').onclick=refresh;document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
+function filterJobs(){rememberProgress($('queue-rows'));state.queueKey=null;state.selected.clear();if(state.view)renderQueue(state.view);}
+$('job-filter').onchange=filterJobs;$('job-search').oninput=filterJobs;
+$('select-unfinished').onclick=()=>{state.selected=new Set(visibleJobs(state.view).filter(unfinished).map(j=>j.id));state.queueKey=null;renderQueue(state.view);};
+$('select-visible').onclick=()=>{state.selected=new Set(visibleJobs(state.view).filter(j=>j.disposition==='canceled').map(j=>j.id));state.queueKey=null;renderQueue(state.view);};
+$('clear-selection').onclick=()=>{state.selected.clear();state.queueKey=null;renderQueue(state.view);};
+async function changeDisposition(disposition){
+ const job_ids=state.view.jobs.filter(j=>state.selected.has(j.id)&&(disposition==='canceled'?unfinished(j):j.disposition==='canceled')).map(j=>j.id);
+ if(!job_ids.length)return;
+ try{
+  const result=await api('set_job_disposition',{job_ids,disposition,reason:disposition==='canceled'?$('cancel-reason').value:''});
+  state.selected.clear();state.queueKey=null;
+  notice(disposition==='canceled'?`${result.jobs.length} job(s) canceled. History and portal accounts kept.${result.skipped_job_ids?.length?' Submitted or already canceled jobs were left unchanged.':''}${result.stop_requested_run_ids.length?' Stop requested for current work; browser shutdown is pending.':''}`:`${result.jobs.length} job(s) restored. Select and queue them when ready.`);
+  await refresh();
+ }catch(error){notice(error.message,true);}
+}
+$('cancel-selected').onclick=()=>changeDisposition('canceled');$('restore-selected').onclick=()=>changeDisposition('active');
 if($('candidate'))$('candidate').onchange=()=>{if($('queue-resume'))$('queue-resume').value='';renderDispatcher(state.view);};
 if($('queue-answered-batch'))$('queue-answered-batch').onclick=async()=>{
  try{const candidates=new Map();for(const group of state.view?.answer_queue?.groups||[]){if(!canQueueAnswers(group))continue;const jobs=candidates.get(group.identity_id)||[];jobs.push(group.job_id);candidates.set(group.identity_id,jobs);}
@@ -386,7 +446,12 @@ if($('queue-answered-batch'))$('queue-answered-batch').onclick=async()=>{
   notice(`${count} answered application${count===1?'':'s'} queued for the next batch.`);await refresh();
  }catch(error){notice(answerError(error),true);}
 };
-$('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:crypto.randomUUID()});state.selected.add(job.id);notice('Job added and selected. Choose Queue selected to apply.');$('intake-form').reset();await refresh();}catch(err){notice(err.message,true);}};
+$('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:crypto.randomUUID()});
+ $('job-search').value='';state.selected.clear();state.queueKey=null;
+ if(job.disposition==='canceled'){$('job-filter').value='canceled';notice('This job is already saved as canceled. Restore it here if you want to pursue it again.');}
+ else if(submitted(job)){$('job-filter').value='submitted';notice('This job is already saved as submitted.');}
+ else{$('job-filter').value='active';state.selected.add(job.id);notice('Job saved and selected. Choose Queue selected to apply.');}
+ $('intake-form').reset();await refresh();}catch(err){notice(err.message,true);}};
 $('mark-ready').onclick=async()=>{try{if(!state.selected.size)throw Error('Select at least one job.');for(const id of state.selected)await api('eligibility',{job_id:id,decision:'ready',reason:'Explicit operator approval'});notice('Selected eligibility recorded.');await refresh();}catch(e){notice(e.message,true);}};
 $('request-run').onclick=async()=>{try{if(!state.selected.size||!$('candidate').value||!$('browser-profile').value.trim())throw Error('Select jobs, candidate and exact browser profile.');const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:[...state.selected],identity_id:$('candidate').value,browser_profile:$('browser-profile').value.trim()});state.run=r.id;state.attempt=null;notice('Run requested; waiting for worker acceptance.');tab('run');await refresh();}catch(e){notice(e.message,true);}};
 if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{

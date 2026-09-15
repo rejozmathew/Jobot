@@ -198,16 +198,19 @@ class EventServices:
         if command not in ('pause','stop','resume'): raise ProtocolError('invalid_control')
         with self.tx() as db:
             run=self._get(db,'runs',run_id)
-            if run['state']=='completed' or run['control']=='stopped':raise ProtocolError('run_terminal')
-            if command=='resume':
-                if run['control']!='paused':raise ProtocolError('not_paused')
-                control='running'
-            elif command=='pause':
-                if run['control'] in ('stop_requested','stopped'):raise ProtocolError('stop_pending')
-                control='paused' if run['control']=='paused' else 'pause_requested'
-            else:control='stop_requested'
-            db.execute('UPDATE runs SET control=? WHERE id=?',(control,run_id))
-            return dict(self._get(db,'runs',run_id))
+            return self._control(db,run,command=command)
+
+    def _control(self, db, run, *, command):
+        if run['state']=='completed' or run['control']=='stopped':raise ProtocolError('run_terminal')
+        if command=='resume':
+            if run['control']!='paused':raise ProtocolError('not_paused')
+            control='running'
+        elif command=='pause':
+            if run['control'] in ('stop_requested','stopped'):raise ProtocolError('stop_pending')
+            control='paused' if run['control']=='paused' else 'pause_requested'
+        else:control='stop_requested'
+        db.execute('UPDATE runs SET control=? WHERE id=?',(control,run['id']))
+        return dict(self._get(db,'runs',run['id']))
 
     def _is_quiescent(self, db, a):
         return a['writer_state']=='idle' and not db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL',(a['id'],)).fetchone()

@@ -478,4 +478,26 @@ footer {
 .queue-options > summary, .job-outcome > summary { cursor: pointer; }
 .manual-intake { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border, #dde3e8); }
 .main-action-bar { flex-wrap: wrap; gap: 12px; }
+.job-filters { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 240px); gap: 16px; }
+.bulk-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px; background: var(--bg-subtle); border-radius: 6px; }
+.bulk-actions label { margin: 0; }
+.bulk-actions .cancel-reason { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.cancel-reason select { width: auto; margin: 0; }
+.cleanup-note { font-size: 12px; margin: 8px 0 16px; }
+.muted, #selection, #queue-count { color: var(--text-muted); font-size: 13px; }
+.session-history > summary { padding: 10px 0; }
+.session-history[open] { max-height: 520px; overflow-y: auto; padding-right: 12px; }
+.activity-empty { margin-bottom: 0; }
+#local-sessions-card { padding-top: 12px; padding-bottom: 12px; }
+#local-sessions-card .section-title h2 { margin-bottom: 0; }
+#local-sessions-card .activity-empty { margin-top: 4px; font-size: 13px; }
+#local-sessions-card .session-history { margin: 4px 0 0; }
+.queue-options { margin: 8px 0; }
+.job-outcome { max-width: 440px; }
+.job-outcome p { overflow-wrap: anywhere; }
+.badge[data-state="Canceled"] { background: #f1f5f9; color: #64748b; }
+@media (max-width: 650px) {
+  .job-filters { grid-template-columns: 1fr; gap: 0; }
+  .bulk-actions .cancel-reason { margin-left: 0; flex-basis: 100%; }
+}
 [hidden] { display: none !important; }
