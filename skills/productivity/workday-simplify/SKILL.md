@@ -1,13 +1,16 @@
 ---
 name: workday-simplify
 description: Execute Workday with local sessions and Simplify.
-version: 0.3.16
+version: 0.3.17
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
-platforms: [windows]
+platforms: [linux, windows]
 ---
 
 # Workday with Simplify
+
+On Linux use `.venv/bin/python` wherever an example shows the Windows virtualenv
+interpreter. Use the explicitly selected VM runtime config and existing mailbox.
 
 Read the canonical [job-apply](../job-apply/SKILL.md). Start the application using
 its local `start` operation before reading this ATS detail, allowing browser

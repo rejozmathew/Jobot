@@ -1,0 +1,20 @@
+[Unit]
+Description=JobBot sequential application queue
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace this checkout path with the existing VM checkout; do not reinstall Hermes.
+WorkingDirectory=%h/git/auto-job-applier
+Environment=JOBBOT_CONFIG=%h/.config/jobbot/runtime.json
+EnvironmentFile=-%h/.config/jobbot/runtime.env
+ExecStart=%h/git/auto-job-applier/.venv/bin/python -m job_applier.queue_runtime watch
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+
+[Install]
+WantedBy=default.target

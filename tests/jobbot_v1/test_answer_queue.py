@@ -94,13 +94,16 @@ def test_retry_queue_waits_for_all_answers_and_stopped_browser(tmp_path):
         service.queue_answer_retries(job_ids=[session['job_id']],identity_id='candidate')
     service.answer_questions(answers=[{'question_id':first['id'],'answer':'yes','expected_revision':0},
         {'question_id':second['id'],'answer':'After two weeks notice','expected_revision':0}])
-    with pytest.raises(ProtocolError):
-        service.queue_answer_retries(job_ids=[session['job_id']],identity_id='candidate')
-    # Park is still allowed after a quick reply; the stopped attempt can retry.
+    # Retry policy permits recording the request while the existing browser is
+    # active; this only queues data and does not launch or claim another browser.
+    pending=service.queue_answer_retries(job_ids=[session['job_id']],identity_id='candidate')
+    assert pending['requests'][0]['state']=='queued'
+    # Park is still allowed after a quick reply; later enqueue stays idempotent.
     service.finish(**owner,outcome='blocked',evidence='Synthetic answer review',quiescent=False)
     service.session_stopped(session['id'],reason='Review complete',browser_stopped=True)
     queued=service.queue_answer_retries(job_ids=[session['job_id']],identity_id='candidate')
     assert queued['requests'][0]['state']=='queued'
+    assert queued['requests'][0]['id']==pending['requests'][0]['id']
     assert service.answer_retries(identity_id='candidate')['requests'][0]['job_id']==session['job_id']
     again=service.queue_answer_retries(job_ids=[session['job_id']],identity_id='candidate')
     assert again['requests'][0]['id']==queued['requests'][0]['id']

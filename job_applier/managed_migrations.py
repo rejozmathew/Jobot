@@ -218,7 +218,22 @@ def migration_17(db):
         BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17)]
+def migration_18(db):
+    db.execute('''CREATE TABLE dispatch_queue (
+        id TEXT PRIMARY KEY,request_id TEXT NOT NULL,job_id TEXT NOT NULL REFERENCES jobs(id),
+        identity_id TEXT NOT NULL REFERENCES candidates(id),resume_asset_id TEXT NOT NULL REFERENCES document_assets(id),
+        state TEXT NOT NULL,created_at TEXT NOT NULL,started_at TEXT,ended_at TEXT,
+        executor_identity_json TEXT,session_id TEXT REFERENCES application_sessions(id),outcome TEXT,detail TEXT,
+        UNIQUE(request_id,job_id))''')
+    db.execute("CREATE UNIQUE INDEX one_queued_job_identity ON dispatch_queue(job_id,identity_id) WHERE state!='finished'")
+    db.execute('''CREATE TABLE dispatch_control (
+        id INTEGER PRIMARY KEY CHECK(id=1),enabled INTEGER NOT NULL DEFAULT 0,
+        wake_requested INTEGER NOT NULL DEFAULT 0,heartbeat_at TEXT,worker_identity_json TEXT,
+        current_item TEXT,detail TEXT,next_automatic_at TEXT)''')
+    db.execute('INSERT INTO dispatch_control(id) VALUES (1)')
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18)]
 
 
 def migrate(path):

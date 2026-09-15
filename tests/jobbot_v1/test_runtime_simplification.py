@@ -288,7 +288,7 @@ def test_known_answers_do_not_create_new_human_questions(tmp_path,monkeypatch,kn
     else:
         assert not applied
         assert result['skipped']==[{'ref':'leadership','reason':'configured_answer_control_unconfirmed'}]
-def test_submit_non_dispatch_can_retry_but_uncertain_dispatch_cannot(tmp_path,monkeypatch):
+def test_submit_current_form_continues_after_non_dispatch_or_uncertain_history(tmp_path,monkeypatch):
     import asyncio
     from test_embedded_forms import SubmissionLedger
     from job_applier.submission import submit,SCRIPT
@@ -318,10 +318,12 @@ def test_submit_non_dispatch_can_retry_but_uncertain_dispatch_cannot(tmp_path,mo
         assert first['execution']=='not_executed' and not submission_pending(ledger.attempt,ledger.events)
         second=await submit(page,ledger.call,package,{'attempt_id':1},{'spool_dir':str(tmp_path),'cdp_url':'fixture'},'owned',activate,seconds=1)
         assert second['status']=='applied' and len(calls)==2
-        # A lost dispatch result has no not_executed event and stays read-only.
+        # Current retry policy does not turn click history into a blanket veto.
+        # A fresh explicit submit still needs actual employer confirmation.
         uncertain=SubmissionLedger();uncertain.attempt['submit_intent_at']='fixture-lost-response';page.confirmed=False
         third=await submit(page,uncertain.call,package,{'attempt_id':1},{'spool_dir':str(tmp_path/'uncertain'),'cdp_url':'fixture'},'owned',activate,seconds=1)
-        assert third['status']=='submission_unknown' and len(calls)==2
+        assert third['status']=='applied' and len(calls)==3
+        assert third['source']=='employer'
     asyncio.run(check())
 
 

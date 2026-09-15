@@ -226,22 +226,34 @@ def test_submission_permissions_and_duplicate_click_guard(monkeypatch):
             await app.operate({'operation': 'submit'})
         assert not any(c[0] == 'submission_intent' for c in client.calls)
 
-        # 2. Resume not uploaded guard
+        # 2. A local flag is not authority over a resume uploaded by Simplify.
+        # Observe the form and current submission policy, not the historical flag.
         app.settings = {'submission_mode': 'submit'}
         app.resume_uploaded = False
-        with pytest.raises(ValueError, match='Upload the approved resume'):
-            await app.operate({'operation': 'submit'})
-        assert not any(c[0] == 'submission_intent' for c in client.calls)
+        async def confirmed(page):
+            app.finished=True
+            return {'outcome':'fixture_confirmation'}
+        monkeypatch.setattr(app,'confirm',confirmed)
+        result=await app.operate({'operation':'submit'})
+        assert result=={'outcome':'fixture_confirmation'}
+        assert sum(c[0]=='submission_intent' for c in client.calls)==1
 
-        # 3. Duplicate click guard: once submit_clicked is True, never re-click submit
+        # 3. A new explicit submit may continue the current form after verification.
+        # Click history alone must not silently turn it into a confirmation-only call.
         app.resume_uploaded = True
         app.submit_clicked = True
-        async def pending_confirmation(page): return {'outcome': 'pending_confirmation'}
-        monkeypatch.setattr(app, 'confirm', pending_confirmation)
+        app.finished=False
+        confirmations=0
+        async def pending_then_confirmed(page):
+            nonlocal confirmations
+            confirmations+=1
+            if confirmations==1:return {'outcome':'pending_confirmation'}
+            return await confirmed(page)
+        monkeypatch.setattr(app,'confirm',pending_then_confirmed)
         result = await app.operate({'operation': 'submit'})
-        assert result == {'outcome': 'pending_confirmation'}
-        assert not any(c[0] == 'submission_intent' for c in client.calls)
-        assert not any(e[1] and e[1].get('operation') == 'submit' for e in evaluated)
+        assert result == {'outcome':'fixture_confirmation'}
+        assert sum(c[0]=='submission_intent' for c in client.calls)==2
+        assert sum(bool(e[1] and e[1].get('operation')=='submit') for e in evaluated)==2
 
     asyncio.run(_run())
 

@@ -147,7 +147,8 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
           'requested_effort':config.get('application_effort',config.get('reasoning_effort')),
           'config_path':config['config_path'],'canonical_skill_hash':evidence.get('canonical_skill_hash'),
           'source_revision':evidence.get('code_version'),'source_fingerprint':evidence.get('source_fingerprint'),'resume_asset_id':resume}
-    meta['credential_sources']={k:config.get(k) for k in ('credential_profile_path','mailbox_token_path','gmail_script')}
+    meta['credential_sources']={k:config.get(k) for k in ('credential_profile_path','mailbox_token_path','gmail_script',
+        'mailbox_provider','himalaya_executable','himalaya_account','himalaya_config_path')}
     for configured,observed in (('application_model','model'),('application_provider','provider')):
         if config.get(configured) and meta.get(observed) and config[configured]!=meta[observed]:
             raise ProtocolError('application_runtime_model_mismatch')

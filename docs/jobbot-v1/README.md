@@ -87,3 +87,9 @@ Hermes reasons and applies sequentially in bounded batch sessions. Simplify hand
 Do not rewrite the autofill engine, rebuild Hermes, port Autograph broadly, replace the frontend framework, or add cover-letter generation to this release. Do not wipe existing databases or copy credentials/browser profiles into Git. Do not debug against Ubuntu yet. Do not claim Windows tests establish Ubuntu production readiness.
 
 The first Windows database is a new synthetic development instance, not a deletion of the old database. A real Windows pilot's submissions/accounts are real history and must survive eventual migration. A new email address does not justify applying again to a previously submitted requisition.
+# Current queue and VM handoff
+
+See [single-job queue and existing Ubuntu VM runbook](QUEUE_AND_VM_RUNBOOK.md)
+for the new dashboard launcher, manual/API/discovery intake, sequential Hermes
+dispatch, email context, additive migration and deployment templates. This does
+not mean the user's VM or any employer portal was live-validated by this change.

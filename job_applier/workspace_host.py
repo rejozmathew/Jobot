@@ -99,7 +99,9 @@ def endpoint_info(endpoint):
 
 def profile_in_use(workspace):
     """Bounded OS process inventory; never operate on or terminate other browsers."""
-    if os.name!='nt':raise ProtocolError('workspace_host_windows_only')
+    if os.name != 'nt':
+        from .workspace_linux import linux_profile_in_use
+        return linux_profile_in_use(workspace)
     executable=Path(workspace['browser_executable']).name.replace("'","''")
     command="Get-CimInstance Win32_Process -Filter \"Name = '"+executable+"'\" -ErrorAction Stop | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
     result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',command],capture_output=True,text=True,timeout=10,
@@ -408,7 +410,12 @@ class WorkspaceHost:
             if previous and previous['state'] not in ('preparing','paused','capacity_wait'):
                 self.service.session_stopped(previous['id'],reason='Previous host died; owned process identity is stopped. Lost command was not replayed.',browser_stopped=True)
             address=pipe_address(self.config,self.workspace_id,self.host_id)
-            with Listener(address,family='AF_PIPE' if os.name=='nt' else 'AF_UNIX',authkey=None) as listener:
+            if os.name == 'nt':
+                listener_ctx = Listener(address, family='AF_PIPE', authkey=None)
+            else:
+                from .workspace_linux import create_linux_listener
+                listener_ctx = create_linux_listener(address)
+            with listener_ctx as listener:
                 server=threading.Thread(target=self.serve_requests,args=(listener,),daemon=True);server.start()
                 last_seen=0
                 idle_since=None
@@ -447,6 +454,9 @@ class WorkspaceHost:
                     if self.browser:self.browser.stop()
                     with self.service.tx() as db:
                         db.execute("UPDATE browser_workspaces SET state='offline',browser_identity_json=NULL,updated_at=? WHERE id=? AND host_id=?",(self.service.now(),self.workspace_id,self.host_id))
+                    if os.name != 'nt':
+                        from .workspace_linux import cleanup_linux_socket
+                        cleanup_linux_socket(address)
 
 
 def main():

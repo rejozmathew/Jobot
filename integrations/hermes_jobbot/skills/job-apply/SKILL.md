@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Run repository-managed job applications with tracking.
-version: 0.4.5
+version: 0.4.6
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -12,7 +12,7 @@ metadata:
 
 # Job Apply — Hermes entry point
 
-This is the thin Hermes discovery layer. The application repository owns the procedures and executable helpers; do not copy its workflow into this profile.
+The repository owns application procedures and helpers. This thin Hermes entry points there; do not copy the workflow into this profile.
 
 ## When to Use
 - An authorized application or application benchmark using the configured JobBot project.
@@ -25,7 +25,7 @@ This is the thin Hermes discovery layer. The application repository owns the pro
 4. For Workday, read `<repo>/skills/productivity/workday-simplify/SKILL.md` while startup runs, then check the returned session's readiness/context and use the shipped native `jobbot fast_forward` operation or its documented same-runtime CLI. No token export, running HTTP service or expiring shared lease is required. Another harness uses the same CLI.
 
 ## Pitfalls
-No in-run PDF extraction or experience/education reconstruction. Do not compete with Simplify, clear every nonblocking review warning, bypass ownership, or resubmit an uncertain application. A fresh URL does not authorize using a stale run or another candidate.
+No in-run PDF extraction or experience/education reconstruction. Do not compete with Simplify, clear every nonblocking review warning, or bypass ownership. A prior submit click or uncertain history is not a blanket veto: continue the current form's verification/edits and follow the canonical retry policy for a fresh explicit request. Recorded successful submission suppresses duplicates. A fresh URL does not authorize using a stale run or another candidate.
 
 ## Verification
 The canonical repository skills supply submission evidence, accepted sources and measurements. A user request to apply plus those skills is sufficient; no separate benchmark prompt or historical review log is required. An updated skill or passing fixture is not evidence of a live application.

@@ -1,11 +1,11 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.11
+version: 0.5.12
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
-platforms: [windows]
+platforms: [linux, windows]
 metadata:
   hermes:
     tags: [jobs, local-session, simplify]
@@ -18,6 +18,24 @@ This repository owns the procedure. Hermes discovery is a thin entry; another
 shell-capable harness uses the same local interface. The application executor
 uses its configured application model and existing mailbox capabilities. This
 skill does not launch a model. Engineering and application execution are separate.
+
+## Per-job reminders
+
+Use a fresh conversation for each dispatched job, with its exact selected config,
+identity, resume and request ID. Fetch the prepared session's context rather than
+depending on another job's conversation. The mailbox handoff can describe the
+existing Himalaya account or Gmail wrapper: check and use that actual integration
+before declaring email unavailable. Email OTPs, verification links and email-vs-
+phone choices are not CAPTCHA. Prefer an offered accessible email route; SMS-only
+requires a real SMS channel or human input. An actual image CAPTCHA may be recorded
+as blocked, but a protection logo alone is not a challenge. Do not expose codes or
+mail bodies in progress/history. Use enabled Simplify for bulk fill. When stuck,
+capture **and inspect** the owned screenshot using the harness's image/vision tool.
+
+Linux examples use `.venv/bin/python`; Windows examples use
+`.venv/Scripts/python.exe`. The configured paths and actual interpreter override
+historical Windows path examples. See `docs/jobbot-v1/QUEUE_AND_VM_RUNBOOK.md` for
+queue operation and VM environment setup, not as a prerequisite to every job.
 
 After reading this canonical skill, start the configured browser immediately.
 Read the required ATS skill while the host prepares the browser; finish that

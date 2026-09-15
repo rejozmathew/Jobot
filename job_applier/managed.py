@@ -28,6 +28,7 @@ from .managed_context import ContextServices
 from .managed_archive import ArchiveServices
 from .managed_sessions import SessionServices, local_session
 from .managed_questions import QuestionServices
+from .managed_queue import QueueServices
 from .managed_versions import code_evidence
 from .managed_redaction import safe_text, reject_secrets
 
@@ -39,7 +40,7 @@ def utc_now():
 from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity
 
 
-class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices):
+class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices, QueueServices):
     def __init__(self, db_path, *, instance_id=None, now_fn=utc_now):
         p=Path(db_path)
         if not p.is_absolute(): raise ProtocolError('absolute_db_path_required')

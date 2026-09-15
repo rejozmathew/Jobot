@@ -14,7 +14,7 @@ metadata:
 
 # Job Posting Harvest
 
-Preserve the existing discovery approach and change its output/handoff to the shared app intake. Discovery has no auto-apply behavior and does not approve eligibility or claim work.
+Discovery publishes into shared intake by default and never opens application sessions. There is **no auto-apply during discovery itself**. When the operator explicitly enables `--enqueue`, publish qualifying Strong apply / Apply records into JobBot's separate sequential dispatcher. Discovery itself still does not apply, claim a browser, or choose the submission mode.
 
 ## When to Use
 Find live official roles for the selected candidate profile, verify links, or import an existing alert/ATS result batch. Do not invent listings when a source is blocked.
@@ -25,10 +25,10 @@ Find live official roles for the selected candidate profile, verify links, or im
 3. Greenhouse public API: `https://boards-api.greenhouse.io/v1/boards/{slug}/jobs`. Workday CXS searches use the verified host, tenant and site in a same-origin context. See [discovery and handoff](references/discovery-and-handoff.md).
 4. Validate official-live status and explicit incompatibilities before any form work. Apply the verdict set **Strong apply / Apply / Apply with caveats / Skip**, with honest level, gaps and sponsorship risk; no fabricated fit scores.
 5. Account for every recovered role, including closed, excluded, incompatible, weaker-fit and blocked items. Keep source IDs and original URLs; deduplicate through app identity rules, not blanket query stripping.
-6. Send bounded records through [intake_results.py](scripts/intake_results.py): `terminal(command="<python> skills/job-posting-harvest/scripts/intake_results.py --config <explicit-config> --input <records-json> --dry-run", workdir="<app-repo>")` previews without writes. After approval omit the preview flag to publish to intake only. Report every per-item outcome and actual counts.
+6. Send bounded records through [intake_results.py](scripts/intake_results.py): `terminal(command="<python> skills/job-posting-harvest/scripts/intake_results.py --config <explicit-config> --input <records-json> --dry-run", workdir="<app-repo>")` previews without writes. Omit the preview flag to publish to intake. Add `--enqueue` only when the operator's discovery task explicitly authorizes it; the scheduled harvest task can carry that standing authorization. Local transport uses the selected instance without needing HTTP or an exported API token. Report every per-item outcome and actual counts.
 
 ## Pitfalls
 Workday WAF/challenge responses, a login wall, DNS lookup failures and CORS failures are different states. Avoid bursts and speculative hostnames. Never bypass login barriers or rewrite payloads simply because a WAF rejected a burst. Verify helper availability; workspace auto-import is not guaranteed.
 
 ## Verification
-Read back canonical job/source rows through the app. Imported postings remain held for eligibility review. No automatic application or submission can be inferred from an import. Source failures remain visible, with direct official links when available. Raw emails, credentials and private mailbox contents are not intake payloads.
+Read back canonical job/source rows through the app. Default imports remain held for eligibility review. Explicit `--enqueue` requests make only Strong apply / Apply records ready and create idempotent dispatch entries; rediscovery does not replay finished entries. Caveats and skipped records are not automatically queued. No completed application or submission can be inferred from intake or enqueue. Source failures remain visible, with direct official links when available. Raw emails, credentials and private mailbox contents are not intake payloads.

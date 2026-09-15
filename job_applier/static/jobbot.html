@@ -46,19 +46,21 @@
   <!-- TAB: APPLICATIONS (QUEUE & START) -->
   <section id="tab-queue" class="tab">
     <section class="card" id="local-sessions-card" hidden>
-      <h2>Application sessions</h2>
-      <p>Give a job URL to your application conversation to start. Each session has its own browser workspace.</p>
+      <h2>Application activity</h2>
+      <p>One job at a time. Select an application to see its steps, evidence and controls.</p>
       <div id="local-sessions"></div>
     </section>
     <section class="card">
-      <h2>Apply with your profile</h2>
-      <p>Select a job below. Your chosen model fills the application using this profile and resume.</p>
+      <h2>Application queue</h2>
+      <p id="dispatcher-status" role="status">Checking queue worker…</p>
+      <details class="queue-options"><summary>Candidate, resume and application options</summary>
       <div class="operate-grid">
         <label>Candidate
           <select id="candidate"></select>
         </label>
         <div>
           <label>Active Resume</label>
+          <select id="queue-resume" aria-label="Resume for queued applications"></select>
           <div style="margin-top: 6px;">
             <span id="main-resume-filename" class="badge">None registered</span>
           </div>
@@ -93,8 +95,11 @@
           </select>
         </label>
       </div>
+      </details>
       <div class="main-action-bar">
-        <button id="start-application-btn" class="primary large" type="button">Start application</button>
+        <button id="start-application-btn" class="primary" type="button">Queue selected</button>
+        <button id="queue-run-next" type="button">Run next now</button>
+        <button id="queue-toggle" type="button">Enable automatic queue</button>
         <span id="selection">No jobs selected</span>
       </div>
       <!-- Legacy controls preserved for compatibility -->
@@ -106,7 +111,7 @@
 
     <section class="card">
       <div class="section-title">
-        <h2>Applications Queue</h2>
+        <h2>Jobs</h2>
         <span id="queue-count"></span>
       </div>
       <div class="table-wrap">
@@ -122,10 +127,8 @@
           <tbody id="queue-rows"></tbody>
         </table>
       </div>
-      <details style="margin-top: 16px;">
-        <summary>Add a Posting &amp; Technical Details</summary>
-        <div style="margin-top: 12px; padding: 12px; background: var(--bg-subtle); border-radius: 4px;">
-          <h3>Add Posting Manually</h3>
+      <section class="manual-intake">
+          <h3>Add a job</h3>
           <form id="intake-form">
             <label>Official URL
               <input id="job-url" type="url" required>
@@ -138,10 +141,10 @@
                 <input id="job-title" type="text">
               </label>
             </div>
-            <button type="submit">Add to intake</button>
+            <button type="submit">Add job</button>
+            <span>Add first, then select it and choose Queue selected.</span>
           </form>
-        </div>
-      </details>
+      </section>
     </section>
   </section>
 

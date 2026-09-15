@@ -450,9 +450,12 @@ class OwnedProcess:
         self,
         pid: int,
         identity: Dict[str, Any],
-        proc_handle: Any,
-        job_handle: Any,
+        proc_handle: Any = None,
+        job_handle: Any = None,
         open_handles: Optional[Sequence[Any]] = None,
+        pgid: Optional[int] = None,
+        lifetime_w: Optional[int] = None,
+        supervisor_proc: Optional[Any] = None,
     ):
         self._pid = pid
         self._identity = identity
@@ -460,6 +463,9 @@ class OwnedProcess:
         self._job_handle = job_handle
         self._open_handles = list(open_handles or [])
         self._stopped = False
+        self._pgid = pgid
+        self._lifetime_w = lifetime_w
+        self._supervisor_proc = supervisor_proc
 
     @property
     def pid(self) -> int:
@@ -470,12 +476,14 @@ class OwnedProcess:
         return dict(self._identity)
 
     def alive(self) -> bool:
-        if self._stopped or not self._proc_handle:
+        if self._stopped:
             return False
         if _IS_WIN32:
+            if not self._proc_handle:
+                return False
             res = kernel32.WaitForSingleObject(self._proc_handle, 0)
             return res == WAIT_TIMEOUT
-        return False
+        return process_matches(self._identity)
 
     def stop(self, timeout: float = 5.0) -> None:
         """Kill ONLY that owned job and wait for child death."""
@@ -490,6 +498,19 @@ class OwnedProcess:
                 timeout_ms = int(timeout * 1000) if timeout is not None else 5000
                 if kernel32.WaitForSingleObject(self._proc_handle, timeout_ms)!=WAIT_OBJECT_0:
                     raise ProtocolError('owned_process_stop_unconfirmed')
+            self._cleanup()
+        else:
+            from .workspace_linux import linux_stop_owned_process
+            lifetime_w=self._lifetime_w
+            self._lifetime_w=None  # helper closes once; never close a recycled fd
+            linux_stop_owned_process(
+                pgid=self._pgid,
+                pid=self._pid,
+                identity=self._identity,
+                lifetime_w=lifetime_w,
+                supervisor_proc=self._supervisor_proc,
+                timeout=timeout,
+            )
             self._cleanup()
         self._stopped = True
 
@@ -518,6 +539,14 @@ class OwnedProcess:
                 except Exception:
                     pass
                 self._job_handle = None
+        else:
+            if self._lifetime_w is not None:
+                try:
+                    os.close(self._lifetime_w)
+                except OSError:
+                    pass
+                self._lifetime_w = None
+            self._supervisor_proc = None
 
     def __enter__(self) -> "OwnedProcess":
         return self
@@ -534,7 +563,14 @@ class OwnedProcess:
         stderr_path: Optional[Union[str, Path]] = None,
     ) -> "OwnedProcess":
         if not _IS_WIN32:
-            raise NotImplementedError("OwnedProcess is only supported on Windows")
+            from .workspace_linux import linux_launch_owned_process
+            return linux_launch_owned_process(
+                cls=cls,
+                argv=argv,
+                cwd=cwd,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+            )
 
         # 1. Create a dedicated Windows Job Object
         job_handle = kernel32.CreateJobObjectW(None, None)

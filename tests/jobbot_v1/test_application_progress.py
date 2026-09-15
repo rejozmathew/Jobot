@@ -124,7 +124,7 @@ def test_actual_required_question_records_wait_for_input_without_answer(tmp_path
     assert task['state']=='awaiting_input' and task['title']=='Review and fill “Why this role?”'
 
 
-def test_dashboard_keeps_semantic_tasks_visible_and_helper_names_in_collapsed_debug():
+def test_dashboard_collapses_application_details_and_preserves_expansion():
     if not JSDOM.exists():pytest.skip('optional jsdom fixture dependency not installed')
     html=(ROOT/'job_applier/static/jobbot.html').read_text(encoding='utf-8')
     script=(ROOT/'job_applier/static/jobbot.js').read_text(encoding='utf-8')
@@ -141,19 +141,27 @@ const w=new JSDOM(d.html,{url:'http://localhost/',runScripts:'outside-only'}).wi
 w.setInterval=()=>0;w.fetch=()=>new Promise(()=>{});w.eval(d.script+'\nwindow.renderTest=renderSessions;');
 w.renderTest(d.payload);
 const root=w.document.getElementById('local-sessions');
-const shown=e=>{for(let p=e.parentElement;p&&root.contains(p);p=p.parentElement)if(p.tagName==='DETAILS'&&!p.open)return false;return !e.closest('details.debug-details');};
-const normal=[...root.querySelectorAll('*')].filter(shown).map(e=>e.childNodes.length===1&&e.firstChild.nodeType===3?e.textContent:'').join(' ');
+const shown=e=>{for(let p=e.parentElement;p&&root.contains(p);p=p.parentElement)if(p.tagName==='DETAILS'&&!p.open&&!p.querySelector(':scope > summary')?.contains(e))return false;return !e.closest('details.debug-details');};
+const visible=()=>[...root.querySelectorAll('*')].filter(shown).flatMap(e=>[...e.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent)).join(' ');
+const normal=visible();
+const application=root.querySelector('[data-progress-key="session-fixture:application"]');
+const initiallyCollapsed=!application.open;
+application.querySelector('summary').click();
+const expanded=visible();
 const debug=[...root.querySelectorAll('details.debug-details')];
 const stage=root.querySelector('[data-progress-key="session-fixture:stage:remaining_questions"]');
 stage.querySelector('summary').click();w.renderTest(d.payload);
-console.log(JSON.stringify({normal,debug:debug.map(e=>({open:e.open,text:e.textContent})),
+console.log(JSON.stringify({normal,expanded,initiallyCollapsed,applicationStillOpen:root.querySelector('[data-progress-key="session-fixture:application"]').open,debug:debug.map(e=>({open:e.open,text:e.textContent})),
  collapsed:!root.querySelector('[data-progress-key="session-fixture:stage:remaining_questions"]').open}));w.close();
 '''
     result=subprocess.run(['node','-e',harness,str(JSDOM)],input=json.dumps({'html':html,'script':script,'payload':payload}),
-        text=True,encoding='utf-8',capture_output=True,timeout=10)
+        text=True,encoding='utf-8',capture_output=True,timeout=30)
     assert result.returncode==0,result.stderr
     rendered=json.loads(result.stdout)
-    assert 'How did you hear about us?' in rendered['normal']
+    assert 'How did you hear about us?' not in rendered['normal']
+    assert 'How did you hear about us?' in rendered['expanded']
+    assert rendered['initiallyCollapsed'] and rendered['applicationStillOpen']
+    assert 'In progress' in rendered['normal']
     assert 'workday_dropdown_helper' not in rendered['normal'] and 'job-fixture' not in rendered['normal']
     assert 'Identifying company and role' in rendered['normal']
     assert all(not d['open'] for d in rendered['debug']) and any('workday_dropdown_helper' in d['text'] for d in rendered['debug'])

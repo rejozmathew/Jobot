@@ -467,3 +467,15 @@ footer {
 }
 
 .posting-heading{display:flex;flex-wrap:wrap;gap:.35rem 1rem;align-items:baseline}.posting-heading a{font-size:.85em}.progress-stage{margin:.6rem 0;padding:.65rem;border:1px solid #d5dce5;border-radius:.5rem}.progress-stage summary{cursor:pointer;font-weight:600}.progress-stage summary .badge{margin-left:.65rem}.progress-task{padding:.6rem 0 .3rem 1rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:baseline}.progress-task small{flex-basis:100%;color:#586574}.debug-details{margin:.75rem 0;color:#586574}.debug-details summary{cursor:pointer}.debug-details pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.78rem}.badge[data-state="Completed"]{background:#d9f0e5}.badge[data-state="Recovering"]{background:#fff1cf}.badge[data-state="Awaiting your input"]{background:#e3e9ff}
+/* Applications stay compact; detailed stages and debug evidence are opt-in. */
+.application-row { border-bottom: 1px solid var(--border, #dde3e8); padding: 12px 0; }
+.application-row > summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
+.application-row > summary .badge { margin-left: 14px; font-weight: 500; }
+.application-row[open] > summary { margin-bottom: 16px; }
+.application-row > small { display: block; margin: 8px 0; }
+.application-row > button { margin: 12px 8px 0 0; }
+.queue-options { margin: 16px 0; }
+.queue-options > summary, .job-outcome > summary { cursor: pointer; }
+.manual-intake { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border, #dde3e8); }
+.main-action-bar { flex-wrap: wrap; gap: 12px; }
+[hidden] { display: none !important; }

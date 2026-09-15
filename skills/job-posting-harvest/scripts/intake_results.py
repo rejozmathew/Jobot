@@ -1,4 +1,4 @@
-"""Bounded discovery handoff into shared intake. No eligibility or execution authority."""
+"""Discovery intake; optional explicitly requested enqueue into the local dispatcher."""
 import argparse
 import json
 import os
@@ -51,22 +51,32 @@ def publish(client, records, *, dry_run=False):
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config',required=True);parser.add_argument('--input',required=True)
-    parser.add_argument('--dry-run',action='store_true');args=parser.parse_args(argv)
+    parser.add_argument('--dry-run',action='store_true')
+    parser.add_argument('--enqueue',action='store_true',help='queue only Strong apply / Apply verdicts, not caveats or skipped jobs')
+    args=parser.parse_args(argv)
     from job_applier.managed_cli import load_config
-    from job_applier.managed_client import Client
+    from job_applier.managed_client import configured_client
     try:
         records=json.loads(Path(args.input).read_text(encoding='utf-8'))
         cfg=load_config(args.config)
         if args.dry_run:result=publish(None,records,dry_run=True)
         else:
-            token=os.environ.get(cfg['operator_token_env'],'')
-            if not token:raise ProtocolError('credential_unavailable')
-            client=Client(base_url=cfg['base_url'],instance_id=cfg['instance_id'],token=token)
-            try:result=publish(client,records)
-            finally:client.close()
+            with configured_client(cfg) as client:
+                result=publish(client,records)
+                if args.enqueue:
+                    result['enqueue']=[]
+                    for item in result['results']:
+                        if item['status']!='ok' or records[item['index']].get('verdict','').strip().casefold() not in ('strong apply','apply'):continue
+                        try:
+                            queued=client.call('queue_enqueue',job_ids=[item['job_id']],identity_id=cfg['identity_id'],
+                                resume_asset_id=cfg['resume_asset_id'],request_id='harvest:'+item['job_id'])
+                            result['enqueue'].append({'job_id':item['job_id'],'state':queued['items'][0]['state']})
+                        except ProtocolError as exc:
+                            result['enqueue'].append({'job_id':item['job_id'],'error':exc.code})
+                            if exc.code!='already_applied':result['failed']+=1
         print(json.dumps(result,sort_keys=True))
         return 1 if result['failed'] else 0
-    except (OSError,ValueError,KeyError):
+    except (OSError,ValueError,KeyError,ProtocolError):
         print(json.dumps({'error':'handoff_unavailable'}));return 2
 
 

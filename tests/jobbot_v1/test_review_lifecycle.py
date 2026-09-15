@@ -1,9 +1,8 @@
 """Reviewer regression tests for JobBot lifecycle and control contracts.
 
 Regressions covered:
-L1: Quarantined attempt on one browser profile must prevent reclaiming the selected job
-    through another browser profile (request_run or claim must reject with ProtocolError;
-    attempt count must not increase).
+L1: Quarantine remains local to the prior browser profile. A fresh explicit request
+    can retry a failed job in another workspace without deleting its history.
 L4: Submit-enabled PILOT fixture acknowledges pause/stop; subsequent submission_intent
     must reject with ProtocolError and no change to submit_intent_at.
 L5: Idle pause before first claim / between attempts must be recoverable via ack_run_control:
@@ -60,12 +59,8 @@ def accept(s, r, worker="worker", session_id="session-1"):
     )
 
 
-def test_L1_blocked_attempt_quarantine_prevents_reclaim_via_other_browser_profile(tmp_path):
-    """L1: Blocked attempt finished quiescent=False creates quarantine;
-
-    selected job must not be reclaimed through another browser_profile.
-    request_run OR claim may reject ProtocolError; ensure attempt count does not increase.
-    """
+def test_L1_quarantine_is_workspace_local_not_a_new_job_retry_lock(tmp_path):
+    """RETRY_POLICY: retain old isolation and allow a fresh explicit request."""
     s, r, ids = ready(tmp_path, count=1, browser_profile="profile-a")
     accept(s, r)
     a = s.claim(r["id"], worker_id="worker")
@@ -103,15 +98,18 @@ def test_L1_blocked_attempt_quarantine_prevents_reclaim_via_other_browser_profil
     except ProtocolError:
         reclaimed = False
 
-    assert not reclaimed, "Quarantined job must not be reclaimed through another browser profile"
+    assert reclaimed, "Failed history must not veto a new request in another workspace"
 
-    # Ensure attempt count for this job did not increase
+    # Earlier evidence and quarantined workspace are retained, not overwritten.
     with s.tx() as db:
         count = db.execute(
             "SELECT count(*) FROM application_attempts WHERE job_id=?",
             (job_id,),
         ).fetchone()[0]
-    assert count == 1, f"Attempt count must remain 1, found {count}"
+        old_lease=db.execute("SELECT state FROM browser_leases WHERE profile='profile-a'").fetchone()
+    assert old_lease['state']=='quarantined'
+    assert count == 2
+    assert s.attempt(a['id'])['outcome']=='blocked'
 
 
 @pytest.mark.parametrize("command", ["pause", "stop"])

@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily JobBot discovery
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 America/Chicago
+Persistent=true
+Unit=jobbot-harvest.service
+
+[Install]
+WantedBy=timers.target

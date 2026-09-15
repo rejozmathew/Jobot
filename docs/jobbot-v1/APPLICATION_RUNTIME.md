@@ -907,3 +907,17 @@ checks use synthetic DBs/profiles. JUnit and phase evidence stay in ignored arti
 Official Simplify, mailbox challenges, employer submission and under-ten-minute
 performance require separate ordinary-Hermes evidence. The implementation log
 contains actual commands/results, durations and remaining blockers.
+# Queue and VM additions — 2026-09-15
+
+The current runtime can now be called by `job_applier.queue_runtime`, a separate
+sequential dispatcher. `managed_queue` owns explicit queue records (migration 18),
+`application_brief` assembles one fresh job's skill/mail/vision/Simplify context,
+and `harvest_runtime` launches a separate discovery task. The canonical apply
+runtime and its ownership/evidence rules remain authoritative; legacy HTTP
+accept/claim does not become the new local dispatcher.
+
+`hermes_gmail.mailbox_handoff` now describes either the existing Gmail wrapper or
+the selected Himalaya account. It does not itself authenticate/fetch mail or claim
+SMS support. `workspace_linux` provides Linux process-group supervision and private
+socket/profile inspection; Windows Job Objects remain unchanged. See
+[Queue and VM runbook](QUEUE_AND_VM_RUNBOOK.md) for exact boundaries and rollout.
