@@ -14,7 +14,7 @@ def dashboard_check(check):
 const fs=require('fs'),{JSDOM}=require(process.argv[1]),d=JSON.parse(fs.readFileSync(0,'utf8'));
 const w=new JSDOM(d.html,{url:'http://localhost/',runScripts:'outside-only'}).window;
 w.setInterval=()=>0;w.fetch=()=>new Promise(()=>{});
-w.eval(d.script+'\nwindow.draw=v=>{state.view=v;renderQueue(v)};window.noRefresh=()=>{refresh=async()=>{}};');
+w.eval(d.script+'\nwindow.draw=v=>{state.view=v;renderQueue(v)};window.drawSettings=renderSettings;window.noRefresh=()=>{refresh=async()=>{}};');
 const doc=w.document;
 const v={jobs:[],candidates:[],assets:[],answer_queue:{groups:[]},
  dispatch_queue:{installed:true,worker_online:true,enabled:true,counts:{},items:[]},
@@ -79,4 +79,26 @@ assert(doc.getElementById('notice').textContent.includes('current application'),
 response={worker_online:true,counts:{queued:1}};
 await doc.getElementById('queue-run-next').onclick();
 assert(doc.getElementById('notice').textContent.includes('Request saved'),'Queued request not acknowledged');
+''')
+
+
+def test_discovery_controls_save_numeric_settings_and_show_runner_and_schedule():
+    dashboard_check(r'''
+v.discovery={installed:true,batch_size:5,interval_hours:4,runner:'JobBot discovery service / Hermes',
+ scheduler_recent:true,next_due_at:'2026-09-15T20:00:00Z',last_run:{started_at:'2026-09-15T16:00:00Z',state:'completed'}};
+w.draw(v);w.noRefresh();
+w.drawSettings({version:7,values:{discovery_batch_size:5,discovery_interval_hours:4}});
+const area=doc.getElementById('discovery-setting-fields');
+assert(area.querySelectorAll('input').length===2,'Discovery settings hidden among operational fields');
+assert(doc.getElementById('discovery-status').textContent.includes('5 jobs every 4 hours'),'Schedule not visible');
+assert(doc.getElementById('discovery-status').textContent.includes('Hermes'),'Runner not visible');
+assert(doc.getElementById('discovery-status').textContent.includes('Next due'),'Next run not visible');
+area.querySelector('[data-setting=discovery_interval_hours]').value=3;
+let payload;
+w.fetch=async(path,options)=>{payload=JSON.parse(options.body);return {ok:true,status:200,json:async()=>({})};};
+await doc.getElementById('settings-form').onsubmit({preventDefault(){}});
+assert(payload.changes.discovery_interval_hours===3&&payload.changes.discovery_batch_size===5,'Discovery settings did not save as numbers');
+assert(payload.expected_version===7,'Versioned settings save bypassed');
+v.discovery.scheduler_recent=false;v.discovery.last_run.state='running';w.draw(v);
+assert(doc.getElementById('discovery-status').textContent.includes('Last scheduler check'),'Manual discovery must not imply an active scheduler');
 ''')

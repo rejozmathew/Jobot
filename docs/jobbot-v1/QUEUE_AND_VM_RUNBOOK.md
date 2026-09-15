@@ -1,9 +1,9 @@
 # Single-job queue and existing Ubuntu VM rollout
 
-Status: implementation and synthetic verification, not a completed deployment to
-the user's Unraid VM. The actual VM's Hermes/email/browser combination has not
-been inspected here. Preserve the existing VM, Hermes home, authenticated
-providers, Himalaya account and browser extension setup.
+The existing Ubuntu deployment was inspected on September 15, 2026. The queue
+feedback and four-hour discovery changes are prepared in the Windows repository
+first; they are not yet installed on the VM. Preserve the existing VM, Hermes
+home, authenticated providers, Himalaya account and browser extension setup.
 
 ## What runs where
 
@@ -31,6 +31,13 @@ interval is three hours after the preceding dispatch returns. Pausing automatic
 pickup does not terminate an application already in progress. Its own expanded
 row has Pause and Stop controls. Application details and diagnostic messages are
 collapsed on the main view; the queue worker's online/offline state is explicit.
+
+Saved postings without a pending execution request show **Not queued**. An ended
+request shows its outcome (for example, **Interrupted**) and explains how to queue
+a fresh attempt. **Run next now** reports an empty queue, an offline worker or a
+currently running application using the server's response. It does not enqueue
+selected postings or replay ended requests. These are display changes, not new
+execution restrictions.
 
 CLI equivalents, after selecting the private configuration:
 
@@ -83,7 +90,29 @@ An executor that never exits or a browser whose cleanup cannot be verified can
 hold the queue. Inspect its expanded row; do not delete locks or fabricate a
 stopped/submitted state. Unclosed pre-rollout sessions must be accounted for.
 
-## Daily discovery and other intake sources
+## Discovery settings and other intake sources
+
+Open **Settings → Job discovery** to set **Maximum jobs per discovery run** and
+**Discover jobs every (hours)**. Defaults are **5 jobs every 4 hours**. Settings
+are saved in JobBot's versioned managed database, not the private runtime JSON.
+The former `harvest_batch_size` config field is superseded by
+`discovery_batch_size`; transfer any nondefault value into Settings during rollout.
+Discovery prioritizes the strongest verified matches and may return fewer; it
+should not broaden candidate preferences to fill the batch.
+
+The systemd timer checks once a minute. `harvest_runtime --scheduled` reads the
+current settings and last discovery start from the selected managed database.
+It launches Hermes only when due. Frequency is measured from the last start,
+in elapsed UTC hours; changing it recalculates the next due time immediately.
+A long run remains single-instance under the existing harvest lock. A manual run
+without `--scheduled` starts immediately and resets the next scheduled due time.
+Failed/interrupted runs remain visible and the next scheduled check uses the same
+configured interval. Application pickup uses its separate queue interval.
+
+The dashboard shows the job limit, interval, executor, last start/outcome, next
+due time and whether schedule checks are arriving. An executor exit is not proof
+of discovered jobs or successful intake. Old private result files remain intact;
+the new status history begins with the first run after this update.
 
 For on-demand discovery:
 
@@ -192,8 +221,8 @@ systemctl --user status jobbot-queue.service jobbot-dashboard.service
 systemctl --user list-timers jobbot-harvest.timer
 ```
 
-The timer is explicitly 08:00 America/Chicago; change it deliberately for another
-timezone. Services use private umasks. Queue/harvest service shutdown targets their
+The minute timer is only a wakeup; the saved JobBot settings control discovery.
+Dates display in JobBot's selected timezone. Services use private umasks. Queue/harvest service shutdown targets their
 own systemd control groups. User-service persistence may require enabling user
 lingering, but lingering **does not create or preserve a graphical desktop**.
 VM auto-start/login/display availability must be verified on the actual machine.
@@ -205,3 +234,35 @@ The dashboard remains loopback-only. Open it in the VM or use an SSH tunnel to
 port 60158; do not change its bind address to a wildcard to make access convenient.
 Check worker online state separately from web availability, then choose automatic
 pickup or Run next. No services or timer were installed during this code review.
+
+### Updating an existing discovery schedule
+
+After deploying the validated changes to the existing VM checkout, preserve the
+actual checkout path in the installed harvest service and add `--scheduled` to
+its existing `ExecStart`. Install the updated timer and reload systemd. Do not
+install the minute timer with an old service that lacks `--scheduled`, or it will
+launch discovery every minute. This does not restart the application worker:
+
+```sh
+cp deploy/systemd/jobbot-harvest.timer ~/.config/systemd/user/jobbot-harvest.timer
+systemctl --user daemon-reload
+systemctl --user restart jobbot-harvest.timer
+systemctl --user list-timers jobbot-harvest.timer
+```
+
+Restart the dashboard through its normal deployment procedure to expose the new
+settings and apply the backed-up additive migration 20. The migration adds only
+discovery run/check records; it does not rewrite job/application history. Later
+frequency and job-limit changes need only **Save settings**, not a service restart.
+
+## Local validation — September 15, 2026
+
+Antigravity (`gemini-3.8-flash-medium`) ran synthetic regression tests; the primary
+agent independently inspected logs and JUnit. Queue labeling/empty-trigger tests
+failed before their fixes, as did the discovery cadence/status tests before their
+implementation. The focused suite passed 41 tests. The full managed suite with
+isolated Chrome fixtures passed **793 tests**, with four Linux-only skips and no
+failures or errors. A final nine-test run verified the discovery UI, live settings
+changes and the wording that distinguishes manual discovery from schedule checks.
+Evidence is in ignored `artifacts/jobbot-v1-private/queue-feedback-20260915/`.
+No production application, database or VM service was changed by validation.

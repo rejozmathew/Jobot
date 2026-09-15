@@ -17,7 +17,6 @@
   "himalaya_config_path": "/home/REPLACE/.config/himalaya/config.toml",
   "hermes_command": ["/home/REPLACE/.local/bin/hermes", "chat", "--query-file", "{prompt_file}"],
   "queue_interval_seconds": 10800,
-  "harvest_batch_size": 5,
   "harvest_instructions": "Use the selected candidate's current leadership, location and work-authorization preferences. Verify each direct employer link is live. Do not requeue recorded successes.",
   "concurrency_limit": 1,
   "require_simplify": true,

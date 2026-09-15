@@ -1,8 +1,9 @@
 [Unit]
-Description=Daily JobBot discovery
+Description=Check the discovery schedule saved in JobBot
 
 [Timer]
-OnCalendar=*-*-* 08:00:00 America/Chicago
+OnCalendar=minutely
+AccuracySec=1s
 Persistent=true
 Unit=jobbot-harvest.service
 

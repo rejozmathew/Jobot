@@ -52,6 +52,7 @@
     <section class="card">
       <h2>Application queue</h2>
       <p id="dispatcher-status" role="status">Checking queue worker…</p>
+      <p id="discovery-status" role="status">Checking discovery schedule…</p>
       <details class="queue-options"><summary>Candidate, resume and application options</summary>
       <div class="operate-grid">
         <label>Candidate
@@ -287,6 +288,9 @@
       </div>
       <p>Operational settings apply to new requests. Existing attempts retain their immutable snapshots.</p>
       <form id="settings-form">
+        <h3>Job discovery</h3>
+        <p>Find the strongest matches, up to the job limit. These settings apply to the next discovery run. Application pickup is separate.</p>
+        <div id="discovery-setting-fields" class="settings-grid"></div>
         <details open style="margin-bottom: 16px;">
           <summary>All Operational Settings</summary>
           <div id="setting-fields" class="settings-grid" style="margin-top: 12px;"></div>

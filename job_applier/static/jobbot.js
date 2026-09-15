@@ -191,6 +191,15 @@ function runNextMessage(q){
 }
 function renderDispatcher(v){
  const q=v.dispatch_queue||{};
+ const discovery=v.discovery;
+ if($('discovery-status')){
+  const last=discovery?.last_run;
+  $('discovery-status').textContent=!discovery?.installed?'Discovery status unavailable until the updated discovery service is installed.':
+   `Discovery: up to ${discovery.batch_size} jobs every ${discovery.interval_hours} hours · Runner: ${discovery.runner}. `+
+   `${last?`Last started ${stamp(last.started_at)} · ${last.state==='completed'?'Executor finished; see discovered jobs':displayStatus(last.state)}. `:'No discovery run recorded yet. '}`+
+   `${last?.state==='running'?'Discovery is running. ':`Next due: ${discovery.next_due_at?stamp(discovery.next_due_at):'next scheduler check'}. `}`+
+   `${discovery.scheduler_recent?'Scheduler checked recently.':last?.state==='running'?`Last scheduler check: ${stamp(discovery.scheduler_last_checked_at)}.`:'No recent scheduler check; check the discovery service.'} Change frequency and job limit in Settings.`;
+ }
  if($('main-resume-filename'))$('main-resume-filename').hidden=!!v.local_runtime?.workspaces?.length;
  const candidate=$('candidate')?.value;
  if($('queue-resume')){
@@ -350,11 +359,14 @@ function renderSettings(s){
  if($('main-effort-picker'))$('main-effort-picker').value=s.values.reasoning_effort||'low';
  if($('main-submission-mode'))$('main-submission-mode').value=s.values.submission_mode||'review';
  if($('main-browser-mode'))$('main-browser-mode').value=s.values.browser_mode||'headed';
- const box=$('setting-fields');box.replaceChildren();
- for(const [key,value]of Object.entries(s.values)){const label=el('label',key.replaceAll('_',' '));let input;
+ const box=$('setting-fields');box.replaceChildren();const discoveryBox=$('discovery-setting-fields');discoveryBox?.replaceChildren();
+ const discoveryLabels={discovery_batch_size:'Maximum jobs per discovery run',discovery_interval_hours:'Discover jobs every (hours)'};
+ for(const [key,value]of Object.entries(s.values)){const label=el('label',discoveryLabels[key]||key.replaceAll('_',' '));let input;
   if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const o=el('option',x);o.value=x;input.append(o);}input.value=value;}
   else {input=el('input');if(typeof value==='boolean'){input.type='checkbox';input.checked=value;}else if(typeof value==='number'){input.type='number';input.value=value;const range=s.budget_ranges?.[key];if(range){input.min=range[0];input.max=range[1];}}else{input.type='text';input.value=Array.isArray(value)?value.join(', '):(value??'');}}
-  input.dataset.setting=key;input.dataset.kind=Array.isArray(value)?'list':(value===null?'nullable':typeof value);label.append(input);box.append(label);
+  if(key==='discovery_batch_size'){input.min=1;input.max=100;input.step=1;}
+  if(key==='discovery_interval_hours'){input.min=1;input.max=168;input.step='any';}
+  input.dataset.setting=key;input.dataset.kind=Array.isArray(value)?'list':(value===null?'nullable':typeof value);label.append(input);(discoveryLabels[key]&&discoveryBox?discoveryBox:box).append(label);
  }
 }
 async function renderProfile(v){

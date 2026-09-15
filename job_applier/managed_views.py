@@ -220,4 +220,5 @@ class ViewServices:
             'jobs':jobs,'runs':runs,'accounts':accounts,'candidates':candidates,'current_run':current,
             'lessons':lessons,'helpers':helpers,'assets':assets,'assessments':assessments,
             'document_selections':selections,'document_uploads':uploads,
-            'local_runtime':self.sessions_view(),'answer_queue':self.answer_queue(),'dispatch_queue':self.queue_status()}
+            'local_runtime':self.sessions_view(),'answer_queue':self.answer_queue(),'dispatch_queue':self.queue_status(),
+            'discovery':self.discovery_status()}

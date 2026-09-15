@@ -239,7 +239,17 @@ def migration_19(db):
                             'disposition_reason': 'TEXT', 'disposition_at': 'TEXT'})
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19)]
+def migration_20(db):
+    db.execute('''CREATE TABLE discovery_runs (
+        id TEXT PRIMARY KEY,started_at TEXT NOT NULL,ended_at TEXT,
+        process_identity_json TEXT NOT NULL,batch_size INTEGER NOT NULL,
+        enqueue_authorized INTEGER NOT NULL,executor_exit_code INTEGER,
+        record_file_exists INTEGER,error TEXT)''')
+    db.execute('CREATE TABLE discovery_control (id INTEGER PRIMARY KEY,last_checked_at TEXT)')
+    db.execute('INSERT INTO discovery_control(id) VALUES (1)')
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20)]
 
 
 def migrate(path):

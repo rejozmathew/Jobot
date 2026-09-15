@@ -11,7 +11,8 @@ DEFAULTS={'mode':'development','submission_mode':'review','worker':'external','a
     'screenshots':False,'timezone':'UTC','trigger':'manual','allowed_fallback':'targeted',
     'field_seconds':60,'no_progress_seconds':45,'attempt_seconds':300,'lease_seconds':60,
     'reasoning_provider':None,'reasoning_model':None,'reasoning_effort':'low','learning_activation':'manual',
-    'notifications':'none','excluded_companies':[],'market_countries':['US'],'browser_mode':'headed'}
+    'notifications':'none','excluded_companies':[],'market_countries':['US'],'browser_mode':'headed',
+    'discovery_batch_size':5,'discovery_interval_hours':4}
 CHOICES={'mode':('development','pilot'),'submission_mode':('review','submit'),
     'worker':('external','hermes'),'autofill':('simplify','native'),'trigger':('manual',),
     'allowed_fallback':('targeted','block'),'learning_activation':('manual',),'notifications':('none',),
@@ -32,6 +33,11 @@ def validate_settings(values):
     for key,(low,high) in BOUNDS.items():
         value=out[key]
         if type(value) not in (int,float) or not math.isfinite(value) or not low<=value<=high:raise ProtocolError('invalid_budget')
+    if type(out['discovery_batch_size']) is not int or not 1<=out['discovery_batch_size']<=100:
+        raise ProtocolError('invalid_discovery_batch_size')
+    hours=out['discovery_interval_hours']
+    if type(hours) not in (int,float) or not math.isfinite(hours) or not 1<=hours<=168:
+        raise ProtocolError('invalid_discovery_interval_hours')
     for key in ('reasoning_provider','reasoning_model'):
         if out[key] is not None and (not isinstance(out[key],str) or not PUBLIC_ID.fullmatch(out[key])):raise ProtocolError('invalid_reasoning_selection')
     if bool(out['reasoning_provider'])!=bool(out['reasoning_model']):raise ProtocolError('incomplete_reasoning_selection')
@@ -54,7 +60,7 @@ class SettingsServices:
 
     def _settings_record(self,db):
         row=db.execute('SELECT * FROM settings_revisions ORDER BY version DESC LIMIT 1').fetchone()
-        if row:return {'version':row['version'],'values':json.loads(row['values_json'])}
+        if row:return {'version':row['version'],'values':dict(DEFAULTS)|json.loads(row['values_json'])}
         original=json.loads(db.execute('SELECT settings_json FROM instance WHERE id=?',(self.instance_id,)).fetchone()[0])
         return {'version':1,'values':dict(DEFAULTS)|original}
 

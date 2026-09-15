@@ -522,6 +522,8 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 
 | Component | Scope and consumer |
 |---|---|
+| managed_discovery.py / migration 20 | Selected-instance discovery run/check history and last/next-run reporting for the dashboard and harvest scheduler; no application dispatch or browser ownership |
+| harvest_runtime.py / managed_settings.py / jobbot-harvest.timer | Minute schedule checks launch fresh Hermes discovery only when the saved interval is due; dashboard settings own batch size and interval; the existing harvest lock prevents overlapping discovery |
 | application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
 | managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed |
 | workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, queued JSON dispatch on the physical browser; no model or five-second busy veto |
