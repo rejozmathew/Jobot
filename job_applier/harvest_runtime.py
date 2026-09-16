@@ -146,6 +146,8 @@ def run_harvest(config, service, *, enqueue=False, scheduled=False, launcher=sub
                 'executor_exit_code':result.returncode,'enqueue_authorized':enqueue,
                 'record_file_exists':(root/'records.json').is_file(),
                 'note':'CLI completion alone does not prove discovery, live-link validation or intake success. Inspect JobBot source/queue rows.'}
+            record['state']=('failed' if result.returncode!=0 else
+                'completed' if record['record_file_exists'] else 'incomplete')
             private_write(root/'result.json',json.dumps(record,indent=2))
             with service.tx() as db:
                 db.execute('UPDATE discovery_runs SET ended_at=?,executor_exit_code=?,record_file_exists=? WHERE id=?',
@@ -166,7 +168,7 @@ def main(argv=None):
     try:
         config=resolve_config(args.config)
         result=run_harvest(config,prepare_local(config),enqueue=args.enqueue,scheduled=args.scheduled)
-        print(json.dumps(result));return 0 if result.get('executor_exit_code',0)==0 else 1
+        print(json.dumps(result));return 0 if result['state'] in ('completed','not_due') else 1
     except (ProtocolError,OSError,ValueError,KeyError) as exc:
         print(json.dumps({'error':getattr(exc,'code',type(exc).__name__)}));return 2
 

@@ -68,6 +68,43 @@ def test_discovery_exit_zero_without_records_is_not_completed(tmp_path):
     assert last['state'] == 'incomplete'
 
 
+@pytest.mark.parametrize('exit_code,records,state,cli_exit', [
+    (0, False, 'incomplete', 1),
+    (0, True, 'completed', 0),
+    (1, False, 'failed', 1),
+    (1, True, 'failed', 1),
+])
+def test_discovery_cli_reports_actual_completion(tmp_path, monkeypatch, capsys,
+                                                 exit_code, records, state, cli_exit):
+    import json
+    from job_applier import harvest_runtime
+    s, _, _, _, cfg = runtime_fixture(tmp_path)
+    cfg['hermes_command'] = ['fixture', '{prompt_file}']
+    def launch(command, **kwargs):
+        if records:
+            Path(command[-1]).with_name('records.json').write_text('[]', encoding='utf-8')
+        return type('Done', (), {'returncode': exit_code})()
+    actual_run = run_harvest
+    monkeypatch.setattr(harvest_runtime, 'resolve_config', lambda _: cfg)
+    monkeypatch.setattr(harvest_runtime, 'prepare_local', lambda _: s)
+    monkeypatch.setattr(harvest_runtime, 'run_harvest',
+                        lambda *args, **kwargs: actual_run(*args, **kwargs, launcher=launch))
+    assert harvest_runtime.main([]) == cli_exit
+    result = json.loads(capsys.readouterr().out)
+    assert result['state'] == state == s.discovery_status()['last_run']['state']
+    assert result['executor_exit_code'] == exit_code
+
+
+def test_discovery_cli_not_due_is_success(monkeypatch, capsys):
+    import json
+    from job_applier import harvest_runtime
+    monkeypatch.setattr(harvest_runtime, 'resolve_config', lambda _: {})
+    monkeypatch.setattr(harvest_runtime, 'prepare_local', lambda _: object())
+    monkeypatch.setattr(harvest_runtime, 'run_harvest', lambda *a, **kw: {'state': 'not_due'})
+    assert harvest_runtime.main(['--scheduled']) == 0
+    assert json.loads(capsys.readouterr().out)['state'] == 'not_due'
+
+
 def test_discovery_uses_its_own_executor_without_changing_applications(tmp_path):
     s, _, _, _, cfg = runtime_fixture(tmp_path)
     cfg['hermes_command'] = ['hermes', 'chat', '--query-file', '{prompt_file}']
