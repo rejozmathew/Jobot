@@ -10,6 +10,11 @@ also retained. Needs attention includes queue failures before an attempt starts.
 Choose a reason before canceling. No jobs are canceled automatically because of
 failure, age or number of attempts.
 
+Choose **Manually applied** when you submitted the application yourself. This
+saves that cancellation reason and removes the job from the unfinished queue;
+it does not change recorded application outcomes. The job remains available
+under **Canceled**, where you can restore it if needed.
+
 Cancellation is an operator disposition, separate from the application outcome:
 
 - The posting, URL aliases, discovery sources, attempts and submission evidence

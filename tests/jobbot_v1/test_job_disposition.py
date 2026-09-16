@@ -12,7 +12,8 @@ from test_dispatch_queue import enqueue
 from test_workday_dom import ROOT, JSDOM
 
 
-def test_cancel_preserves_history_accounts_and_rediscovery_then_restores(tmp_path):
+@pytest.mark.parametrize('reason', ['Test job', 'Manually applied'])
+def test_cancel_preserves_history_accounts_and_rediscovery_then_restores(tmp_path, reason):
     s, asset, jobs, _, _ = setup(tmp_path)
     session = connect(s, reserve(s, asset, jobs))
     s.session_stopped(session['id'], reason='Synthetic failed attempt', browser_stopped=True)
@@ -25,8 +26,9 @@ def test_cancel_preserves_history_accounts_and_rediscovery_then_restores(tmp_pat
                            identity_id='candidate', browser_profile='legacy-fixture')
     with s.tx() as db:
         db.execute("INSERT INTO answer_retry_requests(id,job_id,identity_id,state,requested_at) VALUES ('answer',?,'candidate','queued',?)", (jobs[0]['id'], s.now()))
-    result = s.set_job_disposition(job_ids=[jobs[0]['id']], disposition='canceled', reason='Test job')
+    result = s.set_job_disposition(job_ids=[jobs[0]['id']], disposition='canceled', reason=reason)
     assert result['jobs'][0]['disposition'] == 'canceled'
+    assert result['jobs'][0]['disposition_reason'] == reason
     assert s.attempt(session['attempt_id']) == before
     assert s.account_strategy(namespace='employer0.example.test', identity_id='candidate') == account
     again = s.intake(url=jobs[0]['url'] + '?utm_source=rediscovery')
@@ -150,6 +152,13 @@ filter.value='attention';filter.dispatchEvent(new w.Event('change'));
 if(!doc.getElementById('queue-rows').textContent.includes('Startup Failure'))throw Error('Queue startup failure missing from Needs attention');
 const search=doc.getElementById('job-search');search.value='acme';search.dispatchEvent(new w.Event('input'));
 if(doc.querySelectorAll('#queue-rows tr').length!==1||!doc.getElementById('queue-rows').textContent.includes('Acme'))throw Error('Search did not filter jobs');
+const reason=doc.getElementById('cancel-reason');reason.value='Manually applied';
+if(reason.value!=='Manually applied')throw Error('Manually applied reason unavailable');
+doc.getElementById('select-unfinished').click();
+let sent;
+w.fetch=(url,options)=>{sent={url,body:JSON.parse(options.body)};return new Promise(()=>{});};
+doc.getElementById('cancel-selected').click();
+if(sent?.url!=='/v1/set_job_disposition'||sent.body.reason!=='Manually applied'||sent.body.disposition!=='canceled'||JSON.stringify(sent.body.job_ids)!=='["open"]')throw Error('Manual application reason was not sent for the selected job');
 console.log('Dashboard cleanup controls passed');w.close();
 '''
     result = subprocess.run(['node', '-e', harness, str(JSDOM)], input=json.dumps({
