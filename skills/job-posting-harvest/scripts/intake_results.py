@@ -11,7 +11,7 @@ from job_applier.managed_redaction import reject_secrets
 from job_applier.managed_shared import ProtocolError
 
 FIELDS=frozenset({'url','company','title','location','verdict','source_type','source_id',
-                  'namespace','requisition_id','identity_evidence'})
+                  'namespace','requisition_id','identity_evidence','country','posted_at'})
 
 
 def publish(client, records, *, dry_run=False):

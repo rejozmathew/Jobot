@@ -52,6 +52,7 @@
     <section class="card">
       <h2>Application queue</h2>
       <p id="dispatcher-status" role="status">Checking queue worker…</p>
+      <p id="application-schedule" role="status"></p>
       <p id="discovery-status" role="status">Checking discovery schedule…</p>
       <details class="queue-options"><summary>Candidate, resume and application options</summary>
       <div class="operate-grid">
@@ -97,7 +98,7 @@
       </div>
       </details>
       <div class="main-action-bar">
-        <button id="start-application-btn" class="primary" type="button">Queue selected</button>
+        <button id="start-application-btn" class="primary" type="button">Retry selected</button>
         <button id="queue-run-next" type="button">Run next now</button>
         <button id="queue-toggle" type="button">Enable automatic queue</button>
       </div>
@@ -143,6 +144,8 @@
               <th>Company &amp; Role</th>
               <th>Status</th>
               <th>Assessment</th>
+              <th>Country</th>
+              <th>Posted date</th>
             </tr>
           </thead>
           <tbody id="queue-rows"></tbody>

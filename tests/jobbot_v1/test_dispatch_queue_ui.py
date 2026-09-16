@@ -37,11 +37,11 @@ v.jobs=[{id:'saved',company:'Saved Role',status:'queued'},
 v.dispatch_queue.items=[{job_id:'retry',state:'finished',outcome:'interrupted',detail:'Executor stopped'}];
 w.draw(v);
 let rows=[...doc.querySelectorAll('#queue-rows tr')];
-assert(rows[0].cells[2].textContent.includes('Not queued'),'Saved intake incorrectly claims to be queued');
-assert(rows[1].cells[2].textContent.includes('Not queued'),'Review-only intake claims to be queued');
+assert(rows[0].cells[2].textContent.includes('Awaiting automatic pickup'),'Saved intake lacks automatic pickup state');
+assert(rows[1].cells[2].textContent.includes('Awaiting automatic pickup'),'New intake still requires manual queueing');
 assert(rows[2].cells[2].textContent.includes('Interrupted'),'Interrupted request hidden');
-assert(rows[2].cells[2].textContent.includes('Queue selected'),'Interrupted request has no retry guidance');
-assert(doc.getElementById('dispatcher-status').textContent.includes('Queue selected'),'Empty queue has no next action');
+assert(rows[2].cells[2].textContent.includes('schedules recovery'),'Interrupted request has no retry guidance');
+assert(doc.getElementById('dispatcher-status').textContent.includes('automatically'),'Automatic pickup missing');
 v.dispatch_queue.items.unshift({job_id:'retry',state:'queued'});
 v.dispatch_queue.counts={queued:1,finished:1};w.draw(v);
 rows=[...doc.querySelectorAll('#queue-rows tr')];
@@ -65,8 +65,8 @@ w.fetch=async(path,options)=>{calls.push([path,JSON.parse(options.body)]);return
 v.dispatch_queue.counts={queued:2};w.draw(v);
 await doc.getElementById('queue-run-next').onclick();
 assert(calls.length===1&&calls[0][1].command==='run_next','UI blocked or changed the existing wake request');
-assert(doc.getElementById('notice').textContent.includes('No jobs are waiting'),'Empty queue falsely promises a launch');
-assert(doc.getElementById('notice').textContent.includes('Queue selected'),'Missing enqueue guidance');
+assert(doc.getElementById('notice').textContent.includes('No eligible jobs'),'Empty queue falsely promises a launch');
+assert(doc.getElementById('notice').textContent.includes('automatically'),'Missing automatic pickup guidance');
 response={worker_online:false,counts:{queued:1}};
 await doc.getElementById('queue-run-next').onclick();
 assert(doc.getElementById('notice').textContent.includes('offline'),'Offline worker falsely promises a launch');
@@ -101,4 +101,40 @@ assert(payload.changes.discovery_interval_hours===3&&payload.changes.discovery_b
 assert(payload.expected_version===7,'Versioned settings save bypassed');
 v.discovery.scheduler_recent=false;v.discovery.last_run.state='running';w.draw(v);
 assert(doc.getElementById('discovery-status').textContent.includes('Last scheduler check'),'Manual discovery must not imply an active scheduler');
+''')
+
+
+def test_delayed_retry_time_attempt_count_and_next_application_check_are_visible():
+    dashboard_check(r'''
+v.jobs=[{id:'retry',company:'Retry Fixture',status:'queued'}];
+v.dispatch_queue.counts={queued:1};v.dispatch_queue.ready_count=0;v.dispatch_queue.scheduled_count=1;
+v.dispatch_queue.next_automatic_at='2026-09-16T10:01:00Z';v.dispatch_queue.next_job_at='2026-09-16T14:00:00Z';
+v.dispatch_queue.items=[{job_id:'retry',state:'queued',attempt_number:2,waiting_for_retry:true,next_attempt_at:'2026-09-16T14:00:00Z'}];
+w.draw(v);w.noRefresh();
+const cell=doc.querySelector('#queue-rows tr').cells[2];
+assert(cell.textContent.includes('Retry scheduled')&&cell.textContent.includes('Attempt 2 of 3')&&cell.textContent.includes('Retry at'),'Retry timing hidden');
+assert(doc.getElementById('application-schedule').textContent.includes('Next application check'),'Application check time hidden');
+w.fetch=async()=>({ok:true,status:200,json:async()=>v.dispatch_queue});
+await doc.getElementById('queue-run-next').onclick();
+assert(doc.getElementById('notice').textContent.includes('scheduled for later'),'Run next falsely promises immediate retry');
+v.dispatch_queue.items=[{job_id:'retry',state:'finished',outcome:'failed',attempt_number:3,automatic_limit_reached:true,detail:'Employer unavailable'}];
+w.draw(v);
+assert(doc.querySelector('#queue-rows tr').cells[2].textContent.includes('Needs attention'),'Exhausted retries hidden');
+assert(doc.querySelector('#queue-rows tr').cells[2].textContent.includes('Employer unavailable'),'Failure reason hidden');
+v.jobs=[{id:'held-skip',company:'Skipped Fixture',status:'queued',eligibility:'held',metadata_json:'{"verdict":"Skip"}'}];
+w.draw(v);
+assert(doc.querySelector('#queue-rows tr').cells[2].textContent.includes('Not selected for application'),'Skipped posting falsely promises automatic pickup');
+''')
+
+
+def test_country_and_actual_posting_date_are_visible_without_guessing_update_date():
+    dashboard_check(r'''
+v.jobs=[{id:'dated',company:'Dated Fixture',status:'queued',metadata_json:'{"country":"US","posted_at":"2026-09-10","location":"Remote"}'},
+ {id:'undated',company:'Undated Fixture',status:'queued',metadata_json:'{"location":"Remote (United States)","updated_at":"2026-09-15"}'}];
+w.draw(v);
+const rows=doc.querySelectorAll('#queue-rows tr');
+assert(rows[0].cells[4].textContent==='United States','Country code not readable');
+assert(rows[0].cells[5].textContent.includes('2026-09-10'),'Posting date hidden or shifted');
+assert(rows[1].cells[4].textContent==='United States','Explicit country in stored location not displayed');
+assert(rows[1].cells[5].textContent==='Unavailable','Update date fabricated as posting date');
 ''')

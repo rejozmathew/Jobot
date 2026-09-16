@@ -34,6 +34,23 @@ attempt. Request metadata exposes `application_kind`: `first_attempt` or
 
 ## Request identity and lifecycle
 
+### Automatic queue recovery (operator request, September 15)
+
+The sequential worker now picks up active intake automatically. An interrupted,
+failed, blocked or submission-unknown request gets a fresh second request four
+hours after completion, then a third 24 hours after the second completes. These
+are three total attempts per automatic series, as requested by the operator.
+Afterward the dashboard shows Needs attention and the retained failure reason.
+An explicit new retry starts a fresh series; this is not a job-wide retry veto.
+Pending user answers, explicit stops, review-only completion, cancellations and
+recorded submissions retain their existing handling. Retry scheduling never ends
+an in-progress application, rewrites evidence or bypasses browser cleanup.
+
+`managed_queue.queue_reconcile` performs idempotent pickup; `attempt_schedule`
+derives attempt counts and due times from durable request lineage. Both the
+worker and Run next use that reconciliation. `queue_take` skips future retries
+while allowing other ready jobs, and preserves one dispatched application.
+
 The native Hermes caller supplies the observed user-turn ID as request metadata.
 The shared runtime combines it with the actual conversation, configured identity
 and resolved job ID to identify that request. Repeating its start call returns

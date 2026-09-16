@@ -1,11 +1,71 @@
-"""Explicit single-job dispatch requests. Intake alone never starts execution."""
+"""Sequential dispatch, automatic active-job pickup, and durable delayed retries."""
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from .managed_shared import ProtocolError, dumps, uid
 from .managed_redaction import safe_text
 
+AUTOMATIC_ATTEMPTS = 3
+RETRY_OUTCOMES = frozenset({'interrupted', 'failed', 'blocked', 'submission_unknown'})
+
+
+def attempt_schedule(rows):
+    """Retry lineage lives in immutable request IDs; no historical outcomes change."""
+    details = {}
+    by_id = {row['id']: row for row in rows}
+    for row in rows:  # insertion order: a parent always precedes its retry
+        parent_id = row['request_id'].removeprefix('automatic-retry:') if row['request_id'].startswith('automatic-retry:') else None
+        parent = by_id.get(parent_id)
+        number = details[parent_id]['attempt_number'] + 1 if parent_id in details else 1
+        due = row['created_at']
+        if parent and parent['ended_at']:
+            due = (datetime.fromisoformat(parent['ended_at']) + timedelta(hours=4 if number == 2 else 24)).isoformat()
+        details[row['id']] = {'attempt_number': number, 'next_attempt_at': due,
+            'automatic_limit_reached': row['state'] == 'finished' and row['outcome'] in RETRY_OUTCOMES and number >= AUTOMATIC_ATTEMPTS}
+    return details
+
 
 class QueueServices:
+    def queue_reconcile(self, *, identity_id, resume_asset_id):
+        """Pick up active intake and schedule recovery; the serial worker executes it."""
+        added = []
+        with self.tx() as db:
+            candidate = self._get(db, 'candidates', identity_id)
+            asset = self._get(db, 'document_assets', resume_asset_id)
+            if candidate['state'] != 'active': raise ProtocolError('identity_inactive')
+            if asset['identity_id'] != identity_id or asset['kind'] != 'resume' or asset['status'] != 'available':
+                raise ProtocolError('asset_identity_mismatch')
+            rows = [dict(r) for r in db.execute('SELECT * FROM dispatch_queue WHERE identity_id=? ORDER BY rowid', (identity_id,))]
+            latest = {r['job_id']: r for r in rows}
+            schedule = attempt_schedule(rows)
+            settings = self._settings_record(db)['values']
+            jobs = db.execute("SELECT * FROM jobs WHERE disposition='active' AND status NOT IN ('applied','already_applied') ORDER BY created_at,rowid").fetchall()
+            for job in jobs:
+                old = latest.get(job['id'])
+                restored = old and old['state'] == 'finished' and old['outcome'] == 'canceled'
+                if old and not restored and (old['state'] != 'finished' or old['outcome'] not in RETRY_OUTCOMES or schedule[old['id']]['automatic_limit_reached']): continue
+                # Preserve existing user-answer and policy holds; don't burn retries on them.
+                if db.execute("SELECT 1 FROM application_questions WHERE job_id=? AND identity_id=? AND state='pending'", (job['id'], identity_id)).fetchone(): continue
+                if db.execute('SELECT 1 FROM application_sessions WHERE job_id=? AND ended_at IS NULL', (job['id'],)).fetchone(): continue
+                if job['eligibility'] == 'excluded': continue
+                if job['eligibility'] == 'held' and job['intervention_reason']: continue
+                if job['eligibility'] == 'held' and str(json.loads(job['metadata_json'] or '{}').get('verdict', '')).strip().casefold() == 'skip': continue
+                db.execute('SAVEPOINT auto_pickup')
+                try:
+                    # An active intake row no longer needs a second, manual enqueue click.
+                    if job['eligibility'] == 'held': db.execute("UPDATE jobs SET eligibility='ready' WHERE id=?", (job['id'],))
+                    self._eligible(db, job['id'], settings)
+                    item_id = uid()
+                    request = 'automatic-retry:' + old['id'] if old and not restored else 'automatic-intake:' + (old['id'] if restored else job['id'])
+                    db.execute("INSERT INTO dispatch_queue(id,request_id,job_id,identity_id,resume_asset_id,state,created_at) VALUES (?,?,?,?,?,'queued',?)",
+                        (item_id, request, job['id'], identity_id, resume_asset_id, self.now()))
+                    added.append(item_id)
+                except ProtocolError as exc:
+                    db.execute('ROLLBACK TO auto_pickup')
+                    if exc.code not in ('already_applied','job_canceled','company_excluded','job_archived','not_ready','market_incompatible'): raise
+                finally:
+                    db.execute('RELEASE auto_pickup')
+        return {'added': added}
+
     def queue_enqueue(self, *, job_ids, identity_id, resume_asset_id, request_id, retry=False):
         if (not isinstance(job_ids, list) or not job_ids or len(job_ids)>100
                 or any(not isinstance(j, str) for j in job_ids)
@@ -48,16 +108,28 @@ class QueueServices:
             # Row labels need the latest request even when it is outside recent history.
             latest={r['job_id']:dict(r) for r in db.execute('''SELECT id,job_id,state,outcome,detail
                 FROM dispatch_queue WHERE rowid IN (SELECT MAX(rowid) FROM dispatch_queue GROUP BY job_id)''')}
+            schedule=attempt_schedule([dict(r) for r in db.execute('SELECT * FROM dispatch_queue ORDER BY rowid')])
+            waiting=[dict(r) for r in db.execute("SELECT * FROM dispatch_queue WHERE state='queued'")]
+        now=datetime.fromisoformat(self.now())
+        for item in [*items,*latest.values()]:
+            item.update(schedule[item['id']])
+            item['waiting_for_retry']=item['state']=='queued' and datetime.fromisoformat(item['next_attempt_at'])>now
+        ready=sum(datetime.fromisoformat(schedule[r['id']]['next_attempt_at'])<=now for r in waiting)
+        next_job=min((schedule[r['id']]['next_attempt_at'] for r in waiting),default=None)
         from .workspace_process import process_matches
         identity=json.loads(control.pop('worker_identity_json') or '{}')
         heartbeat=control.get('heartbeat_at')
         age=(datetime.fromisoformat(self.now())-datetime.fromisoformat(heartbeat)).total_seconds() if heartbeat else None
         return {**control,'installed':True,'enabled':bool(control['enabled']),
                 'worker_online':bool(identity and process_matches(identity) and age is not None and age<30),
-                'counts':counts,'items':items,'latest_by_job':latest,'selection':getattr(self,'dispatch_selection',None)}
+                'counts':counts,'ready_count':ready,'scheduled_count':len(waiting)-ready,'next_job_at':next_job,
+                'automatic_attempt_limit':AUTOMATIC_ATTEMPTS,
+                'items':items,'latest_by_job':latest,'selection':getattr(self,'dispatch_selection',None)}
 
     def queue_control(self, *, command):
         if command not in ('run_next','pause','resume'):raise ProtocolError('invalid_queue_control')
+        selection=getattr(self,'dispatch_selection',None)
+        if command in ('run_next','resume') and selection:self.queue_reconcile(**selection)
         with self.tx() as db:
             if command=='run_next':db.execute('UPDATE dispatch_control SET wake_requested=1 WHERE id=1')
             else:db.execute('UPDATE dispatch_control SET enabled=? WHERE id=1',(int(command=='resume'),))
@@ -67,7 +139,9 @@ class QueueServices:
         """Only the dispatcher calls this, under its OS lock; no model in Service."""
         with self.tx() as db:
             if db.execute("SELECT 1 FROM dispatch_queue WHERE state='dispatched'").fetchone():return None
+            schedule=attempt_schedule([dict(r) for r in db.execute('SELECT * FROM dispatch_queue ORDER BY rowid')])
             for row in db.execute("SELECT * FROM dispatch_queue WHERE state='queued' ORDER BY created_at,rowid").fetchall():
+                if datetime.fromisoformat(schedule[row['id']]['next_attempt_at'])>datetime.fromisoformat(self.now()):continue
                 try:self._eligible(db,row['job_id'],self._settings_record(db)['values'])
                 except ProtocolError as exc:
                     db.execute("UPDATE dispatch_queue SET state='finished',outcome=?,detail=?,ended_at=? WHERE id=?",

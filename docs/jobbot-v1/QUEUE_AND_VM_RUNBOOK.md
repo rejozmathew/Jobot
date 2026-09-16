@@ -7,7 +7,7 @@ home, authenticated providers, Himalaya account and browser extension setup.
 
 ## What runs where
 
-`Hermes discovery -> intake -> explicit dispatch queue -> one fresh Hermes application -> recorded attempt/evidence`.
+`Hermes discovery -> active intake -> automatic dispatch queue -> one fresh Hermes application -> recorded attempt/evidence`.
 
 JobBot owns the selected managed database, deduplication, queue, submission mode,
 history, browser ownership, controls and reports. Hermes is a replaceable external
@@ -23,21 +23,39 @@ worker are independent processes; a working web page does not mean a worker is o
 ## Everyday use
 
 In the dashboard, **Add a job** accepts its official URL and optional company/title.
-It selects the new row but does not silently execute it. Open application options
-to check the candidate, exact resume and submission mode. **Queue selected** adds
-explicit requests. **Run next now** requests one job as soon as the configured
-browser is free. **Enable automatic queue** enables periodic pickup; the default
-interval is three hours after the preceding dispatch returns. Pausing automatic
+The worker automatically queues active intake using its configured candidate and
+resume. No second enqueue click is required. Existing cancellation, recorded
+submission, exclusions, explicit eligibility holds and pending-answer work remain
+respected. A discovery `Skip` verdict stays held unless the operator previously
+approved the job for execution. Open application
+options to check submission mode. **Run next now** collects active intake and starts
+one ready job as soon as the configured browser is free. **Enable automatic queue**
+enables periodic execution; the VM checks every 60 seconds. Pausing automatic
 pickup does not terminate an application already in progress. Its own expanded
 row has Pause and Stop controls. Application details and diagnostic messages are
 collapsed on the main view; the queue worker's online/offline state is explicit.
 
-Saved postings without a pending execution request show **Not queued**. An ended
-request shows its outcome (for example, **Interrupted**) and explains how to queue
-a fresh attempt. **Run next now** reports an empty queue, an offline worker or a
-currently running application using the server's response. It does not enqueue
-selected postings or replay ended requests. These are display changes, not new
-execution restrictions.
+New active postings briefly show **Awaiting automatic pickup**, then **Queued**.
+Interrupted, failed, blocked and submission-unknown outcomes schedule a fresh
+request after **4 hours**; a third attempt waits **24 hours after the second ends**.
+The operator requested these three total attempts and spaced recovery on September
+15. Retry due times derive from durable parent request IDs and completion times,
+so restarting the worker does not reset them. Other ready jobs can run while a
+retry waits. After the third unsuccessful attempt, **Needs attention** retains the
+reason. **Retry selected** explicitly starts another series after it ends; there
+is no permanent job ban. Recorded success and cancellation still suppress work.
+User stops and completed review-only results do not restart automatically.
+
+The dashboard separates ready jobs from scheduled retries and shows the next
+application check, retry due time, attempt number and failure reason. **Run next
+now** does not accelerate a future retry. Canceled records remain under **Show →
+Canceled / All jobs** and may be restored without deleting history.
+
+Jobs display Country and Posted date. Discovery retains verified `country` and
+`posted_at` fields; the date is the original publication date, never inferred
+from an update or intake timestamp. Missing dates remain Unavailable. Existing
+explicit United States locations can supply the displayed country without
+rewriting old records or guessing the country of an unspecified remote role.
 
 CLI equivalents, after selecting the private configuration:
 
@@ -56,8 +74,9 @@ Global `--config /absolute/path` goes **before** the queue subcommand; the
 environment variable works for both queue and application-runtime commands.
 `once` directly dispatches one queued job; `watch` stays running for the dashboard
 and periodic triggers. Both share a nonblocking per-instance dispatcher lock.
-Do not run `once` alongside the installed watcher. Neither imports arbitrary held
-jobs automatically. Review mode remains review until the operator chooses submit.
+Do not run `once` alongside the installed watcher. Ordinary new intake no longer
+requires promotion from its default held state; explicit holds remain respected.
+Review mode remains review until the operator chooses submit.
 
 ## Fresh application context and outcomes
 
@@ -78,14 +97,14 @@ mail bodies and codes must not enter progress or reusable answer history.
 
 Queue completion uses the stored application outcome, not a successful CLI exit.
 An executor that exits without evidence is interrupted, never marked applied.
-Recovery does not replay a launched request automatically. Recorded success
-suppresses rediscovery. A fresh explicit retry remains allowed after blocked,
+Recovery creates a separate delayed request after an unsuccessful attempt ends.
+Recorded success suppresses rediscovery. A fresh explicit retry remains allowed after blocked,
 failed, interrupted or uncertain history; old evidence stays intact. Automatic
 queue seriality does not change the existing manual multi-workspace retry policy.
 The Answers page's explicitly queued retries also feed the dispatcher for the
 configured candidate. Browser closure must still be acknowledged before pickup.
 
-There is no new whole-application timeout or automatic cross-attempt retry policy.
+There is no new whole-application timeout.
 An executor that never exits or a browser whose cleanup cannot be verified can
 hold the queue. Inspect its expanded row; do not delete locks or fabricate a
 stopped/submitted state. Unclosed pre-rollout sessions must be accounted for.
@@ -124,10 +143,11 @@ The fresh discovery brief loads the configured candidate's preferences and
 exclusions. It can use employer/ATS sources and existing email alerts. It must
 verify every direct employer URL and live status, preserve requisition identity,
 and report unsupported or inaccessible sources rather than inventing listings.
-Only **Strong apply / Apply** verdicts are eligible for the explicit `--enqueue`
-handoff. **Apply with caveats / Skip** remain intake records, not automatic work.
-Omit `--enqueue` to collect for review. Scheduling this task enables that standing
-handoff authorization; it does not change the application's submission mode.
+The optional explicit `--enqueue` handoff still selects **Strong apply / Apply**.
+The running automatic worker now also picks up other active intake, including
+ordinary caveated records; **Skip**, exclusions and explicit holds remain out.
+Omitting `--enqueue` only omits that immediate handoff: pause automatic execution
+to collect active jobs without running them. Discovery never changes submission mode.
 
 Other scripts or a different harness can supply sanitized JSON records:
 

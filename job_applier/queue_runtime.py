@@ -53,7 +53,7 @@ def settle(service, item):
     attempt=service.attempt(session['attempt_id']) if session and session['attempt_id'] else None
     service.queue_complete(item['id'],outcome=(attempt or {}).get('outcome') or 'interrupted',
         detail=(attempt or {}).get('evidence') or (session or {}).get('reason') or
-            'Executor exited without a recorded application outcome; no automatic replay of this request.',
+            'Executor exited without a recorded application outcome.',
         session_id=session['id'] if session else None)
     return True
 
@@ -123,9 +123,11 @@ def watch(config, service, *, once=False):
     interval=float(config.get('queue_interval_seconds',10800))
     if interval<=0:raise ProtocolError('invalid_queue_interval')
     with FileLock(str(service.db_path)+'.dispatcher.lock'):
+        service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}
         while True:
             service.queue_heartbeat(process_identity(os.getpid()))
             import_answer_retries(config,service)
+            service.queue_reconcile(**service.dispatch_selection)
             status=service.queue_status()
             now=datetime.fromisoformat(service.now())
             due=not status['next_automatic_at'] or now>=datetime.fromisoformat(status['next_automatic_at'])
@@ -186,7 +188,9 @@ def main(argv=None):
                 result=service.queue_enqueue(job_ids=job_ids,identity_id=config['identity_id'],
                     resume_asset_id=config['resume_asset_id'],request_id=uid(),retry=args.retry)
                 if args.run_next:service.queue_control(command='run_next')
-            else:result=service.queue_control(command=args.command.replace('-','_'))
+            else:
+                service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}
+                result=service.queue_control(command=args.command.replace('-','_'))
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0
     except (ProtocolError,OSError,ValueError,KeyError) as exc:
         print(json.dumps({'error':getattr(exc,'code',type(exc).__name__)}));return 2

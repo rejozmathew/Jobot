@@ -40,13 +40,20 @@ function choice(id,items,value){const select=$(id),before=value??select.value;se
 function submitted(job){return ['applied','already_applied'].includes(job.status);}
 function unfinished(job){return !submitted(job)&&job.disposition!=='canceled'&&!job.archived;}
 function latestDispatch(v,job){return v.dispatch_queue?.latest_by_job?.[job.id]||v.dispatch_queue?.items?.find(q=>q.job_id===job.id);}
+function postingMetadata(job){let metadata=job.metadata||{};try{if(job.metadata_json)metadata=JSON.parse(job.metadata_json);}catch{}return metadata;}
+function discoverySkipped(job){return job.eligibility==='held'&&String(postingMetadata(job).verdict||'').trim().toLowerCase()==='skip';}
+function postingCountry(job){const metadata=postingMetadata(job);const country=metadata.country||(/(?:, |\()United States\)?$/.test(metadata.location||'')?'US':'');if(!country)return 'Unavailable';try{return /^[A-Z]{2}$/.test(country)?new Intl.DisplayNames(['en'],{type:'region'}).of(country):country;}catch{return country;}}
+function postingDate(job){const value=postingMetadata(job).posted_at;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value))return 'Unavailable';const day=value.slice(0,10);const parsed=new Date(day+'T00:00:00Z');return !Number.isNaN(parsed.getTime())&&parsed.toISOString().slice(0,10)===day?day:'Unavailable';}
 function queueJobStatus(job,queued,local){
  if(job.disposition==='canceled')return 'Canceled';
  if(submitted(job))return displayStatus(job.status);
+ if(queued?.waiting_for_retry)return 'Retry scheduled';
+ if(queued?.automatic_limit_reached)return 'Needs attention';
  if(queued?.state==='queued')return 'Queued';
  if(queued?.state==='dispatched')return 'In progress';
+ if(discoverySkipped(job))return 'Not selected for application';
  const outcome=queued?.outcome==='canceled'?job.status:queued?.outcome||job.status;
- return local&&outcome==='queued'?'Not queued':displayStatus(outcome);
+ return local&&outcome==='queued'?(job.eligibility==='excluded'?'Excluded':job.intervention_reason?'Needs attention':'Awaiting automatic pickup'):displayStatus(outcome);
 }
 function visibleJobs(v){
  const filter=$('job-filter').value,query=$('job-search').value.trim().toLocaleLowerCase();
@@ -130,22 +137,25 @@ function renderQueue(v){
   const queued=latestDispatch(v,job);
   const statusTd=el('td');statusTd.append(badge(queueJobStatus(job,queued,!!v.local_runtime?.workspaces?.length)));
   if(v.local_runtime?.workspaces?.length&&unfinished(job)&&!['queued','dispatched'].includes(queued?.state)){
-   statusTd.append(el('small',queued?.state==='finished'?'Request ended. Select this job and choose Queue selected to try again.':'Saved only. Select this job and choose Queue selected to apply.'));
+   statusTd.append(el('small',queued?.automatic_limit_reached?'Three attempts ended without completion. Review the reason; Retry selected starts a new attempt series.':discoverySkipped(job)?'Discovery marked this job Skip. Review its match before explicitly choosing Retry selected.':queued?.state==='finished'?'The worker schedules recovery for interrupted or failed attempts. Review-only results and user stops stay here.':job.intervention_reason||'Active jobs enter the execution queue automatically.'));
   }
+  if(queued?.attempt_number)statusTd.append(el('small',`Attempt ${queued.attempt_number} of ${v.dispatch_queue?.automatic_attempt_limit||3}`));
+  if(queued?.waiting_for_retry)statusTd.append(el('small',`Retry at ${stamp(queued.next_attempt_at)}. Other ready jobs can run first.`));
   if(job.disposition==='canceled')statusTd.append(el('small',job.disposition_reason||'Canceled by you'),el('small','Last outcome: '+displayStatus(job.status)));
   const unanswered=v.answer_queue?.groups.find(g=>g.job_id===job.id&&g.pending_count);
   if(unanswered&&job.disposition!=='canceled'){const review=el('button',`Answer ${unanswered.pending_count} question${unanswered.pending_count===1?'':'s'}`);review.onclick=()=>tab('answers');statusTd.append(review);}
   if(job.failure_reason||queued?.detail){const details=progressDetails(job.id+':outcome','Outcome details',false,'job-outcome');details.append(el('p','Reason: '+(job.failure_reason||queued.detail)));statusTd.append(details);}
   tr.append(statusTd);
   const assessment=job.assessment;tr.append(el('td',assessment?(assessment.recommendation||'Assessment available'):'Unassessed'));
+  tr.append(el('td',postingCountry(job)),el('td',postingDate(job)));
   $('queue-rows').append(tr);
  }
- if(!jobs.length){const tr=el('tr'),td=el('td',v.jobs.length?'No jobs match this view.':'No postings in this instance.');td.colSpan=4;tr.append(td);$('queue-rows').append(tr);}
+ if(!jobs.length){const tr=el('tr'),td=el('td',v.jobs.length?'No jobs match this view.':'No postings in this instance.');td.colSpan=6;tr.append(td);$('queue-rows').append(tr);}
  selection();
 }
 function renderSessions(v){
  const runtime=v.local_runtime||{sessions:[],workspaces:[]};
- if($('start-application-btn'))$('start-application-btn').textContent=runtime.workspaces.length?'Queue selected':'Start application';
+ if($('start-application-btn'))$('start-application-btn').textContent=runtime.workspaces.length?'Retry selected':'Start application';
  $('local-sessions-card').hidden=!runtime.workspaces.length&&!runtime.sessions.length;
  const historyScroll=$('session-history')?.scrollTop||0;
  rememberProgress($('local-sessions'));$('local-sessions').replaceChildren();
@@ -185,8 +195,9 @@ function renderSessions(v){
 }
 function displayStatus(value){return ({connected:'In progress',preparing:'In progress',waiting:'In progress',running:'In progress',finishing:'In progress',capacity_wait:'Waiting to start',applied:'Applied',already_applied:'Already applied',ready_for_review:'Ready for review',submission_unknown:'Submission uncertain',blocked:'Needs attention',failed:'Needs attention',interrupted:'Interrupted',paused:'Paused',queued:'Queued',completed:'Completed',stopped:'Stopped',skipped:'Skipped'})[value]||value||'Not started';}
 function runNextMessage(q){
- if(!q.counts?.queued)return q.counts?.dispatched?'An application is already in progress. No other jobs are waiting.':'No jobs are waiting to run. Select a job and choose Queue selected first.';
+ if(!q.counts?.queued)return q.counts?.dispatched?'An application is already in progress. No other jobs are waiting.':'No eligible jobs are waiting. Active jobs are picked up automatically; check job reasons below.';
  if(!q.worker_online)return 'Request saved, but the queue worker is offline. Start the JobBot queue service to run queued jobs.';
+ if(q.ready_count===0&&q.scheduled_count)return `Retries are scheduled for later. Next retry: ${stamp(q.next_job_at)}.`;
  return q.counts?.dispatched?'Request saved. The next queued job will wait for the current application to finish.':'Request saved. The worker will start the next queued job when its browser is free.';
 }
 function renderDispatcher(v){
@@ -209,7 +220,11 @@ function renderDispatcher(v){
   choice('queue-resume',options,selected);
  }
  if($('dispatcher-status'))$('dispatcher-status').textContent=!q.installed?'Queue upgrade required: restart with the current queue dashboard launcher.':
-  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.counts?.queued||0} waiting to run · ${q.counts?.dispatched||0} in progress · Automatic queue ${q.enabled?'on':'paused'}${!q.counts?.queued&&!q.counts?.dispatched?'. No jobs are waiting to run. Select jobs and choose Queue selected.':q.detail?' · '+q.detail.replaceAll('_',' '):''}`;
+  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.counts?.dispatched||0} in progress · Automatic queue ${q.enabled?'on':'paused'}. Active jobs are picked up automatically, one application at a time.`;
+ if($('application-schedule'))$('application-schedule').textContent=
+  `${q.counts?.dispatched?'An application is running. The next ready job follows after it finishes. ':''}`+
+  `${q.enabled?`Next application check: ${q.next_automatic_at?stamp(q.next_automatic_at):'worker’s next check'}.`:'Automatic applications are paused; Run next now starts one ready job.'}`+
+  `${q.ready_count===0&&q.next_job_at?` Next scheduled retry: ${stamp(q.next_job_at)}.`:''} Retries wait 4 hours, then 24 hours; after 3 attempts, review the failure reason.`;
  if($('queue-toggle'))$('queue-toggle').textContent=q.enabled?'Pause automatic queue':'Enable automatic queue';
  // The local queue uses Hermes' configured model and the runtime's actual workspace.
  // Do not imply that legacy model/browser controls can change that configuration.
@@ -492,7 +507,7 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{
   const submission_mode=$('main-submission-mode').value;
   if(submission_mode!==state.view.settings.values.submission_mode)await api('configure',{changes:{submission_mode,mode:submission_mode==='submit'?'pilot':'development'},expected_version:state.settingsVersion});
   await api('queue_enqueue',{job_ids:[...state.selected],identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true});
-  state.selected.clear();notice('Selected jobs queued. Run next now, or enable the automatic queue.');await refresh();return;
+  state.selected.clear();notice('Retry requested. Applications run one at a time; existing scheduled retries keep their due time.');await refresh();return;
  }
  if(!state.selected.size)throw Error('Please select at least one job from the queue.');
  const candidateId=$('candidate').value;if(!candidateId)throw Error('Please select a candidate.');

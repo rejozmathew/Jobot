@@ -148,6 +148,14 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                 db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(alias_key,job_id,safe_text(identity_evidence or 'normalized_url')))
             if row and (company is not None or title is not None):
                 self._enrich_job(db,row,company=company,title=title,source='explicit_intake',url=canonical)
+            if row:
+                # Rediscovery can supply previously missing posting facts. Preserve
+                # all other metadata and never replace known facts with omissions.
+                facts={k:metadata[k] for k in ('country','posted_at') if isinstance(metadata.get(k),str) and metadata[k].strip()}
+                if facts:
+                    saved=json.loads(self._get(db,'jobs',job_id)['metadata_json'] or '{}')
+                    saved.update(facts)
+                    db.execute('UPDATE jobs SET metadata_json=? WHERE id=?',(dumps(saved),job_id))
             if query_key:
                 # Retain every historical job row and link existing duplicates so
                 # an older applied/uncertain attempt cannot be bypassed by a form URL.

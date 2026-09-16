@@ -522,6 +522,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 
 | Component | Scope and consumer |
 |---|---|
+| managed_queue.py / queue_runtime.py | Automatic active-intake pickup from worker and Run next; serial execution; durable request lineage schedules retries after 4 hours and then 24 hours, up to three attempts per series, with explicit retries still available |
 | managed_discovery.py / migration 20 | Selected-instance discovery run/check history and last/next-run reporting for the dashboard and harvest scheduler; no application dispatch or browser ownership |
 | harvest_runtime.py / managed_settings.py / jobbot-harvest.timer | Minute schedule checks launch fresh Hermes discovery only when the saved interval is due; dashboard settings own batch size and interval; the existing harvest lock prevents overlapping discovery; optional harvest_hermes_command selects a discovery profile, and unfinished private checkpoints carry verified leads into the next run for revalidation |
 | application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
