@@ -141,7 +141,10 @@ def remaining_submission_work(observed):
             # Required radio groups are answered by any checked member.
             if not field.get('name'):continue
             missing=not any(f.get('name')==field['name'] and f.get('document')==field.get('document') and f.get('checked') for f in fields)
-        elif kind=='checkbox':missing=field.get('checked') is False
+        elif kind=='checkbox':
+            # Checkbox groups (select-all-that-apply) are satisfied by any checked member.
+            if not field.get('name'):missing=field.get('checked') is False
+            else:missing=not any(f.get('name')==field['name'] and f.get('document')==field.get('document') and f.get('checked') for f in fields)
         else:missing=field.get('present') is False
         if missing:required.append(field)
     groups=[g for g in observed.get('verification',{}).get('groups',[]) if g.get('complete') is False]
