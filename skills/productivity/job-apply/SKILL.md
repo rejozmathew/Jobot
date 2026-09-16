@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.13
+version: 0.5.14
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -44,6 +44,10 @@ doctor run, repeated configuration/history inspection or a planning turn before
 start. The runtime already performs its own prerequisite checks. Reuse skills
 already loaded in this conversation rather than reading them again.
 
+Persist toward the authorized submission: perform the next recovery, inspect its
+effect, and continue until accepted confirmation or an evidenced unresolved
+obstacle remains after plausible recovery. Persistence means changing the action
+when evidence changes, not repeating the same failing click or inspection.
 The executor owns progress toward the authorized application outcome. Helpers
 accelerate routine work; their matchers, retry counts and call budgets do not
 define the limits of executor reasoning. On every ATS, `blocked`,
@@ -269,11 +273,27 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    no applicable range is available. An explicit observed range can be supplied
    as `salary_range:{min,max,currency}`. Do not use the candidate's desired range
    as the job's range. Routine privacy consent excludes marketing and job alerts.
-6. Use the configured approved resume through Simplify during filling. Handle an
-   actual required-upload error with `browser upload` and the selected asset.
+6. Use the configured approved resume through Simplify during filling. On an
+   actual missing/rejected-resume error, immediately capture **and inspect** the
+   owned screenshot. A displayed filename or Simplify Completed checkmark can
+   coexist with an employer upload rejection. After writer settlement, use the
+   Resume/CV widget's observed Remove/Cancel/X control to clear that attachment,
+   reveal its Attach/file input, and use `browser upload` with the selected asset
+   and a fresh ref/selector scoped to **Resume/CV**. If no attachment is present,
+   use its observed Attach/file input directly. A lone file input may belong to
+   Cover Letter while Resume/CV's input is absent until removal; inspect its
+   field association rather than using a broad `input[type=file]` selector.
+   Verify the resulting attachment and current employer feedback, then continue
+   submission. Some widgets clear the raw file input after ingesting the upload;
+   an empty `files` list alone is not a reason to upload again. Resolve the
+   visible resume error through the widget instead of repeating Submit or
+   rediscovering why the filename and validation disagree. If the widget stays
+   stuck, use the shared refresh-and-refill recovery below. Keep validation
+   messages intact so the next observation reflects the actual employer state.
    Report only uploads performed through that helper; do not manufacture an
-   upload event for an attachment Simplify supplied. At Review, proceed directly
-   to the enabled Submit control: no attachment search, scrolling audit, re-upload,
+   upload event for an attachment Simplify supplied. At Review with no employer
+   upload error, proceed directly to the enabled Submit control: no attachment
+   search, scrolling audit, re-upload,
    or requirement for resume evidence in the internal ledger. Missing attachment
    evidence alone does not block submission. No in-run PDF extraction, resume
    hunts, or reconstruction of career/education fields on any ATS.
@@ -360,6 +380,31 @@ evidence-based recovery. Inspect actual submission evidence as part of choosing
 the next operation; historical click uncertainty never locks the browser. New
 user application requests follow the shared retry policy.
 
+Refresh-and-refill is also a shared recovery for a stuck form or an email-code
+step that makes no progress, even if the page still renders. For missing mail,
+compare the approved address with the actual form/verification recipient, check
+the configured mailbox including spam/junk and delayed delivery, and use an
+observed resend when available. If no matching code arrives within about **1–2
+minutes of the employer's code request**, refresh the owned application tab with
+`browser reload` and continue in the same attempt. Track elapsed time from that
+request across polls and conversation compaction; repeated mailbox reads or a
+resend do not restart this recovery window. This is a prompt to change recovery,
+not an application time limit or a reason to finish blocked.
+That is an ordinary page recovery; an earlier Submit click or email prompt does
+not prohibit it. A mail-request ledger entry records a request and does not send
+or resend employer mail. Follow actual page controls for delivery.
+
+After refresh, let the new page and Simplify initialize. If autofill starts
+automatically, observe it until settled; otherwise use its enabled Autofill.
+Repair the remaining required fields from approved facts (including conditional
+questions), handle a renewed upload error as above, and continue to Submit in
+configured submit mode. Refresh may discard unsaved answers or invalidate the
+old code: use fresh refs and any new verification request. If the same obstacle
+recurs, inspect the new evidence and choose the next plausible recovery rather
+than refreshing on a timer. This does not predict or bypass a security challenge;
+handle any verification the refreshed page actually presents. Once accepted
+confirmation is observed, record it and finish.
+
 `finish` parameters are `{"outcome":"blocked","evidence":"<observed reason>",
 "quiescent":true}` (or another supported truthful outcome). Do not add invented
 fields. `context` and `report` remain readable after the browser host has stopped.
@@ -422,10 +467,13 @@ unfinished attempts, including submission-unknown history, remain retryable.
 
 ## Mail and private identity
 
-Read the verification email using the existing Hermes Gmail skill. The LLM
+Read the verification email using the configured mailbox handoff (Himalaya or
+the existing Hermes Gmail integration). The LLM
 identifies the relevant message and extracts the code. With multiple relevant
 messages, choose the one closest to the observed request timestamp. If the email
-has not arrived, check again in this same application. A helper miss does not
+has not arrived, check delayed delivery within the approximately 1–2 minute
+window from the employer's request, then use the shared refresh-and-refill
+recovery above. Continue this same application. A helper miss does not
 mean the user must retrieve or enter the code, and does not end the application.
 
 Enter the selected code with ordinary `browser fill` on the observed input refs,

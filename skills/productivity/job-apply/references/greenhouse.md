@@ -8,8 +8,8 @@ Preserved reliable approaches:
 - Keyboard commit may need a real option click when aria-invalid persists.
 - Prefer native widget interactions for Ashby-style Yes/No buttons. Changing a hidden checkbox does not reliably update framework state.
 - A required conditional follow-up may need a truthful “not applicable” value, but only when the selected facts justify it.
-- Preferred-name fields can be present or required. File input values may remain empty for browser privacy; verify the attachment chip and selected document identity instead.
-- Read security emails through Hermes Gmail. The LLM chooses the relevant code closest to the request time, rechecking delayed mail as needed. Enter it with ordinary browser fill or pass `value` with the observed group to `credentials` mode `verification`; then submit and follow the employer response. No separate mailbox verifier decides whether entry is allowed.
+- Preferred-name fields can be present or required. Greenhouse may clear or remove a file input after displaying an attachment; its empty value alone is not an upload failure. A filename chip alone is not proof of acceptance when the employer also shows "Resume/CV is required." Follow the canonical resume-error recovery immediately: inspect the screenshot, remove the Resume/CV attachment through its X/Remove control, reacquire that widget's input, and upload the approved asset there. The only remaining file input can be Cover Letter's. Preserve actual validation messages and follow the employer response after reattachment.
+- Read security emails through the configured mailbox handoff (Himalaya or Hermes Gmail). The LLM chooses the relevant code closest to the request time, rechecking delayed mail within the shared recovery window below. Enter it with ordinary browser fill or pass `value` with the observed group to `credentials` mode `verification`; then submit and follow the employer response. No separate mailbox verifier decides whether entry is allowed.
 
 In approved submit mode, after material fields are correct and submission intent exists, use the enabled Submit control without a redundant full audit. Confirmation URL/text or an authoritative already-applied signal establishes outcome. A rejected form remains unsubmitted even if every visible input appears filled. Legacy successful forms are historical evidence, not universal current compatibility.
 
@@ -32,6 +32,15 @@ current form. Historical click uncertainty never locks form edits or recovery
 and requires no special rejection-proof operation. Actual accepted confirmation
 establishes success. A new request may start a fresh attempt unless success is
 recorded. These are common application rules, not a Greenhouse exception.
+
+If the expected email code remains undelivered for about 1–2 minutes from the
+employer's request, after checking the exact recipient, configured mailbox,
+delayed mail and any offered resend, use the shared
+refresh-and-refill recovery in the same owned tab/attempt. Let Simplify fill the
+new form, correct actual residual questions, and submit promptly. A refreshed
+Greenhouse form may submit directly or request verification again; inspect its
+actual response. Neither slow filling, an upload rejection nor the presence of
+an email-code prompt proves why Greenhouse requested verification.
 
 Normal observations persist unambiguous posting/Simplify company and role
 metadata into the existing job record, preserving explicit labels. Progress uses
