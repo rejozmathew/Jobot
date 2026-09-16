@@ -14,7 +14,8 @@ def application_brief(config, service, item):
     root=REPOSITORY/'skills'/'productivity'
     selection={k:job.get(k) for k in ('id','url','company','title')}
     selection.update(identity_id=item['identity_id'],resume_asset_id=item['resume_asset_id'],
-                     platform_hint=platform_for_url(job['url']),submission_mode=settings['submission_mode'])
+                     platform_hint=platform_for_url(job['url']),submission_mode=settings['submission_mode'],
+                     application_email=service.candidate(item['identity_id'])['email'])
     start=[sys.executable,'-m','job_applier.application_runtime','start','--job-id',job['id'],
            '--config',config['config_path'],'--request-id','queue:'+item['id'],'--wait-seconds','0']
     return f'''# One application — fresh execution context
@@ -59,6 +60,11 @@ scroll containers; choose a plausible supported recovery and verify its result.
 Do not repeat an unchanged failing click in a loop. Record what was tried.
 
 ## Email, phone choices and genuine CAPTCHA
+The application_email above comes directly from the selected candidate record.
+When checking delivery, compare it with the actual form field and verification
+recipient; copy the observed address exactly into your report. Your earlier
+commentary is not evidence of what the form contains. If the values differ,
+correct the form using the approved address and continue the current application.
 {json.dumps(mailbox,ensure_ascii=False,indent=2)}
 The existing Hermes email integration is already the intended mechanism. An
 ordinary email confirmation, one-time email code, verification link, or choice

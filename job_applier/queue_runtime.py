@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 
 from .application_runtime import REPOSITORY, prepare_local, resolve_config
@@ -20,6 +21,8 @@ from .workspace_process import FileLock, process_identity, process_matches
 
 
 def executor_command(config, prompt_file):
+    if isinstance(config.get('hermes_desktop'),dict):
+        return [sys.executable,'-m','job_applier.hermes_desktop',str(prompt_file)]
     command=config.get('hermes_command')
     if command is None:
         return ['hermes','chat','-q',f'Read the complete application task in {prompt_file} and execute only that task.']
@@ -63,6 +66,10 @@ def recover_dispatch(service):
         rows=[dict(r) for r in db.execute("SELECT * FROM dispatch_queue WHERE state='dispatched'")]
     for item in rows:
         if process_matches(json.loads(item['executor_identity_json'] or '{}')):return False
+        # A desktop turn outlives its monitoring subprocess. Reconcile the native
+        # owner before treating a monitor crash as an executor exit.
+        from .hermes_desktop import orphan_is_active
+        if orphan_is_active(service, item):return False
         if not settle(service,item):return False
     return True
 
@@ -80,6 +87,7 @@ def import_answer_retries(config, service):
 
 
 def dispatch_one(config, service, *, launcher=subprocess.Popen):
+    service.desktop_dispatch_spool=config['spool_dir']
     if not recover_dispatch(service):return {'state':'waiting_for_executor_or_cleanup'}
     workspace_ids={w['id'] for w in config['workspaces']}
     with service.tx() as db:
@@ -123,6 +131,7 @@ def watch(config, service, *, once=False):
     interval=float(config.get('queue_interval_seconds',10800))
     if interval<=0:raise ProtocolError('invalid_queue_interval')
     with FileLock(str(service.db_path)+'.dispatcher.lock'):
+        service.desktop_dispatch_spool=config['spool_dir']
         service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}
         while True:
             service.queue_heartbeat(process_identity(os.getpid()))

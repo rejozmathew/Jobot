@@ -120,10 +120,13 @@ def run_harvest(config, service, *, enqueue=False, scheduled=False, launcher=sub
             previous=Path(config['spool_dir'])/'harvest'/last['id']/'checkpoint.json' if last and last['state']!='completed' else None
             private_write(task,harvest_brief(config,service,root/'records.json',enqueue=enqueue,
                 batch_size=status['batch_size'],previous_checkpoint=previous if previous and previous.is_file() else None))
-            executor_config=config
+            # Desktop routing is for application sessions. Discovery retains its
+            # explicitly configured profile/CLI and its own output-file contract.
+            executor_config=dict(config)
+            executor_config.pop('hermes_desktop',None)
             if 'harvest_hermes_command' in config:
                 if config['harvest_hermes_command'] is None:raise ProtocolError('invalid_hermes_command')
-                executor_config=dict(config,hermes_command=config['harvest_hermes_command'])
+                executor_config['hermes_command']=config['harvest_hermes_command']
             command=executor_command(executor_config,task)
             environment=dict(os.environ,JOBBOT_CONFIG=config['config_path'])
             environment.pop('HERMES_SESSION_ID',None)
