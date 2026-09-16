@@ -113,6 +113,28 @@ function renderProgress(progress,key){
  for(const event of progress?.debug||[])debug.append(el('pre',JSON.stringify(event,null,2)));
  root.append(debug);return root;
 }
+function sourceLabel(value){return ({manual:'Manual',legacy_cli:'Legacy CLI',
+ 'job_harvester:google_jobs':'Job Harvester / Google Jobs','job_harvester:linkedin':'Job Harvester / LinkedIn',
+ linkedin_alert_email:'LinkedIn alert email',employer_search:'Employer search'})[value]||value||'Unknown';}
+function sourceCell(job){
+ const td=el('td'),sources=job.sources||[];
+ if(!sources.length){td.append(el('span','Unknown'));return td;}
+ td.append(el('span',sourceLabel(sources[0].source_type)));
+ const detail=progressDetails(job.id+':sources',`${sources.length} source reference${sources.length===1?'':'s'}`);
+ for(const source of sources){
+  const row=el('div');row.append(el('strong',sourceLabel(source.source_type)),
+   el('small',`First recorded ${stamp(source.discovered_at)}`),el('small',source.source_id||'Reference unavailable'));
+  if(source.original_url)row.append(link(source.original_url,'Discovery link'));detail.append(row);
+ }
+ td.append(detail);return td;
+}
+function dispositionCell(job){
+ const td=el('td'),last=job.last_disposition;
+ if(!last){td.append(el('span','Not recorded'));return td;}
+ const label=last.source==='operator'?(last.value==='active'?'Restored':'Canceled'):displayStatus(last.value);
+ td.append(el('span',label),el('small',stamp(last.at)),el('small',({operator:'By you',application:'Application outcome',queue:'Queue outcome'})[last.source]||last.source));
+ return td;
+}
 function renderQueue(v){
  renderSessions(v);
  renderAnswers(v);
@@ -148,9 +170,10 @@ function renderQueue(v){
   tr.append(statusTd);
   const assessment=job.assessment;tr.append(el('td',assessment?(assessment.recommendation||'Assessment available'):'Unassessed'));
   tr.append(el('td',postingCountry(job)),el('td',postingDate(job)));
+  tr.append(sourceCell(job),el('td',stamp(job.created_at)),dispositionCell(job));
   $('queue-rows').append(tr);
  }
- if(!jobs.length){const tr=el('tr'),td=el('td',v.jobs.length?'No jobs match this view.':'No postings in this instance.');td.colSpan=6;tr.append(td);$('queue-rows').append(tr);}
+ if(!jobs.length){const tr=el('tr'),td=el('td',v.jobs.length?'No jobs match this view.':'No postings in this instance.');td.colSpan=9;tr.append(td);$('queue-rows').append(tr);}
  selection();
 }
 function renderSessions(v){

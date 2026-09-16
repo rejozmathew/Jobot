@@ -912,6 +912,13 @@ performance require separate ordinary-Hermes evidence. The implementation log
 contains actual commands/results, durations and remaining blockers.
 # Queue and VM additions — 2026-09-15
 
+The queue view projects retained `job_sources`, original intake time and the latest
+recorded operator/application/dispatch disposition. `harvester_source` converts
+saved Harvester JSON/CSV to offline discovery leads; `harvest_runtime.harvest_brief`
+can reference them through optional private `harvest_leads_path`. Existing discovery
+verification and `intake_results.py` remain the only publishing path. No live pull
+connector or additional dispatcher was added. See [Harvester integration review](HARVESTER_INTEGRATION_REVIEW.md).
+
 Operator cleanup now uses a reversible Canceled disposition in the same managed
 database (migration 19). `managed_archive.set_job_disposition` owns the mutation,
 `managed_events._control` shares run stop requests, and

@@ -111,6 +111,13 @@ stopped/submitted state. Unclosed pre-rollout sessions must be accounted for.
 
 ## Discovery settings and other intake sources
 
+The queue's Source column shows the first retained source and expandable additional
+references. Added is original JobBot intake time; Last disposition shows the latest
+recorded cancellation/restoration or completed application/queue outcome. Neither
+rediscovery nor metadata refresh resets these times. Missing history stays explicit.
+The [Harvester review and offline export handoff](HARVESTER_INTEGRATION_REVIEW.md)
+describes the prepared integration and future LinkedIn email source contract.
+
 Open **Settings → Job discovery** to set **Maximum jobs per discovery run** and
 **Discover jobs every (hours)**. Defaults are **5 jobs every 4 hours**. Settings
 are saved in JobBot's versioned managed database, not the private runtime JSON.

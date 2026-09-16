@@ -149,7 +149,20 @@ class ViewServices:
             jobs=[dict(j,archived=j['id'] in archived) for j in jobs if include_archived or j['id'] not in archived]
             for job in jobs:
                 job['assessment']=self._assessment(db,job['id'])
-                job['source_count']=db.execute('SELECT COUNT(*) FROM job_sources WHERE job_id=?',(job['id'],)).fetchone()[0]
+                job['sources']=[dict(r) for r in db.execute(
+                    'SELECT * FROM job_sources WHERE job_id=? ORDER BY julianday(discovered_at),rowid', (job['id'],))]
+                job['source_count']=len(job['sources'])
+                # Metadata refreshes, heartbeats and new retries are not dispositions.
+                # Keep the last recorded outcome visible even during a newer attempt.
+                disposition=db.execute('''SELECT at,value,source FROM (
+                    SELECT disposition_at AS at,disposition AS value,'operator' AS source,3 AS precedence
+                    FROM jobs WHERE id=? AND disposition_at IS NOT NULL
+                    UNION ALL SELECT completed_at,outcome,'application',2
+                    FROM application_attempts WHERE job_id=? AND completed_at IS NOT NULL AND outcome IS NOT NULL
+                    UNION ALL SELECT ended_at,outcome,'queue',1
+                    FROM dispatch_queue WHERE job_id=? AND ended_at IS NOT NULL AND outcome IS NOT NULL
+                    ) ORDER BY julianday(at) DESC,precedence DESC LIMIT 1''', (job['id'],)*3).fetchone()
+                job['last_disposition']=dict(disposition) if disposition else None
                 latest=db.execute('SELECT * FROM application_attempts WHERE job_id=? ORDER BY started_at DESC, id DESC LIMIT 1',(job['id'],)).fetchone()
                 job['failure_reason']=resolve_failure_reason(db,dict(latest)) if latest else None
             runs=[dict(r) for r in db.execute('SELECT * FROM runs ORDER BY requested_at DESC,id')]
