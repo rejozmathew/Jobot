@@ -25,6 +25,8 @@ def attempt_schedule(rows):
             offset = AUTOMATIC_ATTEMPT_HOURS[min(number, AUTOMATIC_ATTEMPTS)-1]
             due = max(datetime.fromisoformat(starts[row['id']]) + timedelta(hours=offset),
                       datetime.fromisoformat(parent['ended_at']) + timedelta(hours=spacing)).isoformat()
+        if row.get('immediate_requested_at'):
+            due = row['immediate_requested_at']
         details[row['id']] = {'attempt_number': number, 'next_attempt_at': due,
             'automatic_limit_reached': row['state'] == 'finished' and row['outcome'] in RETRY_OUTCOMES and number >= AUTOMATIC_ATTEMPTS}
     return details
@@ -74,10 +76,10 @@ class QueueServices:
         return {'added': added}
 
     def queue_enqueue(self, *, job_ids, identity_id, resume_asset_id, request_id, retry=False,
-                      enqueue_origin=None, producer=None, discovery_run_id=None, discovery_profile=None):
+                      enqueue_origin=None, producer=None, discovery_run_id=None, discovery_profile=None, start_now=False):
         if (not isinstance(job_ids, list) or not job_ids or len(job_ids)>100
                 or any(not isinstance(j, str) for j in job_ids)
-                or not isinstance(request_id, str) or not request_id or type(retry) is not bool):
+                or not isinstance(request_id, str) or not request_id or type(retry) is not bool or type(start_now) is not bool):
             raise ProtocolError('invalid_queue_request')
         items=[]
         with self.tx() as db:
@@ -90,6 +92,9 @@ class QueueServices:
                 job=self._get(db,'jobs',job_id)
                 self._assert_not_suppressed(db,job_id)
                 old=db.execute('SELECT * FROM dispatch_queue WHERE request_id=? AND job_id=?',(request_id,job_id)).fetchone()
+                if not old and start_now:
+                    old=db.execute('''SELECT q.* FROM dispatch_queue q JOIN dispatch_immediate_requests r ON r.item_id=q.id
+                        WHERE r.request_id=? AND r.job_id=?''',(request_id,job_id)).fetchone()
                 if old and (old['identity_id']!=identity_id or old['resume_asset_id']!=resume_asset_id):
                     raise ProtocolError('idempotency_conflict')
                 if not old:
@@ -105,7 +110,16 @@ class QueueServices:
                 db.execute("INSERT INTO dispatch_queue(id,request_id,job_id,identity_id,resume_asset_id,state,created_at,enqueue_origin,producer,discovery_run_id,discovery_profile) VALUES (?,?,?,?,?,'queued',?,?,?,?,?)",
                            (item_id,request_id,job_id,identity_id,resume_asset_id,self.now(),*context))
                 items.append(dict(self._get(db,'dispatch_queue',item_id)))
-        return {'items':items}
+            if start_now:
+                for item in items:
+                    db.execute('INSERT OR IGNORE INTO dispatch_immediate_requests(request_id,job_id,item_id,requested_at) VALUES (?,?,?,?)',
+                               (request_id,item['job_id'],item['id'],self.now()))
+                    if item['state']=='queued':
+                        db.execute('UPDATE dispatch_queue SET immediate_requested_at=COALESCE(immediate_requested_at,?) WHERE id=?',
+                                   (self.now(),item['id']))
+                        db.execute('UPDATE dispatch_control SET wake_requested=1 WHERE id=1')
+                items=[dict(self._get(db,'dispatch_queue',item['id'])) for item in items]
+        return {'items':items, **({'queue':self.queue_status()} if start_now else {})}
 
     def queue_status(self):
         with self.tx() as db:
@@ -116,7 +130,7 @@ class QueueServices:
             items=[dict(r) for r in db.execute('SELECT q.*,j.company,j.title,j.url FROM dispatch_queue q JOIN jobs j ON j.id=q.job_id ORDER BY q.created_at DESC,q.id DESC LIMIT 100')]
             # Row labels need the latest request even when it is outside recent history.
             latest={r['job_id']:dict(r) for r in db.execute('''SELECT id,job_id,state,outcome,detail,created_at,request_id,
-                enqueue_origin,producer,discovery_run_id,discovery_profile
+                enqueue_origin,producer,discovery_run_id,discovery_profile,immediate_requested_at
                 FROM dispatch_queue WHERE rowid IN (SELECT MAX(rowid) FROM dispatch_queue GROUP BY job_id)''')}
             schedule=attempt_schedule([dict(r) for r in db.execute('SELECT * FROM dispatch_queue ORDER BY rowid')])
             waiting=[dict(r) for r in db.execute("SELECT * FROM dispatch_queue WHERE state='queued'")]
@@ -133,6 +147,7 @@ class QueueServices:
         return {**control,'installed':True,'enabled':bool(control['enabled']),
                 'worker_online':bool(identity and process_matches(identity) and age is not None and age<30),
                 'counts':counts,'ready_count':ready,'scheduled_count':len(waiting)-ready,'next_job_at':next_job,
+                'immediate_count':sum(bool(r['immediate_requested_at']) for r in waiting),
                 'automatic_attempt_limit':AUTOMATIC_ATTEMPTS,
                 'items':items,'latest_by_job':latest,'selection':getattr(self,'dispatch_selection',None)}
 
@@ -150,7 +165,7 @@ class QueueServices:
         with self.tx() as db:
             if db.execute("SELECT 1 FROM dispatch_queue WHERE state='dispatched'").fetchone():return None
             schedule=attempt_schedule([dict(r) for r in db.execute('SELECT * FROM dispatch_queue ORDER BY rowid')])
-            for row in db.execute("SELECT * FROM dispatch_queue WHERE state='queued' ORDER BY created_at,rowid").fetchall():
+            for row in db.execute("SELECT * FROM dispatch_queue WHERE state='queued' ORDER BY immediate_requested_at IS NULL,immediate_requested_at,created_at,rowid").fetchall():
                 if datetime.fromisoformat(schedule[row['id']]['next_attempt_at'])>datetime.fromisoformat(self.now()):continue
                 try:self._eligible(db,row['job_id'],self._settings_record(db)['values'])
                 except ProtocolError as exc:

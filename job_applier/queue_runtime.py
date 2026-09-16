@@ -165,7 +165,7 @@ def watch(config, service, *, once=False):
             due=not status['next_automatic_at'] or now>=datetime.fromisoformat(status['next_automatic_at'])
             # Cleanup is observed even with scheduling paused.
             recovered=recover_dispatch(service)
-            if once or status['wake_requested'] or (status['enabled'] and due):
+            if once or status['wake_requested'] or status['immediate_count'] or (status['enabled'] and due):
                 result=dispatch_one(config,service) if recovered else {'state':'waiting_for_executor_or_cleanup'}
                 if result['state'] not in ('waiting_for_browser','waiting_for_executor_or_cleanup'):
                     with service.tx() as db:

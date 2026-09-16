@@ -56,8 +56,16 @@ resume. No second enqueue click is required. Existing cancellation, recorded
 submission, exclusions, explicit eligibility holds and pending-answer work remain
 respected. A discovery `Skip` verdict stays held unless the operator previously
 approved the job for execution. Open application
-options to check submission mode. **Run next now** collects active intake and starts
-one ready job as soon as the configured browser is free. **Enable automatic queue**
+options to check submission mode. **Run next queued job** collects active intake
+and starts the oldest ready job after any explicit **Apply now** requests, as soon
+as the configured browser is free. It does not choose a selected table row.
+**Apply now** on a job requests that specific job immediately, ahead of automatic
+jobs, and bypasses its scheduled retry wait. If another application is running,
+the job follows it and any earlier Apply now requests. These requests survive
+worker restarts and remain runnable while automatic pickup is paused. An offline
+worker is reported explicitly; the saved request runs when it returns. Candidate,
+resume and submission mode come from the dashboard's application options.
+**Enable automatic queue**
 enables periodic execution; the VM checks every 60 seconds. Pausing automatic
 pickup does not terminate an application already in progress. Its own expanded
 row has Pause and Stop controls. Application details and diagnostic messages are
@@ -79,8 +87,14 @@ User stops and completed review-only results do not restart automatically.
 
 The dashboard separates ready jobs from scheduled retries and shows the next
 application check, retry due time, attempt number and failure reason. **Run next
-now** does not accelerate a future retry. Canceled records remain under **Show →
+queued job** does not accelerate a future retry; **Apply now** explicitly does.
+Canceled records remain under **Show →
 Canceled / All jobs** and may be restored without deleting history.
+
+Migration 22 adds an immediate-request timestamp and an idempotency mapping to
+the existing dispatch queue. Promoting a queued retry retains its request lineage,
+attempt number and all earlier outcomes. Applying again after a finished request
+starts a fresh series. The existing runtime backs up the database before migration.
 
 Jobs display Country and Posted date. Discovery retains verified `country` and
 `posted_at` fields; the date is the original publication date, never inferred
@@ -394,3 +408,15 @@ managed suite passed 853 tests with five platform-specific skips and four existi
 deprecation warnings; zero failures or errors. Antigravity used
 `gemini-3.8-flash-medium`, and the primary agent independently checked logs/JUnit.
 Logs and JUnit live under ignored `artifacts/jobbot-v1-private/queue-recovery-*`.
+
+## Per-job Apply now — September 16, 2026
+
+Antigravity (`gemini-3.8-flash-medium`) reproduced six failing regressions before
+implementation. The focused queue/UI suite passed 57 tests. The final managed
+suite passed 835 tests; a follow-up with the explicit browser configuration passed
+all 38 initially skipped browser cases, leaving only five Linux-only skips.
+The primary independently checked logs/JUnit and inspected the rendered dashboard.
+A real browser click against an isolated synthetic database prioritized exactly
+the chosen job and displayed the offline-worker message. No live application was
+used as a fixture. Evidence is under ignored
+`artifacts/jobbot-v1-private/apply-now-20260916/`.

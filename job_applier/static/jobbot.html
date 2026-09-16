@@ -99,9 +99,10 @@
       </details>
       <div class="main-action-bar">
         <button id="start-application-btn" class="primary" type="button">Retry selected</button>
-        <button id="queue-run-next" type="button">Run next now</button>
+        <button id="queue-run-next" type="button" aria-describedby="queue-run-help">Run next queued job</button>
         <button id="queue-toggle" type="button">Enable automatic queue</button>
       </div>
+      <p id="queue-run-help">Run next queued job starts the oldest ready job, after any jobs requested with Apply now. Use Apply now on a job below to choose that specific job and skip its retry wait. If an application is running, your chosen job starts after it finishes.</p>
       <!-- Legacy controls preserved for compatibility -->
       <div hidden>
         <button id="mark-ready">Mark selected ready</button>

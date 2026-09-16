@@ -48,6 +48,7 @@ function queueJobStatus(job,queued,local){
  if(job.disposition==='canceled')return 'Canceled';
  if(submitted(job))return displayStatus(job.status);
  if(queued?.waiting_for_retry)return 'Retry scheduled';
+ if(queued?.state==='queued'&&queued.immediate_requested_at)return 'Apply now requested';
  if(queued?.automatic_limit_reached)return 'Needs attention';
  if(queued?.state==='queued')return 'Queued';
  if(queued?.state==='dispatched')return 'In progress';
@@ -192,6 +193,13 @@ function renderQueue(v){
   }
   if(queued?.attempt_number)statusTd.append(el('small',`Attempt ${queued.attempt_number} of ${v.dispatch_queue?.automatic_attempt_limit||3}`));
   if(queued?.waiting_for_retry)statusTd.append(el('small',`Retry at ${stamp(queued.next_attempt_at)}. Other ready jobs can run first.`));
+  if(v.local_runtime?.workspaces?.length&&unfinished(job)){
+   const apply=el('button',queued?.state==='dispatched'?'In progress':'Apply now','primary');
+   apply.type='button';apply.dataset.applyNow=job.id;apply.disabled=queued?.state==='dispatched';
+   apply.setAttribute('aria-label',apply.textContent+' · '+postingLabel(job));
+   apply.onclick=()=>applyNow(job,apply);statusTd.append(apply);
+   if(queued?.state==='queued'&&queued.immediate_requested_at)statusTd.append(el('small','Starts when the worker is free, ahead of automatic jobs.'));
+  }
   if(job.disposition==='canceled')statusTd.append(el('small',job.disposition_reason||'Canceled by you'),el('small','Last outcome: '+displayStatus(job.status)));
   const unanswered=v.answer_queue?.groups.find(g=>g.job_id===job.id&&g.pending_count);
   if(unanswered&&job.disposition!=='canceled'){const review=el('button',`Answer ${unanswered.pending_count} question${unanswered.pending_count===1?'':'s'}`);review.onclick=()=>tab('answers');statusTd.append(review);}
@@ -246,6 +254,26 @@ function renderSessions(v){
  if(past.length){$('local-sessions').append(history);history.scrollTop=historyScroll;}
 }
 function displayStatus(value){return ({connected:'In progress',preparing:'In progress',waiting:'In progress',running:'In progress',finishing:'In progress',capacity_wait:'Waiting to start',applied:'Applied',already_applied:'Already applied',ready_for_review:'Ready for review',submission_unknown:'Submission uncertain',blocked:'Needs attention',failed:'Needs attention',interrupted:'Interrupted',paused:'Paused',queued:'Queued',completed:'Completed',stopped:'Stopped',skipped:'Skipped'})[value]||value||'Not started';}
+async function applyNow(job,button){
+ if(button.disabled)return;
+ button.disabled=true;
+ try{
+  const identity_id=$('candidate').value;
+  const asset=(state.view.assets||[]).find(a=>a.id===$('queue-resume').value&&a.identity_id===identity_id&&a.kind==='resume'&&a.status==='available');
+  if(!asset)throw Error('Choose a candidate with a registered resume.');
+  const submission_mode=$('main-submission-mode').value;
+  if(submission_mode!==state.view.settings.values.submission_mode)await api('configure',{changes:{submission_mode,mode:submission_mode==='submit'?'pilot':'development'},expected_version:state.settingsVersion});
+  const result=await api('queue_enqueue',{job_ids:[job.id],identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_retry'});
+  const q=result.queue||{},item=result.items[0];
+  const message=item.state==='dispatched'?'This application is already in progress.':
+   !q.worker_online?'Request saved, but the queue worker is offline. It will start this job when the service is back online.':
+   q.counts?.dispatched?'Request saved. This job will run after the current application and any earlier Apply now requests.':
+   'Request saved. The worker will start this job as soon as its browser is free, ahead of automatic jobs.';
+  notice(postingLabel(job)+': '+message);
+  await refresh();
+ }catch(error){notice(error.message,true);}
+ finally{button.disabled=false;}
+}
 function runNextMessage(q){
  if(!q.counts?.queued)return q.counts?.dispatched?'An application is already in progress. No other jobs are waiting.':'No eligible jobs are waiting. Active jobs are picked up automatically; check job reasons below.';
  if(!q.worker_online)return 'Request saved, but the queue worker is offline. Start the JobBot queue service to run queued jobs.';
@@ -275,7 +303,7 @@ function renderDispatcher(v){
   `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.counts?.dispatched||0} in progress · Automatic queue ${q.enabled?'on':'paused'}. Active jobs are picked up automatically, one application at a time.`;
  if($('application-schedule'))$('application-schedule').textContent=
   `${q.counts?.dispatched?'An application is running. The next ready job follows after it finishes. ':''}`+
-  `${q.enabled?`Next application check: ${q.next_automatic_at?stamp(q.next_automatic_at):'worker’s next check'}.`:'Automatic applications are paused; Run next now starts one ready job.'}`+
+  `${q.enabled?`Next application check: ${q.next_automatic_at?stamp(q.next_automatic_at):'worker’s next check'}.`:'Automatic applications are paused; Apply now or Run next queued job can start work immediately.'}`+
   `${q.ready_count===0&&q.next_job_at?` Next scheduled retry: ${stamp(q.next_job_at)}.`:''} Up to 6 attempts: 4 in the first 24 hours, then 2 the next day. Targets: 0, 2, 4, 6, 24 and 28 hours; busy or long runs move later. After 6 attempts, review the failure reason.`;
  if($('queue-toggle'))$('queue-toggle').textContent=q.enabled?'Pause automatic queue':'Enable automatic queue';
  // The local queue uses Hermes' configured model and the runtime's actual workspace.
