@@ -36,12 +36,15 @@ row has Pause and Stop controls. Application details and diagnostic messages are
 collapsed on the main view; the queue worker's online/offline state is explicit.
 
 New active postings briefly show **Awaiting automatic pickup**, then **Queued**.
-Interrupted, failed, blocked and submission-unknown outcomes schedule a fresh
-request after **4 hours**; a third attempt waits **24 hours after the second ends**.
-The operator requested these three total attempts and spaced recovery on September
-15. Retry due times derive from durable parent request IDs and completion times,
+Interrupted, failed, blocked and submission-unknown outcomes allow **six total
+attempts**, targeting offsets of **0, 2, 4, 6, 24 and 28 hours** from the first
+start: four in the first 24-hour window and two in the next. Each retry also waits
+at least two hours after its predecessor completes (four hours for attempt six).
+Late runs move later rather than bursting to catch up. This September 16 operator
+update replaces the earlier three-attempt schedule. Retry due times derive from
+durable parent request IDs, start and completion times,
 so restarting the worker does not reset them. Other ready jobs can run while a
-retry waits. After the third unsuccessful attempt, **Needs attention** retains the
+retry waits. After the sixth unsuccessful attempt, **Needs attention** retains the
 reason. **Retry selected** explicitly starts another series after it ends; there
 is no permanent job ban. Recorded success and cancellation still suppress work.
 User stops and completed review-only results do not restart automatically.
@@ -104,10 +107,15 @@ queue seriality does not change the existing manual multi-workspace retry policy
 The Answers page's explicitly queued retries also feed the dispatcher for the
 configured candidate. Browser closure must still be acknowledged before pickup.
 
-There is no new whole-application timeout.
-An executor that never exits or a browser whose cleanup cannot be verified can
+Desktop cleanup follows replacement sessions by the receipt's exact conversation,
+job and candidate, including sessions left by an already finished dispatch. It
+checks current native task state, requests normal browser stop after the task
+ends, and waits for host acknowledgement. An old finished receipt does not
+override a resumed task. Independent manual sessions remain owned.
+There is no new whole-application timeout. An executor that is still working,
+waiting for input, unreachable, or a browser whose cleanup cannot be verified can
 hold the queue. Inspect its expanded row; do not delete locks or fabricate a
-stopped/submitted state. Unclosed pre-rollout sessions must be accounted for.
+stopped/submitted state.
 
 ## Discovery settings and other intake sources
 
@@ -334,3 +342,27 @@ failures or errors. A final nine-test run verified the discovery UI, live settin
 changes and the wording that distinguishes manual discovery from schedule checks.
 Evidence is in ignored `artifacts/jobbot-v1-private/queue-feedback-20260915/`.
 No production application, database or VM service was changed by validation.
+
+## Queue recovery incident — September 16, 2026
+
+The VM worker was online but reported `waiting_for_browser` with six ready jobs
+and no dispatched queue item. A Gusto replacement session retained the sole
+configured workspace for nine hours. Its Hermes desktop task was idle, and the
+last recorded application operation was eight hours old. The retained desktop
+receipt linked it to a finished dispatch, but the old cleanup looked only at the
+original `queue:<id>` request and only reconciled dispatched queue rows.
+
+The operator-requested recovery confirmed the current native task was idle and
+used normal runtime stop, receiving the host's browser-close acknowledgement.
+Pickup was paused during deployment. No attempt was relabeled as submitted.
+The code correction follows same-conversation replacement sessions and checks
+current native ownership before cleanup, preserving existing finished history.
+The six-attempt schedule was requested in the same incident.
+
+Synthetic regressions reproduced eight failures before implementation, including
+both the unfinished-dispatch and already-finished-dispatch replacement cases.
+The first focused validation passed 55 tests with one Linux-only skip. The final
+managed suite passed 853 tests with five platform-specific skips and four existing
+deprecation warnings; zero failures or errors. Antigravity used
+`gemini-3.8-flash-medium`, and the primary agent independently checked logs/JUnit.
+Logs and JUnit live under ignored `artifacts/jobbot-v1-private/queue-recovery-*`.

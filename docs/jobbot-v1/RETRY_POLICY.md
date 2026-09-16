@@ -34,12 +34,17 @@ attempt. Request metadata exposes `application_kind`: `first_attempt` or
 
 ## Request identity and lifecycle
 
-### Automatic queue recovery (operator request, September 15)
+### Automatic queue recovery (operator update, September 16)
 
-The sequential worker now picks up active intake automatically. An interrupted,
-failed, blocked or submission-unknown request gets a fresh second request four
-hours after completion, then a third 24 hours after the second completes. These
-are three total attempts per automatic series, as requested by the operator.
+The sequential worker picks up active intake automatically. An interrupted,
+failed, blocked or submission-unknown request gets up to five automatic retries
+(six total attempts). Target offsets from the first start are 0, 2, 4, 6, 24 and
+28 hours: four attempts in the first 24-hour window and two in the next. Retries
+also wait at least two hours after the previous completion, or four hours for
+attempt six. Long applications or a busy queue can move these times later;
+overdue retries never burst back-to-back. These are elapsed windows, not midnight
+boundaries. Previously exhausted three-attempt series can continue with their
+history intact.
 Afterward the dashboard shows Needs attention and the retained failure reason.
 An explicit new retry starts a fresh series; this is not a job-wide retry veto.
 Pending user answers, explicit stops, review-only completion, cancellations and
@@ -50,6 +55,12 @@ an in-progress application, rewrites evidence or bypasses browser cleanup.
 derives attempt counts and due times from durable request lineage. Both the
 worker and Run next use that reconciliation. `queue_take` skips future retries
 while allowing other ready jobs, and preserves one dispatched application.
+The desktop receipt's exact conversation, job and candidate also associate
+replacement application sessions with their dispatch. A finished dispatch is
+checked for retained sessions. After the native task is confirmed idle or gone,
+normal host stop/acknowledgement releases its browser before the next job.
+Resumed tasks, input waits and unknown native task state remain owned; neither
+heartbeat age nor a cached finished receipt proves that a resumed task ended.
 
 The native Hermes caller supplies the observed user-turn ID as request metadata.
 The shared runtime combines it with the actual conversation, configured identity

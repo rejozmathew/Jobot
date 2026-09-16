@@ -188,7 +188,7 @@ function renderQueue(v){
   const queued=latestDispatch(v,job);
   const statusTd=el('td');statusTd.append(badge(queueJobStatus(job,queued,!!v.local_runtime?.workspaces?.length)));
   if(v.local_runtime?.workspaces?.length&&unfinished(job)&&!['queued','dispatched'].includes(queued?.state)){
-   statusTd.append(el('small',queued?.automatic_limit_reached?'Three attempts ended without completion. Review the reason; Retry selected starts a new attempt series.':discoverySkipped(job)?'Discovery marked this job Skip. Review its match before explicitly choosing Retry selected.':queued?.state==='finished'?'The worker schedules recovery for interrupted or failed attempts. Review-only results and user stops stay here.':job.intervention_reason||'Active jobs enter the execution queue automatically.'));
+   statusTd.append(el('small',queued?.automatic_limit_reached?'Six attempts ended without completion. Review the reason; Retry selected starts a new attempt series.':discoverySkipped(job)?'Discovery marked this job Skip. Review its match before explicitly choosing Retry selected.':queued?.state==='finished'?'The worker schedules recovery for interrupted or failed attempts. Review-only results and user stops stay here.':job.intervention_reason||'Active jobs enter the execution queue automatically.'));
   }
   if(queued?.attempt_number)statusTd.append(el('small',`Attempt ${queued.attempt_number} of ${v.dispatch_queue?.automatic_attempt_limit||3}`));
   if(queued?.waiting_for_retry)statusTd.append(el('small',`Retry at ${stamp(queued.next_attempt_at)}. Other ready jobs can run first.`));
@@ -276,7 +276,7 @@ function renderDispatcher(v){
  if($('application-schedule'))$('application-schedule').textContent=
   `${q.counts?.dispatched?'An application is running. The next ready job follows after it finishes. ':''}`+
   `${q.enabled?`Next application check: ${q.next_automatic_at?stamp(q.next_automatic_at):'worker’s next check'}.`:'Automatic applications are paused; Run next now starts one ready job.'}`+
-  `${q.ready_count===0&&q.next_job_at?` Next scheduled retry: ${stamp(q.next_job_at)}.`:''} Retries wait 4 hours, then 24 hours; after 3 attempts, review the failure reason.`;
+  `${q.ready_count===0&&q.next_job_at?` Next scheduled retry: ${stamp(q.next_job_at)}.`:''} Up to 6 attempts: 4 in the first 24 hours, then 2 the next day. Targets: 0, 2, 4, 6, 24 and 28 hours; busy or long runs move later. After 6 attempts, review the failure reason.`;
  if($('queue-toggle'))$('queue-toggle').textContent=q.enabled?'Pause automatic queue':'Enable automatic queue';
  // The local queue uses Hermes' configured model and the runtime's actual workspace.
  // Do not imply that legacy model/browser controls can change that configuration.

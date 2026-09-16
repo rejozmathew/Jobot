@@ -41,18 +41,35 @@ def private_write(path, text):
         stream.write(text)
 
 
-def find_session(service, item):
+def find_sessions(service, item):
+    """Follow this dispatch's native conversation through replacement requests."""
+    driver = None
+    root = getattr(service, 'desktop_dispatch_spool', None)
+    if root:
+        receipt = Path(root)/'dispatch'/item['id']/'desktop-session.json'
+        if receipt.exists():
+            driver = json.loads(receipt.read_text()).get('stored_session_id')
     with service.tx() as db:
-        row=db.execute('SELECT * FROM application_sessions WHERE request_id=?',('queue:'+item['id'],)).fetchone()
-        return dict(row) if row else None
+        return [dict(row) for row in db.execute('''SELECT * FROM application_sessions
+            WHERE job_id=? AND identity_id=? AND (request_id=? OR driver_id=?) ORDER BY rowid''',
+            (item['job_id'], item['identity_id'], 'queue:'+item['id'], driver))]
 
 
 def settle(service, item):
     """Observe durable evidence after process exit; never translate exit zero to applied."""
-    session=find_session(service,item)
-    if session and not session['ended_at']:
-        if session['run_id']:service.control(session['run_id'],command='stop')
+    sessions=find_sessions(service,item)
+    active=[session for session in sessions if not session['ended_at']]
+    if active:
+        for session in active:
+            if session['run_id']:service.control(session['run_id'],command='stop')
+            else:service.session_stopped(session['id'],reason='Executor ended before browser allocation',browser_stopped=True)
         return False  # host acknowledges owned-browser stop before the next job
+    session=sessions[-1] if sessions else None
+    # A later unsuccessful replacement must not downgrade an earlier submission.
+    for prior in sessions:
+        if prior['attempt_id'] and service.attempt(prior['attempt_id'])['outcome'] in ('applied','already_applied'):
+            session=prior
+            break
     attempt=service.attempt(session['attempt_id']) if session and session['attempt_id'] else None
     service.queue_complete(item['id'],outcome=(attempt or {}).get('outcome') or 'interrupted',
         detail=(attempt or {}).get('evidence') or (session or {}).get('reason') or
@@ -63,13 +80,18 @@ def settle(service, item):
 
 def recover_dispatch(service):
     with service.tx() as db:
-        rows=[dict(r) for r in db.execute("SELECT * FROM dispatch_queue WHERE state='dispatched'")]
+        rows=[dict(r) for r in db.execute('''SELECT q.* FROM dispatch_queue q
+            WHERE q.state='dispatched' OR (q.state='finished' AND EXISTS (
+                SELECT 1 FROM application_sessions s WHERE s.job_id=q.job_id
+                AND s.identity_id=q.identity_id AND s.ended_at IS NULL))''')]
     for item in rows:
+        active=any(not session['ended_at'] for session in find_sessions(service,item))
+        if item['state']=='finished' and not active:continue
         if process_matches(json.loads(item['executor_identity_json'] or '{}')):return False
         # A desktop turn outlives its monitoring subprocess. Reconcile the native
         # owner before treating a monitor crash as an executor exit.
         from .hermes_desktop import orphan_is_active
-        if orphan_is_active(service, item):return False
+        if orphan_is_active(service, item, check_finished=active):return False
         if not settle(service,item):return False
     return True
 

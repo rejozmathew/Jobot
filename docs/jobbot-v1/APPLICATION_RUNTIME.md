@@ -936,6 +936,17 @@ and `harvest_runtime` launches a separate discovery task. The canonical apply
 runtime and its ownership/evidence rules remain authoritative; legacy HTTP
 accept/claim does not become the new local dispatcher.
 
+September 16 queue recovery follows desktop replacements using the private
+dispatch receipt's exact conversation, job and candidate. `queue_runtime.find_sessions`
+is the common association reader for settlement and restart recovery;
+`hermes_desktop.orphan_is_active` checks current native ownership even when an
+old receipt says finished. Ended native work releases retained browsers through
+the existing host stop/acknowledgement lifecycle, including sessions opened after
+the original dispatch completed. It does not use heartbeat age as a stop rule
+or alter finished dispatch history. `managed_queue.attempt_schedule` now permits
+six total attempts at target offsets 0, 2, 4, 6, 24 and 28 hours, with minimum
+spacing after completion. See the shared retry policy for late-run behavior.
+
 `hermes_gmail.mailbox_handoff` now describes either the existing Gmail wrapper or
 the selected Himalaya account. It does not itself authenticate/fetch mail or claim
 SMS support. `workspace_linux` provides Linux process-group supervision and private

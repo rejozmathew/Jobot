@@ -126,3 +126,72 @@ def test_rpc_reports_server_error_without_echoing_private_payload():
     with pytest.raises(ValueError,match='4090') as failure:
         RPC(Socket()).call('prompt.submit',{'text':'private-prompt-secret'})
     assert 'private-prompt-secret' not in str(failure.value)
+
+
+@pytest.mark.parametrize('dispatch_finished', [False, True])
+def test_replacement_session_is_cleaned_up_before_next_job(tmp_path, monkeypatch, dispatch_finished):
+    from job_applier import hermes_desktop as desktop
+    from job_applier.queue_runtime import recover_dispatch
+    from test_local_sessions import reserve, connect
+    s, asset, jobs, _, cfg = runtime_fixture(tmp_path)
+    item = enqueue(s, asset, jobs)['items'][0]
+    s.queue_take()
+    s.desktop_dispatch_spool = cfg['spool_dir']
+    root = tmp_path/'private-spool'/'dispatch'/item['id']
+    root.mkdir(parents=True)
+    (root/'desktop-session.json').write_text(json.dumps({
+        'state':'finished', 'session_id':'live', 'stored_session_id':'stored'}))
+    (root/'runtime.json').write_text(json.dumps({'hermes_desktop':{}}))
+    original = connect(s, reserve(s, asset, jobs, driver='stored', request='queue:'+item['id']))
+    s.session_stopped(original['id'], reason='Synthetic startup failure', browser_stopped=True)
+    if dispatch_finished:
+        s.queue_complete(item['id'], outcome='interrupted', detail='Original failure', session_id=original['id'])
+    replacement = connect(s, reserve(s, asset, jobs, driver='stored', request='new-request'))
+    class RPC:
+        def call(self, method, params):
+            return {'sessions':[{'id':'live','session_key':'stored','status':'idle'}]}
+    @contextmanager
+    def connection(_):yield RPC(),None
+    monkeypatch.setattr(desktop, 'connection', connection)
+    assert recover_dispatch(s) is False
+    with s.tx() as db:
+        assert db.execute('SELECT control FROM runs WHERE id=?', (replacement['run_id'],)).fetchone()[0] == 'stop_requested'
+    assert s.session(replacement['id'])['ended_at'] is None
+    if not dispatch_finished:
+        assert s.queue_take() is None
+    s.session_stopped(replacement['id'], reason='Owned browser stopped', browser_stopped=True)
+    assert recover_dispatch(s) is True
+    assert s.queue_take()['job_id'] == jobs[1]['id']
+    if dispatch_finished:
+        old = next(r for r in s.queue_status()['items'] if r['id'] == item['id'])
+        assert old['detail'] == 'Original failure' and old['session_id'] == original['id']
+
+
+@pytest.mark.parametrize('state', ['working', 'waiting', 'unavailable', 'foreign', 'new_backend'])
+def test_finished_dispatch_does_not_stop_resumed_or_unrelated_session(tmp_path, monkeypatch, state):
+    from job_applier import hermes_desktop as desktop
+    from job_applier.queue_runtime import recover_dispatch
+    from test_local_sessions import reserve, connect
+    s, asset, jobs, _, cfg = runtime_fixture(tmp_path)
+    item = enqueue(s, asset, jobs)['items'][0]
+    s.queue_take(); s.queue_complete(item['id'], outcome='interrupted')
+    s.desktop_dispatch_spool = cfg['spool_dir']
+    root = tmp_path/'private-spool'/'dispatch'/item['id']
+    root.mkdir(parents=True)
+    (root/'desktop-session.json').write_text(json.dumps({
+        'state':'finished','session_id':'live','stored_session_id':'stored',
+        'backend_owner':{'pid':123,'created':1}}))
+    (root/'runtime.json').write_text(json.dumps({'hermes_desktop':{}}))
+    replacement = connect(s, reserve(s, asset, jobs, driver='foreign' if state=='foreign' else 'stored'))
+    class RPC:
+        def call(self, method, params):
+            if state=='unavailable':raise OSError('Temporary disconnect')
+            return {'sessions':[{'id':'reopened' if state=='new_backend' else 'live',
+                                 'session_key':'stored','status':state}]}
+    @contextmanager
+    def connection(_):yield RPC(),None
+    monkeypatch.setattr(desktop, 'connection', connection)
+    monkeypatch.setattr(desktop, 'process_matches', lambda _: state!='new_backend')
+    recover_dispatch(s)
+    with s.tx() as db:
+        assert db.execute('SELECT control FROM runs WHERE id=?', (replacement['run_id'],)).fetchone()[0] == 'running'

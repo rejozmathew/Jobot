@@ -112,10 +112,10 @@ def write_receipt(path, receipt):
     temporary.replace(path)
 
 
-def session_active(rpc, session_id):
+def session_active(rpc, session_id, *, stored_session_id=None):
     rows=rpc.call('session.active_list',{})['sessions']
-    row=next((row for row in rows if row['id']==session_id),None)
-    return row is not None and row['status']!='idle'
+    return any(row['status']!='idle' for row in rows if row['id']==session_id or
+               (stored_session_id and row.get('session_key')==stored_session_id))
 
 
 def run_session(rpc, prompt, config, receipt_path, *, sleep=time.sleep, owner=None):
@@ -147,7 +147,7 @@ def run_session(rpc, prompt, config, receipt_path, *, sleep=time.sleep, owner=No
     return receipt
 
 
-def orphan_is_active(service, item):
+def orphan_is_active(service, item, *, check_finished=False):
     """Recover a crashed monitor without stopping its still-running native turn."""
     # The queue already persists the exact dispatch config beside the task.
     # Config path is supplied by the same dispatcher, never inferred from a DB name.
@@ -156,13 +156,15 @@ def orphan_is_active(service, item):
     receipt_path=Path(root)/'dispatch'/item['id']/'desktop-session.json'
     if not receipt_path.exists():return False
     receipt=json.loads(receipt_path.read_text())
-    if receipt['state']=='finished':return False
+    # A user can resume the native conversation after its monitor has exited.
+    # Retained replacement browsers require a fresh check, even for old receipts.
+    if receipt['state']=='finished' and not check_finished:return False
     owner=receipt.get('backend_owner')
-    if owner and not process_matches(owner):return False
+    if owner and not process_matches(owner) and not check_finished:return False
     config=json.loads(receipt_path.with_name('runtime.json').read_text())
     try:
         with connection(config['hermes_desktop']) as (rpc,_):
-            return session_active(rpc,receipt['session_id'])
+            return session_active(rpc,receipt['session_id'],stored_session_id=receipt.get('stored_session_id'))
     except (OSError,ValueError,TimeoutError,ConnectionClosed,httpx.HTTPError):
         return True  # A connection failure is not evidence that the native owner exited.
 

@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 from .managed_shared import ProtocolError, dumps, uid
 from .managed_redaction import safe_text, provenance_text
 
-AUTOMATIC_ATTEMPTS = 3
+AUTOMATIC_ATTEMPT_HOURS = (0, 2, 4, 6, 24, 28)
+AUTOMATIC_ATTEMPTS = len(AUTOMATIC_ATTEMPT_HOURS)
 RETRY_OUTCOMES = frozenset({'interrupted', 'failed', 'blocked', 'submission_unknown'})
 
 
@@ -12,13 +13,18 @@ def attempt_schedule(rows):
     """Retry lineage lives in immutable request IDs; no historical outcomes change."""
     details = {}
     by_id = {row['id']: row for row in rows}
+    starts = {}
     for row in rows:  # insertion order: a parent always precedes its retry
         parent_id = row['request_id'].removeprefix('automatic-retry:') if row['request_id'].startswith('automatic-retry:') else None
         parent = by_id.get(parent_id)
         number = details[parent_id]['attempt_number'] + 1 if parent_id in details else 1
+        starts[row['id']] = starts.get(parent_id, row.get('started_at') or row['created_at'])
         due = row['created_at']
         if parent and parent['ended_at']:
-            due = (datetime.fromisoformat(parent['ended_at']) + timedelta(hours=4 if number == 2 else 24)).isoformat()
+            spacing = 4 if number >= AUTOMATIC_ATTEMPTS else 2
+            offset = AUTOMATIC_ATTEMPT_HOURS[min(number, AUTOMATIC_ATTEMPTS)-1]
+            due = max(datetime.fromisoformat(starts[row['id']]) + timedelta(hours=offset),
+                      datetime.fromisoformat(parent['ended_at']) + timedelta(hours=spacing)).isoformat()
         details[row['id']] = {'attempt_number': number, 'next_attempt_at': due,
             'automatic_limit_reached': row['state'] == 'finished' and row['outcome'] in RETRY_OUTCOMES and number >= AUTOMATIC_ATTEMPTS}
     return details
