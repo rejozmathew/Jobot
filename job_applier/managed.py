@@ -31,7 +31,7 @@ from .managed_questions import QuestionServices
 from .managed_queue import QueueServices
 from .managed_discovery import DiscoveryServices
 from .managed_versions import code_evidence
-from .managed_redaction import safe_text, reject_secrets
+from .managed_redaction import safe_text, reject_secrets, provenance_text
 
 
 def utc_now():
@@ -101,9 +101,17 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
 
     def sources(self, job_id):
         with self.tx() as db:
-            return [dict(r) for r in db.execute('SELECT * FROM job_sources WHERE job_id=?',(job_id,))]
+            return self._source_rows(db,job_id)
 
-    def intake(self, *, url, source_type='manual', source_id=None, company=None, title=None, namespace=None, requisition_id=None, identity_evidence=None, **metadata):
+    def _source_rows(self, db, job_id):
+        rows=[dict(r) for r in db.execute(
+            'SELECT * FROM job_sources WHERE job_id=? ORDER BY julianday(discovered_at),rowid',(job_id,))]
+        for row in rows:
+            row['observations']=[dict(r) for r in db.execute(
+                'SELECT * FROM source_observations WHERE source_record_id=? ORDER BY rowid',(row['id'],))]
+        return rows
+
+    def intake(self, *, url, source_type='manual', source_id=None, company=None, title=None, namespace=None, requisition_id=None, identity_evidence=None, producer=None, discovery_run_id=None, discovery_profile=None, **metadata):
         reject_secrets(metadata)
         reject_secrets([company,title,namespace,requisition_id,identity_evidence,source_type])
         canonical=canonical_url(url)
@@ -163,6 +171,15 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                     db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',
                                  (query_key,related_id,'consistent_requisition_identity'))
             db.execute('INSERT OR IGNORE INTO job_sources VALUES (?,?,?,?,?,?)',(uid(),job_id,source_type,source_id or canonical,urlunsplit(urlsplit(url.strip())._replace(fragment='')),now))
+            # Store each supplying process/run separately from the first source sighting.
+            # Missing optional attribution never changes intake or execution eligibility.
+            context=tuple(provenance_text(v) for v in (producer,discovery_run_id,discovery_profile))
+            if any(context):
+                source=db.execute('SELECT id FROM job_sources WHERE job_id=? AND source_type=? AND source_id=? AND original_url=?',
+                    (job_id,source_type,source_id or canonical,urlunsplit(urlsplit(url.strip())._replace(fragment='')))).fetchone()
+                if source and not db.execute('''SELECT 1 FROM source_observations WHERE source_record_id=?
+                        AND producer IS ? AND discovery_run_id IS ? AND discovery_profile IS ?''',(source['id'],*context)).fetchone():
+                    db.execute('INSERT INTO source_observations VALUES (?,?,?,?,?,?)',(uid(),source['id'],*context,now))
             return dict(db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone())
 
     def _enrich_job(self,db,job,*,url,company=None,title=None,source,preview=False):

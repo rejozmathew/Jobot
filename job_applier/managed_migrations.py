@@ -249,7 +249,17 @@ def migration_20(db):
     db.execute('INSERT INTO discovery_control(id) VALUES (1)')
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20)]
+def migration_21(db):
+    # Optional provenance only: old sources and queue outcomes remain unchanged.
+    db.execute('''CREATE TABLE source_observations (
+        id TEXT PRIMARY KEY,source_record_id TEXT NOT NULL REFERENCES job_sources(id),
+        producer TEXT,discovery_run_id TEXT,discovery_profile TEXT,recorded_at TEXT NOT NULL)''')
+    db.execute('CREATE INDEX observations_by_source ON source_observations(source_record_id)')
+    add_columns(db, 'dispatch_queue', {'enqueue_origin':'TEXT', 'producer':'TEXT',
+                                      'discovery_run_id':'TEXT', 'discovery_profile':'TEXT'})
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21)]
 
 
 def migrate(path):

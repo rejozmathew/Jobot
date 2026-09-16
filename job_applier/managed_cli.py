@@ -98,6 +98,8 @@ def main(argv=None):
                 if args.command=='call':
                     payload=json.loads(Path(args.payload[1:]).read_text(encoding='utf-8') if args.payload.startswith('@') else args.payload)
                     if not isinstance(payload,dict):raise ProtocolError('invalid_payload')
+                    if args.operation in ('intake','queue_enqueue'):payload.setdefault('producer','managed_cli')
+                    if args.operation=='queue_enqueue':payload.setdefault('enqueue_origin','api_request')
                     result=client.call(args.operation,**payload)
                 else:
                     from .managed_fake_worker import run

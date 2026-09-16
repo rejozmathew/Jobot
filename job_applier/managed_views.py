@@ -149,9 +149,11 @@ class ViewServices:
             jobs=[dict(j,archived=j['id'] in archived) for j in jobs if include_archived or j['id'] not in archived]
             for job in jobs:
                 job['assessment']=self._assessment(db,job['id'])
-                job['sources']=[dict(r) for r in db.execute(
-                    'SELECT * FROM job_sources WHERE job_id=? ORDER BY julianday(discovered_at),rowid', (job['id'],))]
+                job['sources']=self._source_rows(db,job['id'])
                 job['source_count']=len(job['sources'])
+                job['queue_origins']=[dict(r) for r in db.execute('''SELECT id,request_id,created_at,
+                    enqueue_origin,producer,discovery_run_id,discovery_profile FROM dispatch_queue
+                    WHERE job_id=? ORDER BY rowid''',(job['id'],))]
                 # Metadata refreshes, heartbeats and new retries are not dispositions.
                 # Keep the last recorded outcome visible even during a newer attempt.
                 disposition=db.execute('''SELECT at,value,source FROM (

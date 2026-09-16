@@ -119,7 +119,7 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
         raise ProtocolError('invalid_maximum_runtime')
     if url:
         if history_matches(config.get('legacy_history_paths',[]),url):raise ProtocolError('legacy_history_suppression')
-        job=service.intake(url=url,source_type='manual',company=company,title=title)
+        job=service.intake(url=url,source_type='manual',company=company,title=title,producer='application_runtime')
         # Standing authorization is explicit configuration, not an inferred API role.
         if job['eligibility']=='held' and config.get('authorize_requested_urls') is True:
             job=service.eligibility(job['id'],'ready',reason='User-requested URL under configured standing application authorization')

@@ -14,7 +14,7 @@ FIELDS=frozenset({'url','company','title','location','verdict','source_type','so
                   'namespace','requisition_id','identity_evidence','country','posted_at'})
 
 
-def publish(client, records, *, dry_run=False):
+def publish(client, records, *, dry_run=False, provenance=None):
     if not isinstance(records,list) or type(dry_run) is not bool:
         raise ProtocolError('invalid_handoff')
     results=[]; canonical=set(); failed=0
@@ -37,7 +37,7 @@ def publish(client, records, *, dry_run=False):
                 canonical.add(key)
                 results.append({'index':index,'status':'preview','dry_run':True})
             else:
-                row=client.call('intake',**data)
+                row=client.call('intake',**data,**(provenance or {}))
                 canonical.add(row['id'])
                 results.append({'index':index,'status':'ok','job_id':row['id'],
                                 'job_status':row['status']})
@@ -53,23 +53,28 @@ def main(argv=None):
     parser.add_argument('--config',required=True);parser.add_argument('--input',required=True)
     parser.add_argument('--dry-run',action='store_true')
     parser.add_argument('--enqueue',action='store_true',help='queue only Strong apply / Apply verdicts, not caveats or skipped jobs')
+    parser.add_argument('--producer',default='discovery_intake',help='process supplying this batch')
+    parser.add_argument('--discovery-run-id');parser.add_argument('--discovery-profile')
     args=parser.parse_args(argv)
     from job_applier.managed_cli import load_config
     from job_applier.managed_client import configured_client
     try:
         records=json.loads(Path(args.input).read_text(encoding='utf-8'))
         cfg=load_config(args.config)
+        provenance={k:v for k,v in {'producer':args.producer,'discovery_run_id':args.discovery_run_id,
+                                   'discovery_profile':args.discovery_profile}.items() if v}
         if args.dry_run:result=publish(None,records,dry_run=True)
         else:
             with configured_client(cfg) as client:
-                result=publish(client,records)
+                result=publish(client,records,provenance=provenance)
                 if args.enqueue:
                     result['enqueue']=[]
                     for item in result['results']:
                         if item['status']!='ok' or records[item['index']].get('verdict','').strip().casefold() not in ('strong apply','apply'):continue
                         try:
                             queued=client.call('queue_enqueue',job_ids=[item['job_id']],identity_id=cfg['identity_id'],
-                                resume_asset_id=cfg['resume_asset_id'],request_id='harvest:'+item['job_id'])
+                                resume_asset_id=cfg['resume_asset_id'],request_id='harvest:'+item['job_id'],
+                                enqueue_origin='discovery',**provenance)
                             result['enqueue'].append({'job_id':item['job_id'],'state':queued['items'][0]['state']})
                         except ProtocolError as exc:
                             result['enqueue'].append({'job_id':item['job_id'],'error':exc.code})

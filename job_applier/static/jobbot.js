@@ -116,16 +116,45 @@ function renderProgress(progress,key){
 function sourceLabel(value){return ({manual:'Manual',legacy_cli:'Legacy CLI',
  'job_harvester:google_jobs':'Job Harvester / Google Jobs','job_harvester:linkedin':'Job Harvester / LinkedIn',
  linkedin_alert_email:'LinkedIn alert email',employer_search:'Employer search'})[value]||value||'Unknown';}
-function sourceCell(job){
+function producerLabel(value){return ({dashboard:'Dashboard',queue_cli:'Queue CLI',legacy_cli:'Legacy CLI',managed_cli:'Managed CLI',
+ application_runtime:'Application runtime',discovery_intake:'Discovery import',queue_worker:'Queue worker',
+ hermes_scheduled_discovery:'Hermes scheduled discovery',hermes_manual_discovery:'Hermes manual discovery'})[value]||value||'Not recorded';}
+function enqueueLabel(value){return ({discovery:'Discovery handoff',manual_enqueue:'Manual enqueue',api_request:'API request',
+ manual_retry:'Manual retry',automatic_intake:'Automatic pickup',automatic_retry:'Automatic retry',
+ automatic_restore:'Automatic pickup after restoration',answer_retry:'Retry after answer'})[value]||value||'Not recorded';}
+function processDetails(parent,item){
+ parent.append(el('small','Process: '+producerLabel(item.producer)));
+ if(item.discovery_profile)parent.append(el('small','Profile: '+item.discovery_profile));
+ if(item.discovery_run_id)parent.append(el('small','Discovery run: '+item.discovery_run_id));
+}
+function sourceCell(job,queued){
  const td=el('td'),sources=job.sources||[];
- if(!sources.length){td.append(el('span','Unknown'));return td;}
- td.append(el('span',sourceLabel(sources[0].source_type)));
- const detail=progressDetails(job.id+':sources',`${sources.length} source reference${sources.length===1?'':'s'}`);
+ td.append(el('span',sourceLabel(sources[0]?.source_type)));
+ const firstObservation=sources[0]?.observations?.[0];
+ td.append(el('small',firstObservation?'Seen by '+producerLabel(firstObservation.producer):'Discovery process: Not recorded'));
+ const detail=progressDetails(job.id+':sources',`Origin details · ${sources.length} source reference${sources.length===1?'':'s'}`);
  for(const source of sources){
   const row=el('div');row.append(el('strong',sourceLabel(source.source_type)),
    el('small',`First recorded ${stamp(source.discovered_at)}`),el('small',source.source_id||'Reference unavailable'));
-  if(source.original_url)row.append(link(source.original_url,'Discovery link'));detail.append(row);
+  if(source.original_url)row.append(link(source.original_url,'Discovery link'));
+  if(!source.observations?.length)row.append(el('small','Discovery process: Not recorded'));
+  for(const observation of source.observations||[]){
+   const seen=el('div');processDetails(seen,observation);
+   seen.append(el('small','Observed '+stamp(observation.recorded_at)));row.append(seen);
+  }
+  detail.append(row);
  }
+ const hasHistory=!!job.queue_origins?.length;
+ const entries=hasHistory?job.queue_origins:queued?[queued]:[];
+ if(entries.length){
+  td.append(el('small',(hasHistory?'First queued: ':'Latest queue entry: ')+enqueueLabel(entries[0].enqueue_origin)));
+  detail.append(el('strong','Queue entry history'));
+  for(const entry of entries){
+   const row=el('div');row.append(el('span',enqueueLabel(entry.enqueue_origin)));
+   processDetails(row,entry);row.append(el('small','Queued '+stamp(entry.created_at)));
+   if(entry.request_id)row.append(el('small','Request: '+entry.request_id));detail.append(row);
+  }
+ }else detail.append(el('small','No queue entry recorded'));
  td.append(detail);return td;
 }
 function dispositionCell(job){
@@ -170,7 +199,7 @@ function renderQueue(v){
   tr.append(statusTd);
   const assessment=job.assessment;tr.append(el('td',assessment?(assessment.recommendation||'Assessment available'):'Unassessed'));
   tr.append(el('td',postingCountry(job)),el('td',postingDate(job)));
-  tr.append(sourceCell(job),el('td',stamp(job.created_at)),dispositionCell(job));
+  tr.append(sourceCell(job,queued),el('td',stamp(job.created_at)),dispositionCell(job));
   $('queue-rows').append(tr);
  }
  if(!jobs.length){const tr=el('tr'),td=el('td',v.jobs.length?'No jobs match this view.':'No postings in this instance.');td.colSpan=9;tr.append(td);$('queue-rows').append(tr);}
@@ -513,7 +542,7 @@ if($('queue-answered-batch'))$('queue-answered-batch').onclick=async()=>{
   notice(`${count} answered application${count===1?'':'s'} queued for the next batch.`);await refresh();
  }catch(error){notice(answerError(error),true);}
 };
-$('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:crypto.randomUUID()});
+$('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:crypto.randomUUID(),producer:'dashboard'});
  $('job-search').value='';state.selected.clear();state.queueKey=null;
  if(job.disposition==='canceled'){$('job-filter').value='canceled';notice('This job is already saved as canceled. Restore it here if you want to pursue it again.');}
  else if(submitted(job)){$('job-filter').value='submitted';notice('This job is already saved as submitted.');}
@@ -529,7 +558,7 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{
   if(!asset)throw Error('Choose a candidate with a registered resume.');
   const submission_mode=$('main-submission-mode').value;
   if(submission_mode!==state.view.settings.values.submission_mode)await api('configure',{changes:{submission_mode,mode:submission_mode==='submit'?'pilot':'development'},expected_version:state.settingsVersion});
-  await api('queue_enqueue',{job_ids:[...state.selected],identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true});
+  await api('queue_enqueue',{job_ids:[...state.selected],identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true,producer:'dashboard',enqueue_origin:'manual_retry'});
   state.selected.clear();notice('Retry requested. Applications run one at a time; existing scheduled retries keep their due time.');await refresh();return;
  }
  if(!state.selected.size)throw Error('Please select at least one job from the queue.');

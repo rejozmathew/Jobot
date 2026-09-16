@@ -23,6 +23,13 @@ def safe_text(value, limit=300):
     return value[:limit]
 
 
+def provenance_text(value):
+    """Optional process identifiers retain numeric/UUID segments for correlation."""
+    if not isinstance(value,str) or not value.strip():return None
+    if SECRET.search(value):return '[REDACTED]'
+    return value.strip()[:300]
+
+
 def safe_payload(payload):
     if not isinstance(payload,dict): return {}
     # Values submitted in explicit secret fields are also removed from allowed fields.

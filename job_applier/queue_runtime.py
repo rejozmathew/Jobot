@@ -79,7 +79,8 @@ def import_answer_retries(config, service):
     for request in service.answer_retries(identity_id=config['identity_id'])['requests']:
         try:
             service.queue_enqueue(job_ids=[request['job_id']],identity_id=config['identity_id'],
-                resume_asset_id=config['resume_asset_id'],request_id=request['request_id'],retry=True)
+                resume_asset_id=config['resume_asset_id'],request_id=request['request_id'],retry=True,
+                enqueue_origin='answer_retry',producer='queue_worker')
         except ProtocolError as exc:
             # An excluded/applied posting is still subject to the existing policy.
             if exc.code not in ('already_applied','company_excluded','job_archived','not_ready','market_incompatible'):
@@ -193,9 +194,10 @@ def main(argv=None):
             elif args.command=='serve':serve(config,service);return 0
             elif args.command=='enqueue':
                 job_ids=list(args.job_id)
-                for url in args.urls:job_ids.append(service.intake(url=url,source_type='manual')['id'])
+                for url in args.urls:job_ids.append(service.intake(url=url,source_type='manual',producer='queue_cli')['id'])
                 result=service.queue_enqueue(job_ids=job_ids,identity_id=config['identity_id'],
-                    resume_asset_id=config['resume_asset_id'],request_id=uid(),retry=args.retry)
+                    resume_asset_id=config['resume_asset_id'],request_id=uid(),retry=args.retry,
+                    enqueue_origin='manual_retry' if args.retry else 'manual_enqueue',producer='queue_cli')
                 if args.run_next:service.queue_control(command='run_next')
             else:
                 service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}

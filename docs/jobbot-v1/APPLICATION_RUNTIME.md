@@ -522,6 +522,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 
 | Component | Scope and consumer |
 |---|---|
+| managed.py / migration 21 / managed_redaction.provenance_text / managed_views.py | Optional per-source process/run observations and per-queue-entry origin; numeric run identifiers remain intact, secret-bearing labels are redacted, and missing attribution does not affect eligibility. Dashboard/manual CLI/application startup and discovery supply process identities at their own boundary; rediscovery retains prior observations. See SOURCE_PROCESS_ATTRIBUTION.md. |
 | managed_queue.py / queue_runtime.py | Automatic active-intake pickup from worker and Run next; serial execution; durable request lineage schedules retries after 4 hours and then 24 hours, up to three attempts per series, with explicit retries still available |
 | hermes_desktop.py / application_brief.py | Optional application dispatcher transport creates a native session in the existing Hermes desktop backend; desktop resume and correction use that same owner. A private receipt reconnects the monitor without replaying the prompt; queue recovery checks the native turn after a monitor crash. The brief exposes the exact selected candidate email for comparison with observed form values. |
 | managed_discovery.py / migration 20 | Selected-instance discovery run/check history and last/next-run reporting for the dashboard and harvest scheduler; no application dispatch or browser ownership |

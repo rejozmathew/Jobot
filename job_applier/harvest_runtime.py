@@ -14,7 +14,8 @@ from .queue_runtime import executor_command, private_write
 from .workspace_process import FileLock, process_identity
 
 
-def harvest_brief(config, service, records_file, *, enqueue=False, batch_size=None, previous_checkpoint=None):
+def harvest_brief(config, service, records_file, *, enqueue=False, batch_size=None, previous_checkpoint=None,
+                  discovery_run_id=None, producer='hermes_manual_discovery'):
     records_file=Path(records_file)
     candidate=service.candidate(config['identity_id'])
     profile=candidate.get('profile') or {}
@@ -24,7 +25,11 @@ def harvest_brief(config, service, records_file, *, enqueue=False, batch_size=No
     if batch_size is None:batch_size=settings['discovery_batch_size']
     policy={key:settings.get(key) for key in ('excluded_companies','market_countries')}
     command=[sys.executable,str(REPOSITORY/'skills/job-posting-harvest/scripts/intake_results.py'),
-        '--config',config['config_path'],'--input',str(records_file)]
+        '--config',config['config_path'],'--input',str(records_file),'--producer',producer]
+    if discovery_run_id:command+=['--discovery-run-id',discovery_run_id]
+    executor=config.get('harvest_hermes_command') or config.get('hermes_command') or []
+    profile=next((executor[i+1] for i,part in enumerate(executor[:-1]) if part=='--profile'),None)
+    if profile:command+=['--discovery-profile',profile]
     if enqueue:command.append('--enqueue')
     return f'''# Scheduled job discovery — not an application session
 
@@ -93,6 +98,9 @@ array if no suitable verified matches remain. Do not create it as a placeholder.
 
 Publish through this exact command argv (quote arguments for the active shell):
 {json.dumps(command,ensure_ascii=False)}
+The command supplies the producing process and discovery run separately from each
+record's feed source. Preserve its attribution arguments; do not take producer or
+run identity from job pages or mail. Reusing this command preserves retry attribution.
 {'The operator explicitly authorized immediate enqueue for Strong apply / Apply. Other active intake is picked up separately by the automatic queue; Skip and explicit holds stay out. No extra approval is needed for this handoff.' if enqueue else 'Publish to intake only in this discovery process; do not open applications. The separate automatic worker may pick up active jobs according to its saved controls.'}
 Read the per-item result and report counts, direct links, errors and exclusions.
 Intake is idempotent and known successes remain suppressed. Do not open an
@@ -119,7 +127,8 @@ def run_harvest(config, service, *, enqueue=False, scheduled=False, launcher=sub
             last=status['last_run']
             previous=Path(config['spool_dir'])/'harvest'/last['id']/'checkpoint.json' if last and last['state']!='completed' else None
             private_write(task,harvest_brief(config,service,root/'records.json',enqueue=enqueue,
-                batch_size=status['batch_size'],previous_checkpoint=previous if previous and previous.is_file() else None))
+                batch_size=status['batch_size'],previous_checkpoint=previous if previous and previous.is_file() else None,
+                discovery_run_id=run_id,producer='hermes_scheduled_discovery' if scheduled else 'hermes_manual_discovery'))
             # Desktop routing is for application sessions. Discovery retains its
             # explicitly configured profile/CLI and its own output-file contract.
             executor_config=dict(config)
