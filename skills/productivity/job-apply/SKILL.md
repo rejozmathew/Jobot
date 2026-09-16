@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.12
+version: 0.5.13
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -290,6 +290,11 @@ Native `context`, `report`, and `browser_observe` accept empty parameters.
    a request to audit the completed application.
 8. Use `finish` with the truthful outcome, evidence and observed quiescence.
    The host isolates its browser before making the workspace available again.
+   In an `existing` browser workspace it closes only this application's tab and
+   its popups, preserving the user's browser, dashboard, mail and other tabs.
+   Record the actual blocker and finish the attempt before reporting it in chat;
+   a chat response alone does not release the application tab. Helper misses
+   still require the recovery described above, rather than premature finish.
    A missing post-click confirmation is `submission_unknown`, an observation
    rather than a restriction on continuing the application.
 
@@ -318,7 +323,8 @@ an internal resume-upload receipt. Historical clicks remain recorded. Only
 accepted confirmation establishes success; never invent confirmation or label
 an old click as not executed merely to justify continuing.
 
-Headed sessions start maximized. Obscured clicks return viewport/covering metadata
+Managed headed sessions start maximized; existing-browser sessions retain the
+user's window. Obscured clicks return viewport/covering metadata
 and use only an uncovered point on the actual control. Inspect and use an observed
 panel collapse control if needed; never force through an overlay. Completed workspaces retire their owned background host;
 parallel sessions retain their independent hosts and browser processes.
@@ -327,7 +333,9 @@ For a broken page, recover it instead of finishing blocked.
 This applies to Workday, iCIMS, Greenhouse and proprietary portals alike. A
 missing Simplify panel is also a recovery case: inspect the current page and
 whether it is still loading, then refresh if the extension did not initialize.
-Check again after reload; restart the owned browser if still unusable. Diagnose
+Check again after reload; use session `restart` if still unusable.
+In an existing-browser workspace `restart` replaces only the application tab
+within the same attempt; it never restarts the user's browser. Diagnose
 an extension login/setup issue when the UI shows one. Use approved native
 controls where supported after fresh writer observation, without reconstructing
 career/education history. Neither missing Simplify nor a helper timeout is by
@@ -468,8 +476,9 @@ provider-generated password; use the configured reusable employer credential.
 Pause/stop acknowledgement means the host stopped its owned browser activity.
 Pending control is not acknowledgement. Attach by another driver requires that
 pause to finish, then starts a fresh owned target; it does not inherit the old
-page ID. Retry starts a fresh attempt from the beginning and stops an older
-owned browser as part of that lifecycle. It requires no submission reconciliation
+page ID. Retry starts a fresh attempt from the beginning and closes the older
+application workspace: the owned browser in managed mode, or only application
+tabs in existing-browser mode. It requires no submission reconciliation
 or proof that the previous attempt was not submitted. This is the same policy
 for every ATS and proprietary URL. The runtime matches the URL to the existing
 job, classifies `application_kind` as `first_attempt` or `reattempt`, retains
@@ -480,7 +489,9 @@ Repeated calls in that request reuse its session. Portable callers may supply
 Without a request ID, start reuses this driver's active session and creates a new
 one once it ends. A new conversation starts its own attempt. Distinct requests
 can use distinct configured browser workspaces for the same posting or account;
-an ordinary new request does not stop another request. For all ATS types, a new session on a previously
+an ordinary new request does not stop another request. Existing-browser sessions
+retain cookies and site storage because other user tabs share that profile;
+only application-owned tabs are replaced. In managed mode, for all ATS types, a new session on a previously
 attempted job clears the assigned employer origin's cookies and site storage
 before opening it. This also applies to a new request/conversation and queued
 answer retries. Simplify's separate login and extension state remain; the

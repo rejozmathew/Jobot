@@ -222,15 +222,26 @@ class SessionServices:
         self.bind_target(attempt_id,worker_id=run['worker_id'],fence=fence,target_id=target_id,url=job['url'])
         return self.session(session_id)
 
-    def session_stopped(self, session_id, *, reason, paused=False, browser_stopped=False):
-        if browser_stopped is not True:raise ProtocolError('owned_browser_stop_evidence_required')
+    def session_browser_attachment(self, session_id, host_id, attachment, target_id=None):
+        """Durable tab ownership, including the interval before readiness/claim."""
+        with self.tx() as db:
+            s=self._get(db,'application_sessions',session_id)
+            w=self._get(db,'browser_workspaces',s['workspace_id'])
+            if w['host_id']!=host_id:raise ProtocolError('stale_host')
+            meta=json.loads(s['metadata_json']);meta['browser_attachment']=attachment
+            db.execute('UPDATE application_sessions SET metadata_json=?,target_id=COALESCE(?,target_id) WHERE id=?',
+                       (dumps(meta),target_id,session_id))
+
+    def session_stopped(self, session_id, *, reason, paused=False, browser_stopped=False, tabs_closed=False):
+        if browser_stopped is not True and tabs_closed is not True:raise ProtocolError('owned_browser_stop_evidence_required')
         with self.tx() as db:
             s=self._get(db,'application_sessions',session_id)
             if s['ended_at']:return dict(s)
             now=self.now();reason=safe_text(reason)
             if s['attempt_id']:
                 a=self._get(db,'application_attempts',s['attempt_id'])
-                # Process-tree termination establishes quiescence even after a crash.
+                # Owned process termination or confirmed application-tab closure
+                # establishes document quiescence, including after a host crash.
                 db.execute("UPDATE managed_actions SET ended_at=?,status='aborted',uncertainty=1 WHERE attempt_id=? AND ended_at IS NULL",(now,a['id']))
                 db.execute("UPDATE application_attempts SET writer_state='idle' WHERE id=?",(a['id'],))
                 db.execute("UPDATE owned_targets SET state='closed',evidence=?,updated_at=? WHERE attempt_id=? AND state!='closed'",(reason,now,a['id']))

@@ -90,8 +90,11 @@ reloaded. End owned applications through their normal lifecycle before replacing
 an occupied host. Documentation or a local Git checkpoint alone does not prove
 that an existing long-running process has loaded this policy.
 
-Each reattempt uses the existing employer-origin storage cleanup and a fresh
-target. Simplify's separate login and approved reusable employer
+Each reattempt uses a fresh target. Managed-browser workspaces also use the
+existing employer-origin storage cleanup. Workspaces configured with
+`connection_mode: "existing"` retain shared cookies/storage and close only the
+application tab and its popups, preserving the user's other tabs and browser.
+Simplify's separate login and approved reusable employer
 credentials remain available. A form without login proceeds directly to filling;
 an actual login form uses the existing authentication flow. URL normalization
 and form interaction may vary by portal; this retry decision does not.

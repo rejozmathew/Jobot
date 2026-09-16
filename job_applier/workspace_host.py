@@ -51,7 +51,7 @@ def ensure_host(config, workspace_id):
             if not FileLock.is_locked(lock_path(workspace)):raise ProtocolError('host_lock_missing')
             return w
         # A released lock alone is not proof that an orphan browser is stopped.
-        if w['browser_identity_json'] and process_matches(json.loads(w['browser_identity_json'])):
+        if workspace.get('connection_mode')!='existing' and w['browser_identity_json'] and process_matches(json.loads(w['browser_identity_json'])):
             raise ProtocolError('owned_browser_still_alive','Workspace remains isolated until the recorded child stops')
         if FileLock.is_locked(lock_path(workspace)):raise ProtocolError('workspace_owned_by_another_host')
         root=Path(config['spool_dir'])/'hosts';root.mkdir(parents=True,exist_ok=True)
@@ -135,6 +135,11 @@ class WorkspaceHost:
         self.preparing=set();self.threads=[]
         self.retire=False;self.requests=0
         self.startup_timing={}
+        self.attachment=None
+
+    @property
+    def existing_browser(self):
+        return self.workspace.get('connection_mode')=='existing'
 
     def active_session(self):
         with self.service.tx() as db:
@@ -143,6 +148,20 @@ class WorkspaceHost:
 
     def start_browser(self):
         w=self.workspace
+        if self.existing_browser:
+            from .workspace_attachment import verify_connection_process,existing_profile_process
+            try:info=endpoint_info(w['cdp_url'])
+            except (OSError,ValueError) as exc:
+                raise ProtocolError('browser_endpoint_not_ready',
+                    'Open Brave using the configured shared-browser launcher. A browser opened without its debugging connection needs a one-time close and reopen; Hermes will not close your personal browser.') from exc
+            pid=existing_profile_process(w)
+            if not pid:raise ProtocolError('browser_profile_mismatch')
+            verify_connection_process(w,pid)
+            self.attachment={'browser_id':info['webSocketDebuggerUrl'],'process_identity':process_identity(pid)}
+            self.startup_timing['browser_endpoint_ready_at']=self.service.now()
+            # This process belongs to the user. Never put it in OwnedProcess or
+            # browser_identity_json, both of which mean process-lifetime ownership.
+            return
         if self.browser and self.browser.alive():return
         if not Path(w['browser_executable']).is_file():raise ProtocolError('browser_executable_missing',w['browser_executable'])
         if not Path(w['user_data_dir']).is_dir():raise ProtocolError('workspace_profile_not_prepared',w['user_data_dir'])
@@ -170,20 +189,32 @@ class WorkspaceHost:
 
     async def prepare_target(self, session):
         w=self.workspace;endpoint=w['cdp_url']
-        observed=(await browser_command(endpoint,'Browser.getBrowserCommandLine'))['arguments']
-        args={arg.split('=',1)[0]:arg.split('=',1)[1] if '=' in arg else True for arg in observed}
-        if str(Path(str(args.get('--user-data-dir',''))).resolve()).casefold()!=str(Path(w['user_data_dir']).resolve()).casefold():
-            raise ProtocolError('browser_profile_mismatch')
-        mode='headless' if '--headless' in args else 'headed'
-        if mode!=w['mode']:raise ProtocolError('browser_mode_mismatch')
-        target=(await browser_command(endpoint,'Target.createTarget',{'url':'about:blank'}))['targetId']
+        if self.existing_browser:
+            mode=w['mode']
+            # Save the unique marker BEFORE creation: a host crash between CDP
+            # creation and saving its id can still reclaim this exact blank tab.
+            attachment={**self.attachment,'marker':'about:blank#jobbot-'+uid(),'target_ids':[]}
+            self.service.session_browser_attachment(session['id'],self.host_id,attachment)
+            target=(await browser_command(endpoint,'Target.createTarget',{'url':attachment['marker']}))['targetId']
+            attachment['target_ids']=[target]
+            self.service.session_browser_attachment(session['id'],self.host_id,attachment,target)
+        else:
+            observed=(await browser_command(endpoint,'Browser.getBrowserCommandLine'))['arguments']
+            args={arg.split('=',1)[0]:arg.split('=',1)[1] if '=' in arg else True for arg in observed}
+            if str(Path(str(args.get('--user-data-dir',''))).resolve()).casefold()!=str(Path(w['user_data_dir']).resolve()).casefold():
+                raise ProtocolError('browser_profile_mismatch')
+            mode='headless' if '--headless' in args else 'headed'
+            if mode!=w['mode']:raise ProtocolError('browser_mode_mismatch')
+            target=(await browser_command(endpoint,'Target.createTarget',{'url':'about:blank'}))['targetId']
         from .cdp_client import CDPBrowser
         from .managed_identity import is_same_application_scope,application_match
         browser=await CDPBrowser.connect(endpoint,target_id=target,expected_mode=mode)
         try:
             page=await browser.get_current_page();job=self.service.job(session['job_id'])
             employer_storage={'status':'retained'}
-            if not session.get('attempt_id') and json.loads(session.get('metadata_json') or '{}').get('fresh_employer_storage'):
+            if self.existing_browser:
+                employer_storage['reason']='Shared browser retains cookies and other user tabs'
+            if not self.existing_browser and not session.get('attempt_id') and json.loads(session.get('metadata_json') or '{}').get('fresh_employer_storage'):
                 parsed=urlsplit(job['url']);origin=parsed.scheme+'://'+parsed.netloc
                 try:
                     # This host owns the entire process. Close restored page tabs
@@ -197,8 +228,8 @@ class WorkspaceHost:
                 except Exception as exc:
                     raise ProtocolError('employer_storage_cleanup_failed','Retry did not open the employer page; its prior browser data could not be cleared') from exc
                 employer_storage={'status':'cleared','origin':origin}
-            window_state='headless'
-            if mode=='headed':
+            window_state='retained' if self.existing_browser and mode=='headed' else 'headless'
+            if mode=='headed' and not self.existing_browser:
                 try:
                     window=await browser_command(endpoint,'Browser.getWindowForTarget',{'targetId':target})
                     await browser_command(endpoint,'Browser.setWindowBounds',{'windowId':window['windowId'],'bounds':{'windowState':'maximized'}})
@@ -224,6 +255,8 @@ class WorkspaceHost:
                        'simplify':'unverified','observed_at':self.service.now(),'window_state':window_state,
                        'employer_storage':employer_storage,'startup_timing':dict(self.startup_timing),
                        'viewport':await page.evaluate('({width:innerWidth,height:innerHeight})')}
+            readiness['connection_mode']='existing' if self.existing_browser else 'managed'
+            readiness['navigator_webdriver']=await page.evaluate('navigator.webdriver')
             if self.config.get('require_simplify',True):
                 from .simplify_boundary import SimplifyBoundary
                 boundary=SimplifyBoundary(page,budget_seconds=5)
@@ -263,7 +296,55 @@ class WorkspaceHost:
             self.stop_session(session,detail['code']+': '+detail['detail'])
         finally:self.preparing.discard(session['id'])
 
+    async def close_application_tabs(self,session):
+        """Close only durable application-owned targets; never Browser.close.
+
+        Re-checks and descendant ids are persisted before closure, so a host
+        crash during cleanup cannot strand a known popup or touch personal tabs.
+        """
+        session=self.service.session(session['id'])
+        attachment=json.loads(session['metadata_json']).get('browser_attachment') or {}
+        if not attachment:return
+        endpoint=self.workspace['cdp_url']
+        try:current=endpoint_info(endpoint)['webSocketDebuggerUrl']
+        except (OSError,ValueError):
+            identity=attachment.get('process_identity')
+            if identity and not process_matches(identity):return
+            raise ProtocolError('application_tab_close_unconfirmed','Existing browser is temporarily unreachable; tab cleanup remains pending')
+        if current!=attachment['browser_id']:
+            # The old browser incarnation is gone; never close a tab in its replacement.
+            return
+        targets=(await browser_command(endpoint,'Target.getTargets'))['targetInfos']
+        owned=set(attachment.get('target_ids',[]))
+        if session.get('target_id'):owned.add(session['target_id'])
+        owned.update(t['targetId'] for t in targets if attachment.get('marker') and t.get('url')==attachment['marker'])
+        while True:
+            descendants={t['targetId'] for t in targets if t.get('type')=='page' and t.get('openerId') in owned}
+            if descendants<=owned:break
+            owned.update(descendants)
+        attachment['target_ids']=sorted(owned)
+        self.service.session_browser_attachment(session['id'],self.host_id,attachment)
+        present={t['targetId'] for t in targets if t.get('type')=='page'} & owned
+        if present and not any(t.get('type')=='page' and t['targetId'] not in owned for t in targets):
+            # Chromium exits when its last page closes. Leave a neutral tab if
+            # the user has closed their dashboard/mail during the application.
+            await browser_command(endpoint,'Target.createTarget',{'url':'about:blank'})
+        # Close popups first, root last. A fresh inventory is the acknowledgement,
+        # not the return value of closeTarget (the user may already have closed it).
+        for target in sorted(present,key=lambda t:t==session.get('target_id')):
+            try:await browser_command(endpoint,'Target.closeTarget',{'targetId':target})
+            except RuntimeError:pass
+        remaining=(await browser_command(endpoint,'Target.getTargets'))['targetInfos']
+        if any(t['targetId'] in owned or t.get('openerId') in owned for t in remaining if t.get('type')=='page'):
+            raise ProtocolError('application_tab_close_unconfirmed','Application tab closure is not yet confirmed')
+
     def stop_session(self,session,reason,paused=False):
+        if self.existing_browser:
+            asyncio.run(self.close_application_tabs(session))
+            self.service.session_stopped(session['id'],reason=reason,paused=paused,tabs_closed=True)
+            self.service.host_seen(self.workspace_id,self.host_id,None)
+            if not paused:self.retire=True
+            return
         # Closing the Job Object terminates all descendants, including Simplify.
         if self.browser:
             self.browser.stop()
@@ -336,7 +417,9 @@ class WorkspaceHost:
             except Exception:
                 self.preparing.discard(session['id']);raise
             return {**handle(service,session['id'],include_context=False),
-                    'instruction':'The owned browser is restarting in the same attempt. Read status until connected, then inspect and continue; this is not an application outcome.'}
+                    'instruction':('The application tab is reopening; the shared browser and your other tabs stay open. '
+                        if self.existing_browser else 'The owned browser is restarting. ')+
+                        'This is the same attempt. Read status until connected, then inspect and continue; this is not an application outcome.'}
         if op=='fast_forward':
             from .workday_fast import advance
             return advance(cfg,client,own,dict(params,target_id=session['target_id']))
@@ -403,11 +486,17 @@ class WorkspaceHost:
     def run(self):
         with FileLock(lock_path(self.workspace)):
             old=workspace_record(self.service,self.workspace_id)
-            if old['browser_identity_json'] and process_matches(json.loads(old['browser_identity_json'])):
+            if not self.existing_browser and old['browser_identity_json'] and process_matches(json.loads(old['browser_identity_json'])):
                 raise ProtocolError('orphan_browser_still_running')
             previous=self.active_session()
             self.service.host_registered(self.workspace_id,self.host_id,process_identity(os.getpid()))
-            if previous and previous['state'] not in ('preparing','paused','capacity_wait'):
+            if self.existing_browser and previous and json.loads(previous['metadata_json']).get('browser_attachment'):
+                # Recover even a pre-readiness target from a lost host. For a
+                # preparing session retain the request, then open a fresh tab.
+                asyncio.run(self.close_application_tabs(previous))
+                if previous['state'] not in ('preparing','paused','capacity_wait'):
+                    self.stop_session(previous,'Previous host died; application tabs closed. Lost command was not replayed.')
+            elif previous and previous['state'] not in ('preparing','paused','capacity_wait'):
                 self.service.session_stopped(previous['id'],reason='Previous host died; owned process identity is stopped. Lost command was not replayed.',browser_stopped=True)
             address=pipe_address(self.config,self.workspace_id,self.host_id)
             if os.name == 'nt':
@@ -418,6 +507,7 @@ class WorkspaceHost:
             with listener_ctx as listener:
                 server=threading.Thread(target=self.serve_requests,args=(listener,),daemon=True);server.start()
                 last_seen=0
+                last_tab_check=0
                 idle_since=None
                 try:
                     while not self.exit.wait(.25):
@@ -442,16 +532,40 @@ class WorkspaceHost:
                         # control. Never acknowledge stop while a launch can still occur.
                         if session['id'] in self.preparing:continue
                         if session['state']=='finishing' or run['control'] in ('pause_requested','stop_requested') or expired:
-                            self.stop_session(session,'Maximum runtime reached' if expired else session['reason'] or run['control'],
-                                              paused=run['control']=='pause_requested' and not expired)
+                            if self.busy.acquire(blocking=False):
+                                try:
+                                    self.stop_session(session,'Maximum runtime reached' if expired else session['reason'] or run['control'],
+                                                      paused=run['control']=='pause_requested' and not expired)
+                                except Exception as exc:
+                                    with self.service.tx() as db:
+                                        db.execute('UPDATE browser_workspaces SET reason=? WHERE id=?',(error_detail(exc)['detail'],self.workspace_id))
+                                finally:self.busy.release()
                         elif self.browser and not self.browser.alive() and session['state'] in ('connected','waiting'):
                             self.stop_session(session,'Owned browser exited; inspect exact submission state before retry')
                         elif session['state']=='preparing' and session['id'] not in self.preparing:
                             self.preparing.add(session['id'])
                             thread=threading.Thread(target=self.prepare,args=(session,),daemon=True);thread.start();self.threads.append(thread)
+                        elif self.existing_browser and session['state'] in ('connected','waiting') and time.monotonic()-last_tab_check>2 and self.busy.acquire(blocking=False):
+                            try:
+                                last_tab_check=time.monotonic()
+                                attachment=json.loads(session['metadata_json']).get('browser_attachment') or {}
+                                try:
+                                    info=endpoint_info(self.workspace['cdp_url'])
+                                    targets=asyncio.run(browser_command(self.workspace['cdp_url'],'Target.getTargets'))['targetInfos']
+                                    gone=info['webSocketDebuggerUrl']!=attachment.get('browser_id') or not any(t['targetId']==session['target_id'] for t in targets)
+                                except (OSError,ValueError):
+                                    gone=bool(attachment.get('process_identity') and not process_matches(attachment['process_identity']))
+                                if gone:self.stop_session(session,'Application tab or shared browser was closed; retained submission evidence determines the outcome')
+                            except Exception:pass  # Transient CDP loss does not establish closure.
+                            finally:self.busy.release()
                 finally:
                     self.exit.set()
                     if self.browser:self.browser.stop()
+                    if self.existing_browser:
+                        current=self.active_session()
+                        if current and current['state']!='paused':
+                            try:self.stop_session(current,'Host stopped; application tabs closed')
+                            except Exception:pass  # Durable tab ownership remains for the next host.
                     with self.service.tx() as db:
                         db.execute("UPDATE browser_workspaces SET state='offline',browser_identity_json=NULL,updated_at=? WHERE id=? AND host_id=?",(self.service.now(),self.workspace_id,self.host_id))
                     if os.name != 'nt':

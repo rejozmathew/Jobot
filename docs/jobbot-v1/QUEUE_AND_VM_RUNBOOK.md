@@ -22,6 +22,34 @@ worker are independent processes; a working web page does not mean a worker is o
 
 ## Everyday use
 
+### Shared Brave window
+
+For a workspace configured with `connection_mode: "existing"`, open the supplied
+JobBot Brave launcher once and leave it running. It uses the existing authenticated
+profile, a fixed loopback debugging port and no `--enable-automation` switch.
+The equivalent command is:
+
+```sh
+.venv/bin/python -m job_applier.workspace_attachment --config /absolute/path/to/runtime.json
+```
+
+Workspace `startup_urls` can contain the local dashboard URL followed by
+`https://mail.google.com/`. A second launcher invocation on an already connected
+browser does not duplicate them. A browser opened normally must be closed and
+reopened with this launcher once; application executors never restart the user's
+browser to do that setup. `navigator_webdriver` in application readiness records
+the observed flag. False is not a guarantee about employer verification behavior.
+
+Each attempt gets a fresh application tab. Completed, blocked and explicitly
+stopped attempts close their tab and application popups after recording the
+outcome. Dashboard, Gmail, other user tabs and their cookies remain. A retry waits
+according to the existing queue schedule and later opens another application tab.
+The existing executor-exit cleanup handles abandoned attempts too. Same-attempt
+Restart replaces just the application tab. If the user closes the browser, reopen
+the launcher before the next attempt. No additional automatic retry limit is added.
+
+### Queue controls
+
 In the dashboard, **Add a job** accepts its official URL and optional company/title.
 The worker automatically queues active intake using its configured candidate and
 resume. No second enqueue click is required. Existing cancellation, recorded

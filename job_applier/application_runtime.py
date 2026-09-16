@@ -47,6 +47,7 @@ def validate_workspaces(workspaces):
         if endpoint.scheme!='http' or endpoint.hostname!='127.0.0.1' or not endpoint.port or endpoint.path or endpoint.query or endpoint.fragment or endpoint.username or endpoint.password:
             raise ProtocolError('explicit_loopback_cdp_required')
         if w.get('mode','headed') not in ('headed','headless'):raise ProtocolError('invalid_browser_mode')
+        if w.get('connection_mode','managed') not in ('managed','existing'):raise ProtocolError('invalid_browser_connection_mode')
         resolved=str(profile.resolve()).casefold()
         if w['id'] in ids or resolved in profiles or w['cdp_url'] in endpoints:raise ProtocolError('workspace_isolation_required')
         if any(resolved.startswith(p+os.sep) or p.startswith(resolved+os.sep) for p in profiles):

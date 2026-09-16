@@ -409,6 +409,53 @@ Report the outcome and evidence source—or the exact unresolved blocker—with 
 
 ## Windows lifecycle, recovery and parallelism
 
+### Existing user browser (September 16, 2026)
+
+A workspace can set `connection_mode: "existing"`. The default remains
+`managed` for previously configured workspaces. In existing mode the user starts
+Brave once, using `python -m job_applier.workspace_attachment --config <path>`.
+Its fixed loopback CDP port and existing profile are read from the workspace;
+optional `startup_urls` opens the dashboard and mail in order. A repeated launcher
+call on an already connected browser does not create duplicate tabs. A normally
+launched browser without debugging needs a one-time user close/reopen with this
+launcher; an application executor never closes it or substitutes another profile.
+The launcher omits `--enable-automation`, headless mode and port zero. It does not
+override `navigator.webdriver` or browser fingerprints.
+
+The host verifies the profile/port using OS process arguments (and Chromium's
+profile lock for a Linux default profile) instead of
+`Browser.getBrowserCommandLine`, which requires the automation switch. It creates
+one application tab and records `navigator_webdriver` in readiness. This measures
+the actual browser property; it does not predict or bypass an employer's challenge.
+The shared browser process is never assigned to the host's kill-on-close process
+owner. Existing user tabs and window size are retained.
+
+Finish (including blocked/failed outcomes), Stop, Pause and same-attempt Restart
+close only application-owned page targets and their discovered popup descendants.
+Restart then opens a new application tab in the same browser and attempt. A unique
+blank-tab marker and browser incarnation are saved before target creation, and the
+target id is saved before navigation/readiness. Replacement hosts reclaim those
+durable targets after a crash; a different browser incarnation is never cleaned
+using stale target ids. Closure is verified before releasing the session. If the
+application is the last tab, a neutral blank tab keeps the user's browser open.
+A helper miss or time slice does not close the tab or invent an outcome.
+
+The automatic queue's executor-exit recovery continues to request Stop, so an
+executor that merely exits/chat-reports also releases its application tabs.
+User-closed application tabs are observed and settled without closing other tabs.
+Shared-browser retries retain cookies/storage because clearing an origin would
+affect the user's other tabs. The managed-browser storage-reset policy below still
+applies to managed workspaces. Retry scheduling and submission evidence rules are
+unchanged. The UI/chat continues to show the recorded outcome.
+
+The synthetic real-Brave fixture `test_existing_browser_live.py` verifies false
+`navigator.webdriver` before/after attachment, in the application tab and after
+restart; application popup cleanup; preserved dashboard/mail tabs and cookies;
+idempotent starts, retry, host-death recovery, Stop and manual tab closure. It uses
+localhost and a disposable profile, never employers or candidate records.
+
+### Managed process ownership
+
 `workspace_process` creates the browser suspended, assigns it to a Windows Job
 Object with kill-on-close, then resumes it. The detached host retains that object
 and the profile lock across CLI exit. Tests exercise real shell-exit survival and
@@ -417,7 +464,7 @@ child/grandchild death on host kill; detached Popen alone is not the proof.
 A healthy owned browser is retained during its session. Current policy stops it
 on finish/pause/stop instead of keeping it warm across applications; the persistent
 profile remains. Idle hosts exit after 60 seconds. Externally running browsers
-are never adopted or killed. Startup checks endpoint and OS command-line inventory
+are never adopted or killed in managed mode. Startup checks endpoint and OS command-line inventory
 before launching against a profile. Old profile aliases consult legacy reservations;
 migration guards reject old-version acquisition of locally configured profiles.
 
@@ -530,6 +577,7 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 | application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
 | managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed |
 | workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, queued JSON dispatch on the physical browser; no model or five-second busy veto |
+| workspace_attachment.py / workspace_host.py / managed_sessions.session_browser_attachment | Optional existing-browser launcher and verified attachment; durable application-tab ownership, tab-only cleanup/recovery, and observed navigator.webdriver. Called by the manual launcher and local host; managed process lifecycle remains available. |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
 | managed_identity.py | Workday host/site/full-requisition and iCIMS host/job-id comparison, history equivalence, application scope and diagnostic match states; existing frame router, runtime, credentials and binding callers share scope matching |
