@@ -64,13 +64,50 @@ v.jobs=[{id:'one',company:'Example',status:'queued',created_at:'2026-09-15T12:00
  {id:'old',status:'queued',sources:[]}];
 w.draw(v);
 const rows=doc.querySelectorAll('#queue-rows tr');
-assert(rows[0].cells.length===9,'Missing provenance columns');
+assert(rows[0].cells.length===11,'Missing provenance/timing columns');
 assert(rows[0].cells[6].textContent.includes('Job Harvester / Google Jobs'),'Original source absent');
 assert(rows[0].cells[6].textContent.includes('LinkedIn alert email'),'Additional source absent');
-assert(rows[0].cells[6].textContent.includes('record-1'),'Source reference absent');
 assert(!rows[0].querySelector('img'),'Source rendered as unsafe HTML');
-assert(rows[0].cells[7].textContent!=='—','Added time absent');
-assert(rows[0].cells[8].textContent.includes('Interrupted'),'Outcome absent');
+assert(rows[0].cells[7].textContent.includes('record-1'),'Separate source reference absent');
+assert(rows[0].cells[8].textContent!=='—','Added time absent');
+assert(rows[0].cells[9].textContent.includes('Interrupted'),'Outcome absent');
 assert(rows[1].cells[6].textContent.includes('Unknown'),'Invented historical source');
-assert(rows[1].cells[8].textContent.includes('Not recorded'),'Invented disposition time');
+assert(rows[1].cells[9].textContent.includes('Not recorded'),'Invented disposition time');
+''')
+
+
+def test_applied_job_timing_uses_successful_attempt_across_runs(tmp_path):
+    s, asset, jobs, _, _ = setup(tmp_path)
+    session = connect(s, reserve(s, asset, jobs))
+    # Synthetic retained history: a failed attempt, then a successful attempt.
+    s.session_stopped(session['id'], reason='Fixture stopped', browser_stopped=True)
+    success = connect(s, reserve(s, asset, jobs, request='success'))
+    s.session_stopped(success['id'], reason='Fixture stopped', browser_stopped=True)
+    with s.tx() as db:
+        db.execute("UPDATE application_attempts SET outcome='applied', started_at='2026-09-17T12:00:00+00:00', completed_at='2026-09-17T12:12:35+00:00', uncertain_duration=0 WHERE id=?", (success['attempt_id'],))
+        db.execute("UPDATE jobs SET status='applied' WHERE id=?", (jobs[0]['id'],))
+    # The selected run is irrelevant; the jobs table includes all retained runs.
+    row = next(j for j in s.view(run_id=session['run_id'])['jobs'] if j['id'] == jobs[0]['id'])
+    assert row['application_timing']['elapsed_seconds'] == 755
+    assert row['application_timing']['attempt_id'] == success['attempt_id']
+    assert not row['application_timing']['uncertain_duration']
+    with s.tx() as db:
+        db.execute("UPDATE application_attempts SET outcome='already_applied' WHERE id=?", (success['attempt_id'],))
+    assert next(j for j in s.view()['jobs'] if j['id'] == jobs[0]['id'])['application_timing'] is None
+
+
+def test_queue_displays_completion_duration_and_missing_history():
+    dashboard_check(r'''
+doc.getElementById('job-filter').value='all';
+v.jobs=[{id:'done',status:'applied',application_timing:{elapsed_seconds:755,uncertain_duration:false}},
+ {id:'old',status:'already_applied'}, {id:'pending',status:'queued'},
+ {id:'approx',status:'applied',application_timing:{elapsed_seconds:65,uncertain_duration:true}}];
+w.draw(v);
+const rows=doc.querySelectorAll('#queue-rows tr');
+assert(rows[0].cells[10].textContent==='12m 35s','Completion duration missing');
+assert(rows[1].cells[10].textContent==='Not recorded','Historical timing invented');
+assert(rows[2].cells[10].textContent==='—','Pending job has completion duration');
+assert(rows[3].cells[10].textContent==='Approx. 1m 5s','Uncertain timing presented as exact');
+v.jobs=[];w.draw(v);
+assert(doc.querySelector('#queue-rows td').colSpan===11,'Empty row does not span all columns');
 ''')

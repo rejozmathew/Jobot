@@ -133,10 +133,10 @@ function sourceCell(job,queued){
  td.append(el('span',sourceLabel(sources[0]?.source_type)));
  const firstObservation=sources[0]?.observations?.[0];
  td.append(el('small',firstObservation?'Seen by '+producerLabel(firstObservation.producer):'Discovery process: Not recorded'));
- const detail=progressDetails(job.id+':sources',`Origin details · ${sources.length} source reference${sources.length===1?'':'s'}`);
+ const detail=progressDetails(job.id+':sources',`Origin details · ${sources.length} source${sources.length===1?'':'s'}`);
  for(const source of sources){
   const row=el('div');row.append(el('strong',sourceLabel(source.source_type)),
-   el('small',`First recorded ${stamp(source.discovered_at)}`),el('small',source.source_id||'Reference unavailable'));
+   el('small',`First recorded ${stamp(source.discovered_at)}`));
   if(source.original_url)row.append(link(source.original_url,'Discovery link'));
   if(!source.observations?.length)row.append(el('small','Discovery process: Not recorded'));
   for(const observation of source.observations||[]){
@@ -157,6 +157,26 @@ function sourceCell(job,queued){
   }
  }else detail.append(el('small','No queue entry recorded'));
  td.append(detail);return td;
+}
+function sourceReferenceCell(job){
+ const td=el('td',undefined,'source-reference');
+ if(!job.sources?.length)td.append(el('span','Not recorded'));
+ for(const source of job.sources||[]){
+  const row=el('div'),reference=source.source_id||'Reference unavailable';
+  row.title=sourceLabel(source.source_type);
+  row.append(source.original_url?link(source.original_url,reference):el('span',reference));td.append(row);
+ }
+ return td;
+}
+function applicationTimeCell(job){
+ const td=el('td',undefined,'application-time'),timing=job.application_timing;
+ if(!submitted(job)){td.textContent='—';return td;}
+ if(!Number.isFinite(timing?.elapsed_seconds)||timing.elapsed_seconds<0){td.textContent='Not recorded';return td;}
+ const seconds=Math.round(timing.elapsed_seconds),hours=Math.floor(seconds/3600),minutes=Math.floor(seconds%3600/60);
+ td.textContent=(timing.uncertain_duration?'Approx. ':'')+(hours?`${hours}h ${minutes}m ${seconds%60}s`:minutes?`${minutes}m ${seconds%60}s`:`${seconds}s`);
+ td.title=`Successful attempt: ${stamp(timing.started_at)} to ${stamp(timing.completed_at)}. Includes waits during this attempt; excludes earlier attempts and queue time.`;
+ if(timing.uncertain_duration)td.title+=' Some timing evidence is incomplete.';
+ return td;
 }
 function dispositionCell(job){
  const td=el('td'),last=job.last_disposition;
@@ -207,10 +227,10 @@ function renderQueue(v){
   tr.append(statusTd);
   const assessment=job.assessment;tr.append(el('td',assessment?(assessment.recommendation||'Assessment available'):'Unassessed'));
   tr.append(el('td',postingCountry(job)),el('td',postingDate(job)));
-  tr.append(sourceCell(job,queued),el('td',stamp(job.created_at)),dispositionCell(job));
+  tr.append(sourceCell(job,queued),sourceReferenceCell(job),el('td',stamp(job.created_at)),dispositionCell(job),applicationTimeCell(job));
   $('queue-rows').append(tr);
  }
- if(!jobs.length){const tr=el('tr'),td=el('td',v.jobs.length?'No jobs match this view.':'No postings in this instance.');td.colSpan=9;tr.append(td);$('queue-rows').append(tr);}
+ if(!jobs.length){const tr=el('tr'),td=el('td',v.jobs.length?'No jobs match this view.':'No postings in this instance.');td.colSpan=11;tr.append(td);$('queue-rows').append(tr);}
  selection();
 }
 function renderSessions(v){

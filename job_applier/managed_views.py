@@ -167,6 +167,19 @@ class ViewServices:
                 job['last_disposition']=dict(disposition) if disposition else None
                 latest=db.execute('SELECT * FROM application_attempts WHERE job_id=? ORDER BY started_at DESC, id DESC LIMIT 1',(job['id'],)).fetchone()
                 job['failure_reason']=resolve_failure_reason(db,dict(latest)) if latest else None
+                # Completion time belongs to the successful attempt, across all runs.
+                # An already-applied check does not measure the original application.
+                job['application_timing']=None
+                if job['status'] in ('applied','already_applied'):
+                    successful=db.execute('''SELECT * FROM application_attempts WHERE job_id=?
+                        AND outcome='applied' AND completed_at IS NOT NULL
+                        AND julianday(completed_at)>=julianday(started_at)
+                        ORDER BY julianday(completed_at) DESC,id DESC LIMIT 1''',(job['id'],)).fetchone()
+                    if successful:
+                        timing=public_attempt(attempt_timing_state(db,successful,now),now)
+                        job['application_timing']={k:timing[k] for k in
+                            ('started_at','completed_at','elapsed_seconds','uncertain_duration')}
+                        job['application_timing']['attempt_id']=timing['id']
             runs=[dict(r) for r in db.execute('SELECT * FROM runs ORDER BY requested_at DESC,id')]
             candidates=[dict(r) for r in db.execute('SELECT id,person_key,email,state,profile_hash FROM candidates ORDER BY id')]
             accounts=[dict(r) for r in db.execute('SELECT * FROM company_portal_accounts ORDER BY id')]

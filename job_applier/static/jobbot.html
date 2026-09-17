@@ -138,18 +138,23 @@
       </div>
       <p class="cleanup-note">Cancel keeps job history and portal accounts. Restore makes a job available to queue again.</p>
       <div class="table-wrap">
-        <table>
+        <table class="jobs-table">
+          <colgroup>
+            <col><col><col><col><col><col><col><col><col><col><col>
+          </colgroup>
           <thead>
             <tr>
-              <th style="width: 40px;">Select</th>
+              <th>Select</th>
               <th>Company &amp; Role</th>
               <th>Status</th>
               <th>Assessment</th>
               <th>Country</th>
               <th>Posted date</th>
               <th>Source</th>
+              <th>Source reference</th>
               <th title="First added to JobBot; rediscovery does not reset this date">Added</th>
               <th title="Latest recorded operator disposition, application outcome, or queue outcome">Last disposition</th>
+              <th title="Successful attempt start to recorded completion, including waits during that attempt; excludes earlier attempts and time queued">Time to apply</th>
             </tr>
           </thead>
           <tbody id="queue-rows"></tbody>
