@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.14
+version: 0.5.15
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -110,7 +110,7 @@ session. Never open another browser because readiness is still running.
 Start/status returns the detected `platform` and an `ats_reference` path when
 available, including while the browser prepares. Read that reference before form
 actions: iCIMS uses `references/icims.md`, Greenhouse uses `references/greenhouse.md`,
-and Workday uses the canonical `workday-simplify` skill. Portal detection is a
+LinkedIn uses `references/linkedin.md`, and Workday uses the canonical `workday-simplify` skill. Portal detection is a
 starting hint; follow the actual page and controls at each step.
 
 Read `next_operation` from readiness/status and fresh browser observations.
@@ -120,6 +120,15 @@ when the observed Autofill is enabled. Act promptly after readiness. Do not call
 the Workday runner on Greenhouse. `browser_observe` accepts empty parameters;
 `method` belongs to `browser`. After execution begins, status requests a fresh
 observation instead of reusing the original document's Autofill control.
+
+For confirmed LinkedIn Easy Apply, use `linkedin_easy_apply` with `{"seconds":60}`
+in the current owned session. It batches routine fields, approved answers and the
+selected résumé, then advances through the dialog under current submission
+settings. Resolve returned unfamiliar questions from approved facts with the
+current executor and resume the helper. Keep external Apply on its observed
+employer URL and existing ATS handler. A missing external URL is not Easy Apply
+evidence. Simplify may assist when present and settled; the native LinkedIn helper
+also works without it. See [LinkedIn](references/linkedin.md).
 
 `HERMES_SESSION_ID` identifies this conversation. If the shell does not expose
 it, pass `--driver-id <this-conversation-id>` on local commands, consistently for
@@ -148,7 +157,7 @@ that session automatically. The portable equivalent is:
 ```
 
 Portable operation names include `context`, `report`, `browser_observe`,
-`fast_forward`, `credentials`, `browser`, `restart`, `event`, `progress`, `record_account_event`,
+`fast_forward`, `linkedin_easy_apply`, `credentials`, `browser`, `restart`, `event`, `progress`, `record_account_event`,
 `report_upload`, `submission_intent`, `finish`, `request_mail_for_attempt`,
 `match_mail_for_attempt`, and `account_lock`. No attempt/fence/target/CDP fields
 belong in their parameters. Native `milestone` maps to `event`, `observe` to

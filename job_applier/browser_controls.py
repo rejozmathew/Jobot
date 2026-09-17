@@ -17,6 +17,17 @@ def next_operation(platform, observed=None):
     if status in ('active','unknown'):
         return {'operation':'browser_observe','parameters':{},
                 'instruction':'Observe the current writer until it settles. Inspect an unusable page with the shared recovery controls.'}
+    if platform=='linkedin':
+        route=observed.get('linkedin',{})
+        if route.get('kind')=='easy_apply':
+            return {'operation':'linkedin_easy_apply','parameters':{'seconds':60},
+                    'instruction':'Batch the confirmed Easy Apply form in this owned session; resolve returned questions and resume.'}
+        control=route.get('apply') or {}
+        if route.get('kind')=='external' and control.get('enabled'):
+            return {'operation':'browser','parameters':{'method':'click','ref':control['ref']},
+                    'instruction':'Follow the observed external Apply through the existing correlated employer target handoff and ATS handler.'}
+        return {'operation':'browser','parameters':{'method':'snapshot'},
+                'instruction':'Inspect the assigned LinkedIn job. A missing employer URL does not establish Easy Apply. Follow login or current application evidence.'}
     if platform=='icims' and 'native' not in observed:
         return {'operation':'browser','parameters':{'method':'snapshot'},
                 'instruction':'Inspect the iCIMS posting and embedded application controls before choosing Autofill. Open Apply on the posting; use the current Email/Next controls on the login page.'}
@@ -43,6 +54,9 @@ async def observe(page, package):
         return await observe_page(page,package)
     from .simplify_boundary import OBSERVE
     shared=await page.evaluate(OBSERVE)
+    if platform_for_url(package['job']['url'])=='linkedin' and platform_for_url(await page.evaluate('location.href'))=='linkedin':
+        from .linkedin_easy_apply import observe_page
+        return dict(shared,**await observe_page(page,package))
     native=await page.evaluate_function(FORM,{'method':'observe','page_signature':shared.get('page_signature')})
     simplify_inventory=list(shared.get('inventory',[]))
     # Workday's observer above is intentionally unchanged. All other ATSs share
@@ -121,6 +135,10 @@ async def observe_writers(page,package):
     from .managed_context import platform_for_url
     from .cdp_client import CDPPage
     root=await SimplifyBoundary(page,budget_seconds=5).observe()
+    if platform_for_url(package['job']['url'])=='linkedin' and platform_for_url(await page.evaluate('location.href'))=='linkedin':
+        from .linkedin_easy_apply import observe_page
+        root.update(await observe_page(page,package))
+        return root
     if platform_for_url(package['job']['url'])=='workday' or not isinstance(page,CDPPage):return root
     from .browser_frames import router_for
     router=await router_for(page,package)
@@ -247,6 +265,12 @@ async def form_action(page, params):
         if len(matches)==1:
             result=await click(matches[0]['ref'])
             if not result.get('clicked'):return result
+            # LinkedIn input typeaheads expose their final label as input.value.
+            # The document receipt distinguishes this observed option click from
+            # an uncommitted typed search, without changing other ATS read-back.
+            from .managed_context import platform_for_url
+            if platform_for_url(await page.evaluate('location.href'))=='linkedin':
+                await command('selection_dispatched',option_ref=matches[0]['ref'],label=matches[0]['label'])
             return await verify_selection(matches[0]['value'],matches[0]['label'])
         if attempt==0 and before['tag']=='INPUT':
             await command('fill',value=wanted)

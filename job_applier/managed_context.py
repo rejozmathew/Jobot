@@ -7,7 +7,7 @@ from .managed_shared import ProtocolError
 
 def platform_for_url(url):
     host=urlsplit(url).hostname or ''
-    for suffix,name in (('greenhouse.io','greenhouse'),('myworkdayjobs.com','workday'),('workday.com','workday'),('icims.com','icims'),('lever.co','lever'),('ashbyhq.com','ashby')):
+    for suffix,name in (('linkedin.com','linkedin'),('greenhouse.io','greenhouse'),('myworkdayjobs.com','workday'),('workday.com','workday'),('icims.com','icims'),('lever.co','lever'),('ashbyhq.com','ashby')):
         if host==suffix or host.endswith('.'+suffix):return name
     return 'unknown'
 

@@ -207,7 +207,7 @@ def handle(service, session_id, *, include_context=True):
     platform=result.get('context',{}).get('platform') or platform_for_url(job['url'])
     result['platform']=platform
     reference={'icims':'job-apply/references/icims.md','greenhouse':'job-apply/references/greenhouse.md',
-               'workday':'workday-simplify/SKILL.md'}.get(platform)
+               'workday':'workday-simplify/SKILL.md','linkedin':'job-apply/references/linkedin.md'}.get(platform)
     if reference:result['ats_reference']=str(REPOSITORY/'skills'/'productivity'/reference)
     readiness=state['metadata'].get('readiness',{})
     if state['state'] in ('connected','waiting'):

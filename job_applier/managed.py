@@ -38,7 +38,7 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity
+from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity, linkedin_identity
 
 
 class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices, QueueServices, DiscoveryServices):
@@ -124,7 +124,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if namespace and requisition_id and not identity_evidence: raise ProtocolError('identity_evidence_required')
         key=job_key(canonical,namespace,requisition_id)
         url_key=job_key(canonical)
-        compare_identity=workday_identity if workday_identity(canonical) else greenhouse_query_identity
+        compare_identity=linkedin_identity if linkedin_identity(canonical) else workday_identity if workday_identity(canonical) else greenhouse_query_identity
         query_identity=compare_identity(canonical)
         query_key=hashlib.sha256(dumps(['requisition_query',query_identity]).encode()).hexdigest() if query_identity else None
         now=self.now()

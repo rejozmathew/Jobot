@@ -3,15 +3,20 @@
  const visible=e=>!!e&&e.isConnected&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden';
  const native=e=>!e.closest('.simplify-jobs-shadow-root,[id*="simplify"]');
  const text=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
+ const linkedin=location.hostname==='linkedin.com'||location.hostname.endsWith('.linkedin.com');
+ const liModal=linkedin?[...document.querySelectorAll('.jobs-easy-apply-modal,[data-test-modal-id="easy-apply-modal"],[role="dialog"]')]
+  .find(e=>visible(e)&&(e.matches('.jobs-easy-apply-modal,[data-test-modal-id="easy-apply-modal"]')||e.querySelector('[data-test-form-element]'))):null;
+ const liGroup=e=>liModal?.contains(e)?e.closest('[data-test-form-element]'):null;
+ const liQuestion=e=>text(liGroup(e)?.querySelector('legend,[data-test-form-builder-radio-button-form-component__title],label'));
  const label=e=>e.getAttribute('aria-label')||[...(e.labels||[])].map(text).join(' ')||
   (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)).filter(Boolean).map(text).join(' ')||
   e.getAttribute('placeholder')||text(e.closest('label'))||'';
- const nodes=()=>[...document.querySelectorAll('input:not([type="hidden"]),textarea,select,button,a,[role="button"],[role="checkbox"],[role="radio"],[role="combobox"]')].filter(e=>visible(e)&&native(e));
+ const nodes=()=>[...(liModal||document).querySelectorAll('input:not([type="hidden"]),textarea,select,button,a,[role="button"],[role="checkbox"],[role="radio"],[role="combobox"]')].filter(e=>visible(e)&&native(e));
  const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
  const checked=e=>['checkbox','radio'].includes(e.getAttribute('role'))?e.getAttribute('aria-checked')==='true':!!e.checked;
  const descriptor=e=>({tag:e.tagName,type:e.type||'',role:e.getAttribute('role')||'',name:e.name||'',
   label:label(e).slice(0,300),text:/^(BUTTON|A)$/.test(e.tagName)||e.getAttribute('role')==='button'?text(e).slice(0,200):'',
-  automation_id:e.getAttribute('data-automation-id')||''});
+  automation_id:e.getAttribute('data-automation-id')||'',...(liGroup(e)?{question:liQuestion(e)}:{})});
  const key=e=>JSON.stringify(descriptor(e));
  let scope=window.__jobbotFormScope;
  if(!scope||scope.url!==location.href)scope={url:location.href,keys:new Map(),inventory:new Map(),controls:new Map(),bindings:new Map()};
@@ -72,19 +77,25 @@
  const privateControl=e=>e.type==='password'||privateInputs.has(e)||/^(INPUT|TEXTAREA)$/.test(e.tagName)&&codePattern.test([e.name,e.id,e.autocomplete,label(e)].join(' '));
  scope.privateControl=privateControl;
  if(args.method==='verification')return {groups};
- const required=e=>!!e.required||e.getAttribute('aria-required')==='true'||/\*\s*$/.test(label(e));
+ const required=e=>!!e.required||e.getAttribute('aria-required')==='true'||/\*\s*$/.test(label(e))||/\*\s*$/.test(liQuestion(e));
  const choice=e=>e.tagName==='SELECT'||e.getAttribute('role')==='combobox'||['listbox','menu','true'].includes(e.getAttribute('aria-haspopup'));
- const meaningful=value=>!!value&&!/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(value);
+ const meaningful=value=>!!value&&!/^(?:select(?: one| an option)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(value);
  const selectedValue=e=>{
   const workday=window.__jobbotWorkdayScope;
   if(workday?.url===location.href&&workday.selectedValue)return workday.selectedValue(e);
   if(e.tagName==='SELECT'){
    const value=e.selectedOptions[0]?.text||'';
-   return e.value&&!/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(value)?value:'';
+   return e.value&&meaningful(value)?value:'';
   }
   if(choice(e)){
    const value=e.getAttribute('aria-valuetext')||(!['INPUT','TEXTAREA'].includes(e.tagName)?text(e):'');
    if(meaningful(value))return value;
+   // LinkedIn leaves a committed typeahead choice in the input. A typed filter
+   // alone is insufficient: retain only a dispatched observed option whose menu
+   // closed and whose exact input value still matches, on this same DOM node.
+   const receipt=linkedin&&scope.linkedinSelections?.get(e);
+   if(receipt&&e.isConnected&&e.value===receipt.label&&e.getAttribute('aria-expanded')!=='true'&&
+      !receipt.menu?.getClientRects().length)return receipt.label;
    // React-select retains its committed label beside an empty/filter input.
    // Stay in the smallest ancestor containing this one control, never in a
    // portalled menu or an adjacent field. Highlighted options are not answers.
@@ -170,7 +181,7 @@
    const group=e.closest('fieldset,[role="radiogroup"]');
    const field=e.closest('[data-automation-id^="formField"],[data-automation-id="question"],[role="group"]');
    const fieldLabel=field?.querySelector('label,[data-automation-id="richText"],[data-automation-id="questionLabel"]');
-   let question=(group?.querySelector('legend')&&text(group.querySelector('legend')))||
+   let question=liQuestion(e)||(group?.querySelector('legend')&&text(group.querySelector('legend')))||
     group?.getAttribute('aria-label')||text(fieldLabel)||ids.map(text).join(' ')||[...(e.labels||[])].map(text).join(' ')||label(e);
    const identity=question+' '+(e.name||'')+' '+(e.autocomplete||'');
    if(/password|passwd|\botp\b|token|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card|e.?mail|phone|postal|street.?address/i.test(identity))continue;
@@ -209,20 +220,20 @@
    label:choice(el)?selectedValue(el):(/^(INPUT|TEXTAREA)$/.test(el.tagName)?el.value:text(el))};
  if(args.method==='question'){
   const role=el.getAttribute('role'),group=el.closest('fieldset,[role="radiogroup"],[role="group"]');
-  const question=(owner===window.__jobbotWorkdayScope&&owner.questionText?.(el))||
+  const question=liQuestion(el)||(owner===window.__jobbotWorkdayScope&&owner.questionText?.(el))||
    text(group?.querySelector('legend'))||group?.getAttribute('aria-label')||label(el);
   let kind=el.tagName==='SELECT'||role==='combobox'||['listbox','menu','true'].includes(el.getAttribute('aria-haspopup'))?'select':
    el.type==='checkbox'||role==='checkbox'?'check':el.type==='radio'||role==='radio'?'radio':'text';
   if(kind==='text'&&!['INPUT','TEXTAREA'].includes(el.tagName))return {reason:'question_control_unrecognized'};
   let options=[];
   if(el.tagName==='SELECT')options=[...el.options].filter(o=>!o.disabled&&!o.parentElement.disabled&&o.value!==''&&
-    !/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(o.text.trim())).map(o=>({value:o.value,label:o.text.trim()}));
+    meaningful(o.text.trim())).map(o=>({value:o.value,label:o.text.trim()}));
   const radios=kind==='radio'?[...(group||document).querySelectorAll('input[type="radio"],[role="radio"]')]
     .filter(e=>visible(e)&&enabled(e)&&(!el.name||e.name===el.name)):[];
   if(kind==='radio')options=radios.map(e=>({value:e.value||label(e),label:label(e),ref:remember(e)}));
   const actual=value().value.trim();
   const answered=kind==='check'?checked(el):kind==='radio'?radios.some(e=>e.checked||e.getAttribute('aria-checked')==='true'):
-   !!actual&&!/^(?:select(?: one)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(actual);
+   meaningful(actual);
   return {field:el.name||el.id||question,question,kind,options,
    required:required(el)||owner===window.__jobbotWorkdayScope&&/\*\s*$/.test(question),answered,
    context:{page:window.__jobbotWorkdayScope?.step||'form',section:text(group?.querySelector('legend'))||
@@ -272,7 +283,15 @@
   const options=[...menu.querySelectorAll('[role="option"],[role="menuitem"],option,[data-automation-id="promptOption"]')]
    .filter(visible).map(e=>({ref:remember(e),label:text(e),value:e.getAttribute('data-value')||e.value||text(e),enabled:enabled(e)}));
   scope.lastOptions=options;
+  if(linkedin)scope.linkedinOptionMenu=menu;
   return {options};
+ }
+ if(args.method==='selection_dispatched'){
+  if(linkedin&&el.tagName==='INPUT'&&choice(el)&&scope.lastOptions?.some(o=>o.ref===args.option_ref&&o.label===args.label)){
+   scope.linkedinSelections=scope.linkedinSelections||new WeakMap();
+   scope.linkedinSelections.set(el,{label:args.label,menu:scope.linkedinOptionMenu});
+  }
+  return {recorded:true};
  }
  if(args.method==='verify_select'){
   const actual=value();

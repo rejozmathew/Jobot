@@ -257,7 +257,13 @@ class WorkspaceHost:
                        'viewport':await page.evaluate('({width:innerWidth,height:innerHeight})')}
             readiness['connection_mode']='existing' if self.existing_browser else 'managed'
             readiness['navigator_webdriver']=await page.evaluate('navigator.webdriver')
-            if self.config.get('require_simplify',True):
+            from .managed_context import platform_for_url
+            linkedin=platform_for_url(job['url'])=='linkedin'
+            if linkedin:
+                from .browser_controls import observe
+                readiness['observation']=await observe(page,{'job':job,'attempt':{}})
+                readiness['simplify']='optional_native_helper'
+            if self.config.get('require_simplify',True) and not linkedin:
                 from .simplify_boundary import SimplifyBoundary
                 boundary=SimplifyBoundary(page,budget_seconds=5)
                 deadline=time.monotonic()+12
@@ -420,8 +426,9 @@ class WorkspaceHost:
                     'instruction':('The application tab is reopening; the shared browser and your other tabs stay open. '
                         if self.existing_browser else 'The owned browser is restarting. ')+
                         'This is the same attempt. Read status until connected, then inspect and continue; this is not an application outcome.'}
-        if op=='fast_forward':
-            from .workday_fast import advance
+        if op in ('fast_forward','linkedin_easy_apply'):
+            if op=='linkedin_easy_apply':from .linkedin_easy_apply import advance
+            else:from .workday_fast import advance
             return advance(cfg,client,own,dict(params,target_id=session['target_id']))
         if op=='account_lock':return service.coordinate_account(session['id'],release=params.get('release',False))
         if op in ('browser','credentials'):

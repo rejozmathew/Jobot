@@ -62,12 +62,30 @@ def icims_identity(url):
     return None
 
 
+def linkedin_identity(url):
+    """Only an explicit job ID identifies a LinkedIn posting or selected search result."""
+    try:
+        p=urlsplit(canonical_url(url));host=p.hostname or ''
+        if host!='linkedin.com' and not host.endswith('.linkedin.com'):return None
+        match=re.fullmatch(r'/jobs/view/(?:[^/]*-)?(\d+)',p.path)
+        values=[v for k,v in parse_qsl(p.query) if k=='currentJobId']
+        if values and (len(set(values))!=1 or not values[0].isdigit()):return None
+        if match:
+            if values and values[0]!=match[1]:return None
+            return ('linkedin',match[1])
+        if values and re.match(r'^/jobs/(?:search|collections)(?:/|$)',p.path):return ('linkedin',values[0])
+    except (ValueError,ProtocolError):pass
+    return None
+
+
 def same_job_url(left, right):
     """Compare known ATS identities; preserve other portals' opaque URL queries."""
     try:
         a, b = urlsplit(canonical_url(left)), urlsplit(canonical_url(right))
     except (ValueError, ProtocolError):
         return False
+    li_left,li_right=linkedin_identity(left),linkedin_identity(right)
+    if li_left or li_right:return bool(li_left and li_right and li_left==li_right)
     wd_left,wd_right=workday_identity(left),workday_identity(right)
     if wd_left or wd_right:return bool(wd_left and wd_right and wd_left==wd_right)
     icims_left,icims_right=icims_identity(left),icims_identity(right)
@@ -143,6 +161,8 @@ def workday_identity(url):
 
 def job_identity(url):
     """One comparison identity; stored URL hashes and historical rows stay intact."""
+    identity = linkedin_identity(url)
+    if identity:return identity
     identity = workday_identity(url)
     if identity:return identity
     identity = icims_identity(url)
@@ -154,7 +174,7 @@ def job_identity(url):
 
 def job_requisition(job):
     """Confirmation consumes the same complete requisition as job ownership."""
-    identity=workday_identity(job['url'])
+    identity=linkedin_identity(job['url']) or workday_identity(job['url'])
     return identity[-1] if identity else job.get('requisition_id') or ''
 
 
@@ -186,6 +206,8 @@ def application_match(job_url, candidate_url):
     try:
         expected, actual = urlsplit(job_url), urlsplit(candidate_url)
         different = expected.netloc.casefold() != actual.netloc.casefold()
+        li_expected,li_actual=linkedin_identity(job_url),linkedin_identity(candidate_url)
+        if li_expected and li_actual:different=li_expected!=li_actual
         wd_expected, wd_actual = workday_identity(job_url), workday_identity(candidate_url)
         if wd_expected and wd_actual:different = wd_expected != wd_actual
         gh_expected, gh_actual = query_requisition(job_url), query_requisition(candidate_url)
@@ -204,6 +226,8 @@ def public_url(url):
 
 def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
     try:
+        li_expected,li_actual=linkedin_identity(job_url),linkedin_identity(candidate_url)
+        if li_expected or li_actual:return bool(li_expected and li_actual and li_expected==li_actual)
         workday_host=urlsplit(str(job_url).strip()).hostname or ''
         if workday_host.casefold().endswith('.myworkdayjobs.com') and workday_identity(job_url):
             return is_workday_application_scope(job_url, candidate_url)

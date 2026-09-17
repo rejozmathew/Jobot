@@ -567,6 +567,23 @@ leases. Local execution uses OS/database access, not an unauthenticated network 
 
 ## Helper map and canonical procedure
 
+LinkedIn is a recognized platform, with application type observed separately.
+Confirmed Easy Apply routes through `linkedin_easy_apply` (native Hermes and
+portable session call), registered in `hermes_plugin` and `workspace_host`.
+Startup, writer observations and shared snapshots supply the LinkedIn reference
+and next operation. The helper attaches to the existing owned target and uses
+shared writer, answer, selected-document and submission services. External Apply
+retains its employer target handoff/ATS routing; bridge receipts and job/attempt
+history are not migrated or rewritten. Missing direct URLs remain unclassified.
+
+| LinkedIn helper/caller | Responsibility |
+|---|---|
+| `linkedin_easy_apply.py` | Approved answer batching, selected résumé recovery, Next/Review and shared guarded Submit; called by workspace host and Hermes operation dispatcher |
+| `browser_helpers/linkedin_observe.js` | Donor-adapted modal/group/control discovery; called by shared form and writer observers, readiness and native helper |
+| `managed_identity.py:linkedin_identity` | Explicit job-ID aliases across view/search/collection URLs without replacing stored keys |
+| `third_party/godsscion-linkedin` | Pinned MIT license and source-to-local reuse map |
+
+
 | Component | Scope and consumer |
 |---|---|
 | managed.py / migration 21 / managed_redaction.provenance_text / managed_views.py | Optional per-source process/run observations and per-queue-entry origin; numeric run identifiers remain intact, secret-bearing labels are redacted, and missing attribution does not affect eligibility. Dashboard/manual CLI/application startup and discovery supply process identities at their own boundary; rediscovery retains prior observations. See SOURCE_PROCESS_ATTRIBUTION.md. |

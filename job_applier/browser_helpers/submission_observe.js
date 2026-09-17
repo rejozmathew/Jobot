@@ -7,6 +7,8 @@
  const visible=e=>!!e&&e.isConnected&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden';
  const clean=e=>(e.innerText||e.textContent||'').replace(/\s+/g,' ').trim();
  const success=/\b(?:your\s+)?application\s+(?:(?:has been|was|is)\s+)?(?:successfully\s+)?(?:submitted|received)\b|\bthank you for (?:applying|your application)\b|\byou(?:'ve| have) successfully applied\b/i;
+ const linkedin=location.hostname==='linkedin.com'||location.hostname.endsWith('.linkedin.com');
+ const accepted=text=>success.test(text)||(linkedin&&/\byour application (?:was |has been )?sent to\s+\S/i.test(text));
  const baseline=new Set(args.baseline||[]),seen=new Set();
  const document_id=window.__jobbotSubmissionDocument||(window.__jobbotSubmissionDocument=crypto.randomUUID());
  const control=args.application_ref?.startsWith('form:')?window.__jobbotFormScope?.inventory.get(args.application_ref):
@@ -27,13 +29,18 @@
    for(const el of root.querySelectorAll('h1,h2,h3,p,[role="alert"],[role="status"],[aria-live],div,span')){
     if(!visible(el)||el.matches('button,a,[role="button"]')||el.closest('button,a,[role="button"]'))continue;
     if(source==='employer'&&el.closest('.simplify-jobs-shadow-root'))continue;
-    const text=clean(el);if(text.length>700||!success.test(text))continue;
+    const text=clean(el);if(text.length>700||!accepted(text))continue;
+    if(linkedin&&source==='employer'){
+     const card=el.closest('[data-job-id],[data-occludable-job-id]');
+     if(card&&args.requisition&&(card.getAttribute('data-job-id')||card.getAttribute('data-occludable-job-id'))!==args.requisition)continue;
+     if(!card&&!el.closest('.jobs-easy-apply-modal,[role="dialog"],[role="alert"],[role="status"],[aria-live],.jobs-details,.job-view-layout'))continue;
+    }
     const row=el.closest('tr,[role="row"],[data-automation-id="applicationCard"]');
     if(row&&args.requisition&&!clean(row).includes(args.requisition))continue;
     if(source==='employer'&&/\/(?:candidatehome|userhome)(?:\/|$)/i.test(location.pathname)&&!row&&
        !el.closest('[role="alert"],[role="status"],[role="dialog"],[aria-live]'))continue;
     // Prefer the smallest message, not an ancestor containing all form text.
-    if([...el.children].some(c=>visible(c)&&success.test(clean(c))))continue;
+    if([...el.children].some(c=>visible(c)&&accepted(clean(c))))continue;
     const key=source+':'+text;found.push(key);
     if(!state.active||baseline.has(key)||seen.has(key))continue;
     seen.add(key);
