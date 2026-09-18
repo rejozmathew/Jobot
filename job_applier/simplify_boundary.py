@@ -10,14 +10,18 @@ STATES={'ready','active','complete','needs_review','unsupported','login_required
 
 
 class SimplifyBoundary:
-    def __init__(self,page,*,budget_seconds=45,poll_seconds=0.1,clock=None,sleeper=None,fast=False):
+    def __init__(self,page,*,budget_seconds=45,poll_seconds=0.1,clock=None,sleeper=None,fast=False,scope=None,checkpoint=None):
         if not 0<budget_seconds<=120 or not 0<poll_seconds<=5:raise ValueError('Invalid Simplify budget')
         self.page=page;self.budget=budget_seconds;self.poll=poll_seconds
         self.clock=clock or time.monotonic;self.sleep=sleeper or asyncio.sleep
         self.attempted=set();self.deadline=None;self.fast=bool(fast)
         self.retries={}
+        self.scope=scope;self.checkpoint=checkpoint
 
     async def observe(self):
+        if self.checkpoint:await self.checkpoint()
+        if self.scope:
+            await self.page.evaluate_function('(owner)=>{window.__jobbotGreenhouseOwner=owner}',self.scope)
         timeout=self.budget if self.deadline is None else max(0.05,min(self.budget,self.deadline-self.clock()))
         raw=await asyncio.wait_for(self.page.evaluate(OBSERVE),timeout=timeout)
         if not isinstance(raw,dict) or raw.get('status') not in STATES or not isinstance(raw.get('url'),str):
@@ -36,6 +40,12 @@ class SimplifyBoundary:
             result['workday']=True
             result['autofill_attempted']=raw.get('autofill_attempted') is True
             result['autofill_page_key']=raw.get('autofill_page_key')
+        if raw.get('greenhouse'):
+            result.update(greenhouse=True,document_id=raw.get('document_id'),autofill_receipt=raw.get('autofill_receipt') or {})
+            from .browser_controls import FORM,remaining_submission_work
+            native=await self.page.evaluate_function(FORM,{'method':'observe'})
+            result['required_residual_count']=len(remaining_submission_work(native)['required_fields'])
+            result['native_structure']=native.get('structure')
         result['activity']=raw.get('activity') or {}
         if 'review_count' in raw and (raw['review_count'] is None or isinstance(raw['review_count'], int)):
             result['review_count']=raw['review_count']
@@ -45,6 +55,9 @@ class SimplifyBoundary:
             result['writer_safe']=bool(raw['writer_safe'])
         else:
             result['writer_safe']=raw['status'] not in ('active','unknown')
+        result['observed_writer_safe']=result['writer_safe']
+        if result.get('autofill_receipt',{}).get('state') in ('dispatching','dispatched','active','uncertain'):
+            result['writer_safe']=False
         return result
 
     @staticmethod
@@ -56,6 +69,15 @@ class SimplifyBoundary:
             return {'action':'fallback','reason':'workday_native_authentication_required'}
         if status in ('unsupported','missing','login_required'):return {'action':'fallback','reason':status}
         if status=='unknown':return {'action':'fallback','reason':'controls_unavailable'}
+        if observation.get('greenhouse'):
+            receipt=observation.get('autofill_receipt') or {}
+            count=receipt.get('automatic_count',receipt.get('dispatch_count',0))
+            if receipt.get('state') in ('dispatching','dispatched','active','uncertain'):
+                return {'action':'wait','reason':'autofill_settlement_required'}
+            if (not receipt.get('repairs_started') and controls.get('autofill',{}).get('enabled') and
+                (count==0 or count==1 and observation.get('required_residual_count',0)>0)):
+                return {'action':'autofill','reason':'greenhouse_initial_pass' if count==0 else 'greenhouse_residual_second_pass'}
+            return {'action':'fallback','reason':'greenhouse_native_residual_batch'}
         if controls.get('continue',{}).get('enabled'):
             return {'action':'continue','reason':'prefer_extension_continue'}
         if controls.get('autofill_skills',{}).get('enabled'):
@@ -95,7 +117,7 @@ class SimplifyBoundary:
                 'Inspect the actual screen/options, recover with scoped browser tools and resume filling or advancement. '
                 'A helper limit is not a terminal application outcome; keep working on the open session.')}
 
-    async def perform(self,operation,*,retry=False,credential_evidence=None):
+    async def perform(self,operation,*,retry=False,credential_evidence=None,automatic=False):
         if operation not in ('autofill','autofill_skills','continue','start','sign_in','stop'):raise ValueError('Unsupported Simplify operation')
         self.execution='not_executed'
         self.deadline=self.clock()+self.budget
@@ -114,12 +136,21 @@ class SimplifyBoundary:
             and bool(before.get('controls',{}).get('autofill',{}).get('enabled'))
             and self.retries.get(page_key,0)<1)
         decision=self.decide(before,already and not can_retry,fast=self.fast)
+        greenhouse=before.get('greenhouse') and operation=='autofill'
+        receipt=before.get('autofill_receipt') or {}
+        pending=greenhouse and receipt.get('state') in ('dispatching','dispatched','active','uncertain')
+        if greenhouse:
+            # Automatic scheduling is document-scoped. Explicit recovery remains
+            # available after those passes; it is not an application retry veto.
+            already=False;can_retry=False
+            if not automatic and not pending and before['status'] in ('ready','complete','needs_review'):
+                decision={'action':'autofill','reason':'explicit_greenhouse_autofill'}
         # An explicit first Autofill can repair failed advancement even when
         # Continue remains enabled. The default recommendation still advances.
         if (operation=='autofill' and before.get('workday') and not already and
             before['status'] in ('ready','complete','needs_review') and before['controls'].get('autofill',{}).get('enabled')):
             decision={'action':'autofill','reason':'first_page_autofill_before_manual_repair'}
-        active=before['status']=='active';clicked=False
+        active=before['status']=='active' or pending;clicked=False
         try:
             if operation=='stop':
                 control=before['controls']['stop']
@@ -134,10 +165,14 @@ class SimplifyBoundary:
                 self.execution='clicked';previous=None
                 while self.clock()<self.deadline:
                     current=await self.observe()
-                    settled=current.get('panel') and current.get('writer_safe') and current['status'] in ('ready','complete','needs_review','unsupported','login_required')
-                    if settled and previous==current:
+                    settled=current.get('panel') and current.get('observed_writer_safe',current.get('writer_safe')) and current['status'] in ('ready','complete','needs_review','unsupported','login_required')
+                    signature=tuple(current.get(k) for k in ('status','fingerprint','page_ref','native_structure'))
+                    if settled and previous==signature:
+                        if current.get('greenhouse'):
+                            await self.page.evaluate_function('(state)=>{const r=window.__jobbotGreenhouseDocument?.current;if(r)r.state=state}', 'stopped')
+                            current=await self.observe()
                         return self._result(current,True,'idle','observed_stop_settled')
-                    previous=current
+                    previous=signature
                     await self.sleep(self.poll)
                 return self._result(current,False,'unknown','stop_settlement_unconfirmed')
             if operation=='sign_in' and not active:
@@ -180,11 +215,27 @@ class SimplifyBoundary:
                     self.retries[page_key]=self.retries.get(page_key,0)+1
                 elif operation in ('autofill','autofill_skills','start'):
                     self.attempted.add(page_key)
-            stable_count=0;saw_active_or_change=False
+            stable_count=0;saw_active_or_change=bool(active and before['status']=='active' or greenhouse and receipt.get('saw_activity'))
+            prior_native=None;stable_since=self.clock()
             while self.clock()<self.deadline:
                 current=await self.observe();changed=self._changed(before,current)
                 if current['status']=='active' or changed:
                     saw_active_or_change=True
+                if greenhouse:
+                    signature=(current.get('fingerprint'),current.get('native_structure'),current.get('status'))
+                    if signature!=prior_native:stable_count=0;stable_since=self.clock()
+                    stable_count+=1;prior_native=signature
+                    elapsed=self.clock()-(self.deadline-self.budget)+receipt.get('pending_age_ms',0)/1000
+                    # Three fresh native observations, spanning 400ms, after
+                    # real work; otherwise allow five seconds for a late start.
+                    if (current['status'] in ('ready','complete','needs_review','unsupported','missing') and
+                        not current.get('activity',{}).get('explicit_writer') and stable_count>=3 and
+                        self.clock()-stable_since>=.4 and (saw_active_or_change or elapsed>=5)):
+                        state='settled' if saw_active_or_change else 'no_progress'
+                        await self.page.evaluate_function('(state)=>{const r=window.__jobbotGreenhouseDocument?.current;if(r){r.state=state;r.settled_at=Date.now()}}',state)
+                        current=await self.observe()
+                        return self._result(current,changed,'idle','observed_change' if saw_active_or_change else 'no_observable_progress')
+                    await self.sleep(max(.2,self.poll));continue
                 if operation in ('autofill','autofill_skills','sign_in') and current['status'] in ('complete','needs_review'):
                     # Workday can leave the prior "complete" panel visible
                     # briefly after a click. Give its async fill time to start.

@@ -361,6 +361,11 @@ class CDPPage:
     async def press_key(self, key: str, vk: int = 0) -> None:
         await _press_key(self._session,key,vk)
 
+    async def insert_text(self, text: str) -> None:
+        """Trusted text insertion into the explicitly focused current input."""
+        if not isinstance(text, str):raise ValueError('text_required')
+        await self._session.call('Input.insertText', {'text': text})
+
     async def click_observed(self, validator: str, args: dict) -> dict:
         """Activate a validated owned-page control through browser input events."""
         prepared = dict(args, prepare_pointer=True)

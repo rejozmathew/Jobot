@@ -24,7 +24,7 @@ def test_platform_and_confirmed_routing_are_separate():
     assert next_operation('linkedin', {'linkedin': {'kind': 'easy_apply'}})['operation'] == 'linkedin_easy_apply'
     assert next_operation('linkedin', {'linkedin': {'kind': 'unknown'}})['operation'] == 'browser'
     assert next_operation('linkedin', {'linkedin': {'kind': 'external', 'apply': {'ref': 'form:external', 'enabled': True}}})['parameters'] == {'method': 'click', 'ref': 'form:external'}
-    assert next_operation('greenhouse', {'status': 'ready', 'controls': {'autofill': {'enabled': True}}})['operation'] == 'browser'
+    assert next_operation('greenhouse', {'status': 'ready', 'controls': {'autofill': {'enabled': True}}})['operation'] == 'greenhouse_advance'
 
 
 def test_linkedin_job_identity_not_entire_hostname():

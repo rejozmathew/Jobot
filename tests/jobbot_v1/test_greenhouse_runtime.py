@@ -11,7 +11,7 @@ from test_greenhouse_recovery import form_dom
 
 @pytest.mark.parametrize('platform,operation,parameters', [
     ('workday','fast_forward',{'seconds':60}),
-    ('greenhouse','browser',{'method':'simplify','action':'autofill'}),
+    ('greenhouse','greenhouse_advance',{'seconds':60}),
     ('unknown','browser',{'method':'simplify','action':'autofill'}),
 ])
 def test_initial_filling_routes_by_platform_and_enabled_control(platform,operation,parameters):
@@ -21,10 +21,9 @@ def test_initial_filling_routes_by_platform_and_enabled_control(platform,operati
 
 def test_active_writer_and_settled_review_have_distinct_guidance():
     active=browser_controls.next_operation('greenhouse',{'status':'active','controls':{'autofill':{'enabled':True}}})
-    assert active['operation']=='browser_observe' and active['parameters']=={}
+    assert active['operation']=='greenhouse_advance' and active['parameters']=={'seconds':60}
     review=browser_controls.next_operation('greenhouse',{'status':'needs_review','controls':{}})
-    assert review['parameters']=={'method':'snapshot'}
-    assert 'remaining' in review['instruction'].lower()
+    assert review['operation']=='greenhouse_advance' and review['parameters']=={'seconds':60}
 
 
 def test_metadata_enrichment_is_idempotent_and_preserves_explicit_labels_and_outcomes(tmp_path):

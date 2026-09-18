@@ -15,8 +15,32 @@ In approved submit mode, after material fields are correct and submission intent
 
 Start immediately after the canonical skill with `wait_seconds:0`, read this
 reference while the browser prepares, then use the returned `next_operation`.
-Enabled Autofill uses shared `browser simplify`, not Workday `fast_forward`.
-Readiness and first Autofill dispatch are separate timing observations.
+Use `jobbot` operation `greenhouse_advance` with `{"seconds":60}`. The session
+host resolves ownership and the accepted current application document, including
+an embed or an employer reached from LinkedIn. The helper waits for the native
+form, observes existing Simplify activity, dispatches the first eligible fill and
+one second automatic pass only for actual required residuals, then batches
+ordinary approved answers. A call slice returns continuation, never an outcome.
+Explicit supported Autofill recovery remains available after automatic passes.
+Readiness and actual Autofill dispatch counts are separate observations.
+
+Return all unresolved semantic answers together in one subsequent call:
+
+```json
+{"operation":"greenhouse_advance","parameters":{"seconds":60,"answers":[
+  {"ref":"<current ref>","question_key":"<exact returned key>",
+   "answer":{"value":"<offered value>","label":"<offered label>"},
+   "basis":"<approved profile/saved-answer reference or approved-fact basis>"}
+]}}
+```
+
+Text answers are strings and checkbox answers are booleans. Code opens, searches,
+commits, reacquires and verifies each widget inside the batch. Full question labels
+and current options are returned only for unresolved decisions; control failures
+are separate from missing facts. Private verification stays in the existing
+credentials/mail flow. Stale bindings require fresh observed refs. Do not turn
+routine fields into a model/tool exchange per control. The same shared
+`browser select` remains available for executor-led control recovery.
 
 For a React-style combobox, `browser select` checks the selected label beside
 the search input and reacquires the control after a rerender. An open widget
@@ -37,7 +61,9 @@ If the expected email code remains undelivered for about 1–2 minutes from the
 employer's request, after checking the exact recipient, configured mailbox,
 delayed mail and any offered resend, use the shared
 refresh-and-refill recovery in the same owned tab/attempt. Let Simplify fill the
-new form, correct actual residual questions, and submit promptly. A refreshed
+new form through `greenhouse_advance`, which restores approved profile/saved
+answers and previously verified plans with fresh refs, then submits through the
+existing service. Do not replay arbitrary historical captured answers or old codes. A refreshed
 Greenhouse form may submit directly or request verification again; inspect its
 actual response. Neither slow filling, an upload rejection nor the presence of
 an email-code prompt proves why Greenhouse requested verification.

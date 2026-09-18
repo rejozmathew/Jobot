@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.15
+version: 0.5.16
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -114,9 +114,12 @@ LinkedIn uses `references/linkedin.md`, and Workday uses the canonical `workday-
 starting hint; follow the actual page and controls at each step.
 
 Read `next_operation` from readiness/status and fresh browser observations.
-Workday routes to `fast_forward` with `{"seconds":60}`. Greenhouse and other
-shared forms route to `browser` with `{"method":"simplify","action":"autofill"}`
-when the observed Autofill is enabled. Act promptly after readiness. Do not call
+Workday routes to `fast_forward` with `{"seconds":60}`. Greenhouse routes to
+`greenhouse_advance` with `{"seconds":60}`: Simplify settlement, one eligible
+second pass, approved residual batches, grouped semantic questions and shared
+submission. See `references/greenhouse.md` for the grouped answer plan and
+refresh continuation. Other shared forms use `browser` with
+`{"method":"simplify","action":"autofill"}` when Autofill is enabled. Act promptly after readiness. Do not call
 the Workday runner on Greenhouse. `browser_observe` accepts empty parameters;
 `method` belongs to `browser`. After execution begins, status requests a fresh
 observation instead of reusing the original document's Autofill control.

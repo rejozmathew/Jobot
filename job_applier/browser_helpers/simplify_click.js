@@ -30,6 +30,17 @@
     // turn a completed (or uncertain) fill into a new first fill on this page.
     scope.autofillAttempts.add(scope.autofillPageKey);
   }
-  el.click();
+  const receipt=scope.greenhouse&&found.kind==='autofill'?scope.greenhouseReceipt:null;
+  if(receipt){
+    receipt.state='dispatching';receipt.started_at=Date.now();receipt.saw_activity=false;
+  }
+  try{el.click();}catch(error){
+    if(receipt)receipt.state='uncertain';
+    return {status:'uncertain',reason:'autofill_dispatch_uncertain'};
+  }
+  if(receipt){
+    receipt.dispatch_count++;receipt.automatic_count++;
+    receipt.state='dispatched';
+  }
   return {status:'clicked',clicked:true};
 }

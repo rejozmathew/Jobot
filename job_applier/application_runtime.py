@@ -470,6 +470,10 @@ def browser_action(config,client,ownership,package,target_id,params):
                 # Reload is explicit cancellation, not a form write pretending
                 # that Simplify settled. action_start still serializes writers.
                 client.call('writer_state',**ownership,state='unknown')
+                client.call('event',**ownership,event_id=uid(),event_type='recovery',action_id=aid,
+                    observed_at=datetime.now(timezone.utc).isoformat(),payload={'operation':'reload',
+                        'reason':params.get('recovery_reason','executor_requested_page_recovery'),
+                        'evidence':'Reloading the owned application document in the same attempt'})
                 result=await page.reload()
                 succeeded=result.get('document_replaced') is True
                 if succeeded:client.call('writer_state',**ownership,state='idle')
@@ -545,10 +549,12 @@ def browser_action(config,client,ownership,package,target_id,params):
             if method=='simplify':
                 from .simplify_boundary import SimplifyBoundary
                 from .browser_controls import simplify_document
-                document,_,selected=await simplify_document(page,ref=params.get('ref'),operation=params.get('action','autofill'))
+                document,extension,selected=await simplify_document(page,ref=params.get('ref'),operation=params.get('action','autofill'))
                 client.call('writer_state',**ownership,state='active')
                 dispatched_at=datetime.now(timezone.utc).isoformat()
-                result=await SimplifyBoundary(document,budget_seconds=45,fast=True).perform(params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
+                result=await SimplifyBoundary(document,budget_seconds=45,fast=True,
+                    scope={'attempt_id':ownership['attempt_id'],'target_id':target_id} if extension.get('greenhouse') else None).perform(
+                        params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
                 if params.get('action','autofill')=='autofill' and result.get('execution')=='clicked':record_autofill(dispatched_at)
                 if selected and selected.get('recovery'):result['control_recovery']=selected['recovery']
                 if redirected_from:

@@ -3,6 +3,15 @@
   const visible = el => { const r=el.getBoundingClientRect(); return r.width>0 && r.height>0 && getComputedStyle(el).visibility!=='hidden'; };
   const publicUrl=location.origin+location.pathname;
   const workday=/^https:\/\/[^/]+\.myworkdayjobs\.com\//i.test(publicUrl);
+  const greenhouse=/(^|\.)greenhouse\.io$/.test(location.hostname||'')||/[?&]gh_jid=/.test(location.href)||!!window.__jobbotGreenhouseOwner;
+  let receipt=null,documentId=null;
+  if(greenhouse){
+    const doc=window.__jobbotGreenhouseDocument||(window.__jobbotGreenhouseDocument={id:crypto.randomUUID(),cycles:new Map()});
+    documentId=doc.id;
+    const key=JSON.stringify([window.__jobbotGreenhouseOwner?.attempt_id||null,window.__jobbotGreenhouseOwner?.target_id||null,doc.id]);
+    if(!doc.cycles.has(key))doc.cycles.set(key,{dispatch_count:0,automatic_count:0,state:'none',repairs_started:false});
+    receipt=doc.cycles.get(key);doc.current=receipt;doc.key=key;
+  }
   let hosts=Array.from(document.querySelectorAll('.simplify-jobs-shadow-root'));
   if(!hosts.length && document.querySelector('.simplify-jobs-shadow-root')) hosts=[document.querySelector('.simplify-jobs-shadow-root')];
   const roots=hosts.map(h=>h && (h.shadowRoot || (h.tagName ? h : null))).filter(Boolean);
@@ -12,6 +21,8 @@
   // Employer credentials belong to the native Workday account routine. Recheck
   // the live form at click time too: it can appear after an extension snapshot.
   scope.workday=workday;
+  scope.greenhouse=greenhouse;
+  scope.greenhouseReceipt=receipt;
   scope.nativeAuthenticationRequired=()=>workday&&(/\/login\/?$/i.test(location.pathname)||
     [...document.querySelectorAll('input[type="password"],button,a,[role="button"]')].some(e=>
       visible(e)&&!e.closest?.('.simplify-jobs-shadow-root,[hidden]')&&
@@ -192,7 +203,12 @@
     else status='unknown';
     if(declared && ['ready','active','complete','needs_review','unsupported','login_required'].includes(declared)) status=declared;
   }
+  if(receipt&&status==='active'){
+    if(receipt.state==='none'){receipt.external_pass_observed=true;receipt.automatic_count=Math.max(1,receipt.automatic_count);receipt.started_at=Date.now();}
+    receipt.state='active';receipt.saw_activity=true;
+  }
   return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,inventory,login_kind,
+    ...(greenhouse?{greenhouse:true,document_id:documentId,autofill_receipt:{...receipt,pending_age_ms:receipt.started_at?Math.max(0,Date.now()-receipt.started_at):0}}:{}),
     ...(workday?{workday:true,autofill_page_key:scope.autofillPageKey,autofill_attempted:scope.autofillAttempts.has(scope.autofillPageKey)}:{}),
     native_authentication_required:scope.nativeAuthenticationRequired()||workday&&
       ['sign_in','create_account','create_account_autofill'].some(k=>controls[k].enabled),

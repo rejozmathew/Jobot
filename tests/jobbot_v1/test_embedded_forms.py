@@ -268,6 +268,10 @@ def test_embedded_simplify_controls_route_to_their_observed_document(tmp_path):
             assert document is child or document.frame_id==child.frame_id
             result=await document.evaluate_function(CLICK,{'ref':local['ref'],'operation':'autofill','url':observed['url'],'page_ref':observed['page_ref']})
             assert result['clicked'],result
+            # A direct shared click leaves a document receipt. A new helper first
+            # settles it instead of dispatching over potentially delayed work.
+            settled=await SimplifyBoundary(document,budget_seconds=7).perform('autofill')
+            assert settled['execution']=='not_executed' and settled['native_takeover_authorized'],settled
             await child.evaluate("document.querySelector('.simplify-jobs-shadow-root').shadowRoot.innerHTML='<button>Autofill this page</button>';document.querySelector('.simplify-jobs-shadow-root').shadowRoot.querySelector('button').onclick=()=>document.querySelector('.simplify-jobs-shadow-root').shadowRoot.innerHTML='<p>Autofill complete</p>'")
             document,_,_=await simplify_document(page,operation='autofill')
             result=await SimplifyBoundary(document,budget_seconds=1).perform('autofill')

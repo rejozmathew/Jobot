@@ -487,7 +487,8 @@ const context = {{
     getElementById: (id) => getEl(id),
     createElement: (tag) => new FakeElement(tag),
     createTextNode: (text) => new FakeElement('SPAN', text),
-    querySelectorAll: (sel) => []
+    querySelectorAll: (sel) => [],
+    querySelector: (sel) => sel.startsWith('[data-job-sort=') ? {{dataset: {{label: 'Created'}}}} : null
   }},
   Intl: globalThis.Intl,
   Date: globalThis.Date,

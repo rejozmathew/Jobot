@@ -14,6 +14,9 @@ def next_operation(platform, observed=None):
     if platform=='workday':
         return {'operation':'fast_forward','parameters':{'seconds':60},
                 'instruction':'Continue the owned Workday application with its routine runner.'}
+    if platform=='greenhouse' or observed.get('greenhouse'):
+        return {'operation':'greenhouse_advance','parameters':{'seconds':60},
+                'instruction':'Batch the owned Greenhouse form with Simplify and approved residual answers; return one grouped answer plan for unresolved questions and resume this operation.'}
     if status in ('active','unknown'):
         return {'operation':'browser_observe','parameters':{},
                 'instruction':'Observe the current writer until it settles. Inspect an unusable page with the shared recovery controls.'}
@@ -134,7 +137,16 @@ async def observe_writers(page,package):
     from .simplify_boundary import SimplifyBoundary
     from .managed_context import platform_for_url
     from .cdp_client import CDPPage
-    root=await SimplifyBoundary(page,budget_seconds=5).observe()
+    async def read(document):
+        value=await SimplifyBoundary(document,budget_seconds=5).observe()
+        if value.get('greenhouse'):
+            scope={'attempt_id':package.get('attempt',{}).get('id'),'target_id':getattr(page,'target_id',None)}
+            if scope['attempt_id'] is not None:
+                value=await SimplifyBoundary(document,budget_seconds=5,scope=scope).observe()
+            if value.get('autofill_receipt',{}).get('state') in ('dispatching','dispatched','active','uncertain'):
+                value=dict(value,status='active',writer_safe=False)
+        return value
+    root=await read(page)
     if platform_for_url(package['job']['url'])=='linkedin' and platform_for_url(await page.evaluate('location.href'))=='linkedin':
         from .linkedin_easy_apply import observe_page
         root.update(await observe_page(page,package))
@@ -145,7 +157,7 @@ async def observe_writers(page,package):
     router.frames.clear();router.diagnostics.clear()
     await router.discover()
     children=[]
-    for frame in router.frames.values():children.append((frame,await SimplifyBoundary(frame,budget_seconds=5).observe()))
+    for frame in router.frames.values():children.append((frame,await read(frame)))
     return _merge_writers(root,children,router.diagnostics)
 
 
@@ -188,7 +200,7 @@ def inventory(observed, package):
     return result
 
 
-async def form_action(page, params):
+async def form_action(page, params, *, checkpoint=None, deadline=None):
     """Set a specific value, then verify it. A repeated check never toggles off."""
     method=params['method']
     target={k:params[k] for k in ('ref','selector') if params.get(k)}
@@ -199,9 +211,20 @@ async def form_action(page, params):
         return {'committed':False,'execution':'not_executed','reason':str(exc)}
     before=await page.evaluate_function(FORM,dict(target,method='inspect'))
     if before.get('reason'):return before
+    async def check():
+        if deadline is not None and asyncio.get_running_loop().time()>=deadline:raise TimeoutError('call_slice_complete')
+        if checkpoint:await checkpoint()
+    async def pause(seconds):
+        await asyncio.sleep(seconds)
+        await check()
     async def command(operation, **values):
+        await check()
         return await page.evaluate_function(FORM,dict(target,method=operation,**values))
     async def click(ref=None):
+        await check()
+        if not ref:
+            refreshed=await command('inspect')
+            if refreshed.get('reason'):return dict(refreshed,clicked=False)
         args={'ref':ref} if ref else dict(target)
         args['expected_url']=await page.evaluate('location.href')
         return await page.click_observed(POINTER,args)
@@ -209,13 +232,13 @@ async def form_action(page, params):
         previous=None;stable=0;result={}
         # Rerendered controls are reacquired by their unique saved descriptor.
         # Two matching reads avoid treating a transient input update as a commit.
-        for _ in range(10):
+        for _ in range(30):
             result=await command('verify_select',value=value,label=label)
             signature=(result.get('value'),result.get('label'))
             stable=stable+1 if result.get('committed') and signature==previous else int(bool(result.get('committed')))
             if stable>=2:return dict(result,execution='executed')
             previous=signature
-            await asyncio.sleep(.1)
+            await pause(.1)
         options=await command('select_options')
         return dict(result,committed=False,execution='executed',reason=result.get('reason') or 'selection_mismatch',
                     options=options.get('options',[]))
@@ -228,9 +251,9 @@ async def form_action(page, params):
         return {'pressed':True,'execution':'executed','answer_verified':False}
     if method=='fill':
         result=await command('fill',value=params.get('value'))
-        await asyncio.sleep(.15)
+        await pause(.05)
         after=await command('inspect')
-        result['committed']=bool(result.get('committed') and after.get('value')==params.get('value'))
+        result['committed']=bool(result.get('committed') and after.get('value')==params.get('value') and not after.get('validation',{}).get('rejected'))
         return result
     if method=='check':
         desired=params.get('value',True)
@@ -238,15 +261,16 @@ async def form_action(page, params):
         if result.get('needs_click'):
             activated=await click()
             if not activated.get('clicked'):return activated
-            await asyncio.sleep(.15)
+            await pause(.05)
             result=await command('check',value=desired)
         return result
     if method!='select':raise ValueError('unsupported_form_operation')
     supplied={k:params[k] for k in ('value','label') if k in params}
-    if not supplied or any(not isinstance(v,str) for v in supplied.values()):raise ValueError('exact_option_required')
+    if not supplied or any(not isinstance(v,str) and not (before.get('type')=='select-multiple' and
+        isinstance(v,list) and all(isinstance(item,str) for item in v)) for v in supplied.values()):raise ValueError('exact_option_required')
     wanted=params.get('label',params.get('value'))
     if wanted in (before.get('value'),before.get('label')):
-        return {'committed':True,'unchanged':True,'value':before.get('value'),'label':before.get('label')}
+        return dict(await verify_selection(params.get('value',before.get('value')),params.get('label',before.get('label'))),unchanged=True)
     if before['tag']=='SELECT':
         result=await command('select_native',**supplied)
         if not result.get('committed'):return result
@@ -257,24 +281,36 @@ async def form_action(page, params):
     if before.get('expanded')!='true':
         activated=await click()
         if not activated.get('clicked'):return activated
-    for attempt in range(8):
+    from .managed_context import platform_for_url
+    greenhouse=platform_for_url(await page.evaluate('location.href'))=='greenhouse' or 'id' in before
+    for attempt in range(20):
         options=await command('select_options')
         matches=[o for o in options.get('options',[]) if o['enabled'] and
                  (o['label']==wanted if 'label' in params else o['value']==wanted or o['label']==wanted)]
         if len(matches)>1:return {'committed':False,'reason':'ambiguous_option'}
         if len(matches)==1:
             result=await click(matches[0]['ref'])
-            if not result.get('clicked'):return result
+            if not result.get('clicked'):
+                if result.get('execution')=='possibly_executed':return result
+                # Reacquire a detached option from the same widget's fresh menu.
+                if result.get('reason') in ('control_unavailable','control_changed_before_press','stale_control','control_not_found'):
+                    await pause(.1);continue
+                return result
             # LinkedIn input typeaheads expose their final label as input.value.
             # The document receipt distinguishes this observed option click from
             # an uncommitted typed search, without changing other ATS read-back.
-            from .managed_context import platform_for_url
             if platform_for_url(await page.evaluate('location.href'))=='linkedin':
                 await command('selection_dispatched',option_ref=matches[0]['ref'],label=matches[0]['label'])
             return await verify_selection(matches[0]['value'],matches[0]['label'])
         if attempt==0 and before['tag']=='INPUT':
-            await command('fill',value=wanted)
-        await asyncio.sleep(.15)
+            await command('search' if greenhouse else 'fill',value=wanted)
+        if attempt==2 and greenhouse and before['tag']=='INPUT' and hasattr(page,'insert_text'):
+            focused=await command('focus')
+            if focused.get('committed'):
+                await page.press_key('Control+A')
+                await check()
+                await page.insert_text(wanted)
+        await pause(.1)
     return {'committed':False,'reason':options.get('reason','option_not_found'),
             'options':options.get('options',[])}
 
@@ -316,7 +352,7 @@ async def upload_file(page,target,path):
     await CDPElement(document._session,owner).set_input_files(str(path))
 
 
-async def required_questions(page,refs,*,include_answered=False):
+async def required_questions(page,refs,*,include_answered=False,include_optional=False,checkpoint=None):
     """Capture offered choices from actual controls; a failed control is not a missing fact."""
     from .browser_frames import resolve_control,FramePage
     from .managed_questions import question_data
@@ -324,31 +360,39 @@ async def required_questions(page,refs,*,include_answered=False):
         raise ValueError('observed_question_refs_required')
     result={'questions':[],'skipped':[]}
     for ref in dict.fromkeys(refs):
+        if checkpoint:await checkpoint()
         document,target=await resolve_control(page,{'ref':ref})
         info=await document.evaluate_function(FORM,dict(target,method='inspect'))
         if info.get('reason'):
             result['skipped'].append({'ref':ref,'reason':info['reason']});continue
         question=await document.evaluate_function(FORM,dict(target,method='question'))
-        if question.get('reason') or not question.get('required') or (question.get('answered') and not include_answered):
+        if question.get('reason') or (not question.get('required') and not include_optional) or (question.get('answered') and not include_answered):
             result['skipped'].append({'ref':ref,'reason':question.get('reason') or ('already_answered' if question.get('answered') else 'optional_question')});continue
         if question['kind']=='select' and info['tag']!='SELECT':
             opened=info.get('expanded')!='true'
             if opened:
+                await document.evaluate_function(FORM,dict(target,method='begin_menu_inspection'))
                 clicked=await click_control(page,{'ref':ref})
                 if not clicked.get('clicked'):
                     result['skipped'].append({'ref':ref,'reason':clicked.get('reason','control_unavailable')});continue
-            options={}
-            for _ in range(8):
-                options=await document.evaluate_function(FORM,dict(target,method='select_options'))
-                if options.get('options'):break
-                await asyncio.sleep(.1)
-            if not options.get('options'):
-                result['skipped'].append({'ref':ref,'reason':options.get('reason','observed_options_unavailable')});continue
-            question['options']=[o for o in options['options'] if o['enabled']]
-            if opened:await document.press_key('Escape')
+            try:
+                options={}
+                for _ in range(8):
+                    options=await document.evaluate_function(FORM,dict(target,method='select_options'))
+                    if options.get('options'):break
+                    await asyncio.sleep(.1)
+                    if checkpoint:await checkpoint()
+                if not options.get('options'):
+                    result['skipped'].append({'ref':ref,'reason':options.get('reason','observed_options_unavailable')});continue
+                question['options']=[o for o in options['options'] if o['enabled']]
+            finally:
+                if opened:
+                    # FramePage validates the original document; root refs belong
+                    # to that document's scope and cannot bind after a reload.
+                    await document.evaluate_function(FORM,dict(target,method='close_menu'))
         option_refs={(o['value'],o['label']):(document.wrap(o['ref']) if isinstance(document,FramePage) else o['ref'])
                      for o in question['options'] if o.get('ref')}
-        data=question_data(**{k:question[k] for k in ('field','question','kind','required','context')},
+        data=question_data(**{k:question[k] for k in ('field','question','kind','context')},required=True,
                            options=[{k:o[k] for k in ('value','label')} for o in question['options']])
         result['questions'].append({'ref':ref,'data':data,'option_refs':option_refs})
     return result

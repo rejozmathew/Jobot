@@ -41,8 +41,13 @@ lessons. Do not invent facts, choose another mailbox, or reconstruct the resume.
 ## ATS reminders — read the applicable reference while the browser prepares
 Workday: {root/'workday-simplify'/'SKILL.md'}; use the Workday fast_forward helper
 for routine work, then executor-led recovery when its bounded call returns.
-Greenhouse: {root/'job-apply'/'references'/'greenhouse.md'}; shared form helpers,
-Simplify and relevant email verification. Do not run Workday fast_forward here.
+Greenhouse: {root/'job-apply'/'references'/'greenhouse.md'}; call greenhouse_advance
+with {{"seconds":60}} in this session. It settles Simplify, runs the eligible
+second pass for actual required residuals, batches approved answers, and uses
+the shared submission service. Continue on a call slice/handoff. Return all
+unresolved semantic choices in one answers plan (current ref, exact question_key,
+answer and approved basis); code operates and verifies the controls. After a
+missing-email reload, resume greenhouse_advance with fresh refs and any new code.
 iCIMS: {root/'job-apply'/'references'/'icims.md'}; inspect embedded frames and
 observed Apply / Email / Next controls. A login route is not a different job.
 Other portals: shared browser tools and approved profile facts; the actual page

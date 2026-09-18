@@ -95,6 +95,10 @@ class FramePage(CDPPage):
         # A focus operation in the child precedes this call.
         await self.router.root.press_key(key, vk)
 
+    async def insert_text(self, text):
+        await self.validate()
+        await self.router.root.insert_text(text)
+
     async def _map_point(self, point, scroll):
         await self.validate()
         mapped = await _owner_call(self.parent, self.owner, r'''function(p){

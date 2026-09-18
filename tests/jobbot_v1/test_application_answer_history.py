@@ -36,8 +36,9 @@ def test_answer_history_excludes_secret_controls_and_secret_payloads(tmp_path):
 def test_selected_closed_dropdown_does_not_open_again():
     class Page:
         async def evaluate_function(self,script,args):
-            assert args['method']=='inspect'
-            return {'tag':'BUTTON','haspopup':'listbox','expanded':'false','value':'LinkedIn','label':'LinkedIn'}
+            assert args['method'] in ('inspect','verify_select')
+            return {'tag':'BUTTON','haspopup':'listbox','expanded':'false','value':'LinkedIn','label':'LinkedIn',
+                    'committed':True,'value_matches':True,'validation':{'rejected':False}}
     result=asyncio.run(form_action(Page(),{'method':'select','ref':'observed','label':'LinkedIn'}))
     assert result['committed'] and result['unchanged']
 

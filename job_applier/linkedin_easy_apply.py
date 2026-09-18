@@ -7,6 +7,8 @@ import asyncio
 import json
 from pathlib import Path
 import re
+
+from .application_answers import label_has, match_answer_to_option, approved_answer, answer_action, saved_answer
 import time
 
 from .browser_controls import FORM, form_action, click_control, upload_file
@@ -16,107 +18,9 @@ SCRIPT=(Path(__file__).parent/'browser_helpers/linkedin_observe.js').read_text(e
 OBSERVE='(args)=>('+SCRIPT+')(args,('+FORM+'))'
 
 
-def label_has(label, *words):
-    """Donor find_bad_word/label_has: boundaries prevent state/States and no/non collisions."""
-    for word in words:
-        word=str(word).strip()
-        if not word:continue
-        left=r'(?<!\w)' if word[0].isalnum() or word[0]=='_' else ''
-        right=r'(?!\w)' if word[-1].isalnum() or word[-1]=='_' else ''
-        if re.search(left+re.escape(word)+right,label,re.I):return True
-    return False
-
-
-def match_answer_to_option(answer, options):
-    """Adapted donor mapping: exact first, polarity-aware unique matches only."""
-    if answer is None:return None
-    answer='Yes' if answer is True else 'No' if answer is False else str(answer).strip()
-    if not answer:return None
-    exact=[i for i,o in enumerate(options) if o.strip().casefold()==answer.casefold()]
-    if exact:return exact[0] if len(exact)==1 else None
-    negative=('no','not','never',"don't","doesn't","won't","can't",'cannot','disagree','decline')
-    polarity=None
-    if label_has(answer,'decline','prefer not','not wish',"don't wish",'not want','rather not'):
-        phrases=('Decline','not wish',"don't wish",'Prefer not','not want')
-    elif answer.casefold()=='yes':phrases=('Yes','Agree','I do','I have');polarity=False
-    elif answer.casefold()=='no':phrases=('No','Disagree',"I don't",'I do not');polarity=True
-    else:phrases=(answer,)
-    matches=[i for i,option in enumerate(options) if any(label_has(option,p) for p in phrases)
-             and (polarity is None or polarity==label_has(option,*negative))]
-    return matches[0] if len(matches)==1 else None
-
-
-def approved_answer(question, profile):
-    """Use explicit Jobbot facts; the executor resolves unfamiliar/compound wording."""
-    standard=profile.get('standard_answers') or {};identity=profile.get('identity') or {}
-    auth=profile.get('work_authorization') or {}
-    if not isinstance(auth,dict):auth={}
-    exact=[v for k,v in standard.items() if k.strip().casefold()==question.strip().casefold()]
-    if exact:return exact[0]
-    # Donor precedence: sponsorship, authorization, citizenship, then location.
-    # No status-to-eligibility inference and no total tenure for skill experience.
-    if label_has(question,'sponsor','sponsors','sponsorship') or (
-            label_has(question,'need','require','requires') and label_has(question,'visa','visas','work permit','h-1b','h1b')):
-        if re.search(r'\b(?:not|without|no)\b',question,re.I):return None
-        current=standard.get('requires_sponsorship',auth.get('needs_sponsorship'))
-        future=standard.get('will_require_sponsorship_future')
-        if label_has(question,'future'):
-            if label_has(question,'now','currently','current'):
-                return True if current is True or future is True else False if current is False and future is False else None
-            return future
-        return current
-    if label_has(question,'legally authorized','legally authorised','authorized to work','authorised to work','right to work','work authorization','work authorisation'):
-        if label_has(question,'citizen','citizenship') or re.search(r'\b(?:not|without|no)\b',question,re.I):return None
-        if label_has(question,'United States','US','U.S.'):
-            return standard.get('authorized_to_work_us',standard.get('legally_authorized_to_work',auth.get('legally_authorized_us')))
-        return standard.get('legally_authorized_to_work')
-    if label_has(question,'citizen','citizenship'):return None
-    label=question.strip().rstrip('*').strip().casefold()
-    names={'first name':'first_name','last name':'last_name','full name':'full_name','email':'email','email address':'email',
-           'phone':'phone','phone number':'phone','mobile phone number':'phone','linkedin profile':'linkedin','website':'website'}
-    if label in names:return identity.get(names[label])
-    address=identity.get('address') or {}
-    if label in ('city','state','country','zip','postal code','street address') and isinstance(address,dict):
-        return address.get({'postal code':'zip','street address':'street'}.get(label,label))
-    if label in ('location','city, state','city, state, country'):return identity.get('location')
-    if label in ('total years of experience','years of work experience','total professional experience'):
-        return profile.get('years_experience')
-    return None
-
-
 async def observe_page(page,package):
     identity=linkedin_identity(package['job']['url'])
     return await page.evaluate_function(OBSERVE,{'job_id':identity[-1] if identity else None})
-
-
-def answer_action(question,answer):
-    kind=question['kind'];ref=question['ref']
-    if kind in ('radio','select') and question.get('options'):
-        options=question['options']
-        if isinstance(answer,dict):
-            matches=[i for i,o in enumerate(options) if all(o.get(k)==answer.get(k) for k in ('value','label'))]
-            index=matches[0] if len(matches)==1 else None
-        else:index=match_answer_to_option(answer,[o['label'] for o in options])
-        if index is None:return None
-        selected=options[index]
-        if kind=='radio':return {'method':'check','ref':selected['ref'],'value':True}
-        return {'method':'select','ref':ref,'value':selected['value'],'label':selected['label']}
-    if kind=='check':return {'method':'check','ref':ref,'value':answer} if type(answer) is bool else None
-    if isinstance(answer,(str,int,float,bool)):
-        value='Yes' if answer is True else 'No' if answer is False else str(answer)
-        return {'method':'select' if kind=='select' else 'fill','ref':ref,**({'label':value} if kind=='select' else {'value':value})}
-    return None
-
-
-def saved_answer(question,package):
-    from .managed_questions import question_data,question_key
-    try:
-        data=question_data(**{k:question[k] for k in ('field','question','kind','required','context')},
-            options=[{k:o[k] for k in ('value','label')} for o in question['options']])
-    except ValueError:return None
-    key=question_key(data)
-    return next((q['answer'] for q in package.get('saved_questions',[]) if q.get('question_key')==key
-                 and q.get('state')!='superseded' and q.get('answer') is not None),None)
 
 
 class EasyApplyRunner:

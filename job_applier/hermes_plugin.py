@@ -13,7 +13,7 @@ from .managed_shared import ProtocolError, uid
 HOOKS=('pre_tool_call','post_tool_call','pre_api_request','post_api_request','api_request_error')
 OPERATIONS=('start','attach','pause','stop','restart','retry','reconcile','browser','account_lock','status','accept','next','context','report','observe','mail_request','mail_match','record_account_event','report_upload','extend_budget','bind_target','target_state','finish','milestone','checkpoint','resume','heartbeat','ack_control','writer_state','submission_intent','account_strategy','browser_observe','credentials','fast_forward')
 OPERATIONS=OPERATIONS+('answer','answer_retries','park_questions','questions_for_attempt','answer_from_user')
-OPERATIONS=OPERATIONS+('progress','linkedin_easy_apply')
+OPERATIONS=OPERATIONS+('progress','linkedin_easy_apply','greenhouse_advance')
 SCHEMA={'name':'jobbot','description':'Start one local application from a URL, use its owned browser and shared helpers, and record verified outcomes. No model is launched.',
     'parameters':{'type':'object','properties':{'operation':{'type':'string','enum':list(OPERATIONS)},'parameters':{'type':'object'}},'required':['operation'],'additionalProperties':False}}
 
@@ -191,8 +191,9 @@ class PluginController:
                 context=adapter._state().get('attempt')
                 if not context:raise ProtocolError('no_claimed_attempt')
                 if adapter.flush():raise ProtocolError('telemetry_delivery_pending')
-                if op in ('fast_forward','linkedin_easy_apply'):
-                    if op=='linkedin_easy_apply':from .linkedin_easy_apply import advance
+                if op in ('fast_forward','linkedin_easy_apply','greenhouse_advance'):
+                    if op=='greenhouse_advance':from .greenhouse_fast import advance
+                    elif op=='linkedin_easy_apply':from .linkedin_easy_apply import advance
                     else:from .workday_fast import advance
                     result=advance(cfg,adapter.client,context,params)
                     if result.get('status')=='applied':

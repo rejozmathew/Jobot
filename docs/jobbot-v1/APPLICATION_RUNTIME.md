@@ -601,15 +601,16 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
 | managed_identity.py | Workday host/site/full-requisition and iCIMS host/job-id comparison, history equivalence, application scope and diagnostic match states; existing frame router, runtime, credentials and binding callers share scope matching |
 | managed_shared.submission_state / submission_pending and managed_events._submission_state / _submission_pending | One per-attempt evidence projection from existing ordered events; evidence reporting only; accepted alone suppresses a new requested attempt |
+| greenhouse_fast.py | Session-owned `greenhouse_advance` residual batches; next_operation/startup guidance, local workspace host and nonlocal plugin dispatch call the same advance entry. Simplify remains the bulk filler. Legacy platform_handlers/greenhouse.py stays available to its existing agent/registry callers. |
 | workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
 | browser_controls.py / browser_helpers/form_controls.js | Shared form reader including Apply, committed-selection verification, posting metadata, private code groups and remaining_submission_work; iCIMS entry guidance; used by submission, browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
-| application_answers.py | Interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
+| application_answers.py | Shared label_has, match_answer_to_option, approved_answer, answer_action and saved_answer (re-exported by LinkedIn); approved Greenhouse plan journal restoration; interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | One activation per explicit call, current incomplete-form continuation, retained dispatch evidence and native/Simplify confirmation; local browser and Workday callers |
-| simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation, actuation, settlement and forward-first policy |
+| simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation/dispatch/settlement; Workday receipts and Greenhouse attempt/root/document receipts survive reconnects/rerenders. One initial and one eligible residual automatic pass precede custom repair; explicit recovery remains available. |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | browser_helpers/workday_source.js | Workday-only recruiting-source field/menu association, live option inventory and virtualized-menu scrolling; workday_fast drives pointer actions and verifies commitment |
 | managed_credentials.py / managed_documents.py / hermes_gmail.py | Selected account-field filling, executor-supplied code entry without group/format permission, existing Hermes Gmail CLI wrapper, code screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |
@@ -1019,3 +1020,33 @@ the selected Himalaya account. It does not itself authenticate/fetch mail or cla
 SMS support. `workspace_linux` provides Linux process-group supervision and private
 socket/profile inspection; Windows Job Objects remain unchanged. See
 [Queue and VM runbook](QUEUE_AND_VM_RUNBOOK.md) for exact boundaries and rollout.
+
+
+## Managed Greenhouse batch operation
+
+`greenhouse_advance` accepts `seconds` (default 60, up to the existing 120-second
+call range) and a grouped `answers` plan. Each plan item binds a current `ref`
+and exact `managed_questions.question_key` to `answer` and its approved `basis`.
+It uses the current authoritative ownership/identity gate, including accepted
+employer handoffs, then one action lock for native residual work. Heartbeat and
+current document/writer observations continue within that lock without nested
+managed browser actions. Call expiry yields resumable continuation.
+
+Readiness is native interactive form/contact controls with three equal structural
+inventories 200ms apart. DOM receipts count actual Simplify dispatch, uncertain
+work and settlement; they contain no candidate values. An actual document reload
+starts a new cycle; changing fields or replacing the extension panel does not.
+Without observed start/change, settlement allows five seconds for delayed work.
+Otherwise three fresh stable native observations permit immediate continuation.
+The second automatic pass requires actual required residuals and precedes custom
+corrections. It is scheduling policy, not a manual/user retry prohibition.
+
+Shared `form_action` uses focused search and trusted CDP insert_text fallback,
+widget-associated options, exact selected-label/value readback, and field-native
+validation. FramePage validates before forwarding input to the root. Unknown
+questions return together; failures remain distinct. Field-context/verified events
+are emitted under the batch; only verified approved answers enter the restorable
+private journal. Existing salary/privacy policy, selected Resume/CV error recovery,
+credentials/mail flow and submission.submit retain their ownership of those tasks.
+Missing-email reload recovery remains in the same attempt, followed immediately
+by this runner with fresh refs. No external handler or dependency is imported.
