@@ -521,4 +521,13 @@ footer {
 .jobs-table .progress-stage { padding: 4px; margin: 6px 0 0; }
 .jobs-table .source-reference > div + div { margin-top: 6px; }
 .jobs-table .application-time { font-variant-numeric: tabular-nums; }
+.jobs-table th button { border: 0; background: transparent; padding: 0; color: inherit; text-align: left; text-transform: inherit; font: inherit; font-weight: 600; }
+.jobs-table th[aria-sort="ascending"], .jobs-table th[aria-sort="descending"] { color: var(--accent-hover); }
+.job-sequence { display: block; margin-bottom: 4px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.jobs-table .edit-job-url { margin-top: 5px; padding: 2px 5px; }
+.job-filter-details { display: grid; grid-template-columns: repeat(5, minmax(115px, 1fr)) auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.job-filter-details label { margin-bottom: 0; }
+dialog { width: min(620px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 8px; padding: 24px; color: var(--text-main); }
+dialog::backdrop { background: #0f172a66; }
+@media (max-width: 900px) { .job-filter-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 [hidden] { display: none !important; }

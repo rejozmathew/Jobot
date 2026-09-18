@@ -98,11 +98,11 @@
       </div>
       </details>
       <div class="main-action-bar">
-        <button id="start-application-btn" class="primary" type="button">Retry selected</button>
-        <button id="queue-run-next" type="button" aria-describedby="queue-run-help">Run next queued job</button>
+        <button id="start-application-btn" class="primary" type="button">Queue selected</button>
+        <button id="queue-run-next" type="button" aria-describedby="queue-run-help">Wake existing queue</button>
         <button id="queue-toggle" type="button">Enable automatic queue</button>
       </div>
-      <p id="queue-run-help">Run next queued job starts the oldest ready job, after any jobs requested with Apply now. Use Apply now on a job below to choose that specific job and skip its retry wait. If an application is running, your chosen job starts after it finishes.</p>
+      <p id="queue-run-help">Select jobs below, sort them into the order you want, then choose Queue selected. This adds or prioritizes those jobs and runs them without waiting for the automatic schedule. Wake existing queue only wakes the worker: it takes earlier manual requests first, then the oldest ready job. An application already running finishes first.</p>
       <!-- Legacy controls preserved for compatibility -->
       <div hidden>
         <button id="mark-ready">Mark selected ready</button>
@@ -116,7 +116,7 @@
         <span id="queue-count"></span>
       </div>
       <div class="job-filters">
-        <label>Search jobs<input id="job-search" type="search" placeholder="Company, role or URL"></label>
+        <label>Search jobs<input id="job-search" type="search" placeholder="#, company, role, URL or source reference"></label>
         <label>Show<select id="job-filter">
           <option value="active">Unfinished</option>
           <option value="attention">Needs attention</option>
@@ -125,7 +125,16 @@
           <option value="all">All jobs</option>
         </select></label>
       </div>
+      <div class="job-filter-details">
+        <label>Source<select id="job-source-filter"><option value="">All sources</option></select></label>
+        <label>Country<select id="job-country-filter"><option value="">All countries</option></select></label>
+        <label>Assessment<select id="job-assessment-filter"><option value="">All assessments</option></select></label>
+        <label>Added from<input id="job-added-from" type="date"></label>
+        <label>Added through<input id="job-added-to" type="date"></label>
+        <button id="job-reset-filters" type="button">Clear filters</button>
+      </div>
       <div class="bulk-actions">
+        <button id="queue-selected-jobs" type="button" class="primary">Queue selected</button>
         <button id="select-unfinished" type="button">Select unfinished</button>
         <button id="select-visible" type="button" hidden>Select visible canceled jobs</button>
         <button id="clear-selection" type="button">Clear selection</button>
@@ -136,6 +145,7 @@
         <button id="cancel-selected" type="button">Cancel selected</button>
         <button id="restore-selected" type="button" hidden>Restore selected</button>
       </div>
+      <p id="queue-selection-order" class="cleanup-note"></p>
       <p class="cleanup-note">Cancel keeps job history and portal accounts. Restore makes a job available to queue again.</p>
       <div class="table-wrap">
         <table class="jobs-table">
@@ -144,17 +154,17 @@
           </colgroup>
           <thead>
             <tr>
-              <th>Select</th>
-              <th>Company &amp; Role</th>
-              <th>Status</th>
-              <th>Assessment</th>
-              <th>Country</th>
-              <th>Posted date</th>
-              <th>Source</th>
-              <th>Source reference</th>
-              <th title="First added to JobBot; rediscovery does not reset this date">Added</th>
-              <th title="Latest recorded operator disposition, application outcome, or queue outcome">Last disposition</th>
-              <th title="Successful attempt start to recorded completion, including waits during that attempt; excludes earlier attempts and time queued">Time to apply</th>
+              <th title="Permanent job sequence number, assigned when first added"><button type="button" data-job-sort="sequence">#</button></th>
+              <th><button type="button" data-job-sort="company">Company &amp; Role</button></th>
+              <th><button type="button" data-job-sort="status">Status</button></th>
+              <th><button type="button" data-job-sort="assessment">Assessment</button></th>
+              <th><button type="button" data-job-sort="country">Country</button></th>
+              <th><button type="button" data-job-sort="posted">Posted date</button></th>
+              <th><button type="button" data-job-sort="source">Source</button></th>
+              <th><button type="button" data-job-sort="reference">Source reference</button></th>
+              <th title="First added to JobBot; rediscovery does not reset this date"><button type="button" data-job-sort="added">Added</button></th>
+              <th title="Latest recorded operator disposition, application outcome, or queue outcome"><button type="button" data-job-sort="disposition">Last disposition</button></th>
+              <th title="Successful attempt start to recorded completion, including waits during that attempt; excludes earlier attempts and time queued"><button type="button" data-job-sort="duration">Time to apply</button></th>
             </tr>
           </thead>
           <tbody id="queue-rows"></tbody>
@@ -411,6 +421,17 @@
     </section>
   </section>
 </main>
+
+<dialog id="job-url-dialog" aria-labelledby="job-url-title">
+  <form id="job-url-form">
+    <h2 id="job-url-title">Edit job URL</h2>
+    <p id="job-url-label"></p>
+    <p>Correct the link for this job. Its number, added date, history and source references are kept. Saving does not navigate an open application.</p>
+    <label>Job URL<input id="job-edit-url" type="url" required></label>
+    <p id="job-url-error" class="error" role="alert"></p>
+    <div class="toolbar"><button id="job-url-save" type="submit" class="primary">Save URL</button><button id="job-url-cancel" type="button">Cancel</button></div>
+  </form>
+</dialog>
 
 <footer>
   Evidence-led operations · Review-only development defaults · No automatic letter generation

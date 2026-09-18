@@ -1,6 +1,7 @@
 'use strict';
 const $=id=>document.getElementById(id);
 const state={instance:null,view:null,selected:new Set(),run:null,attempt:null,busy:false,queueKey:null,settingsVersion:null,profileCandidate:null,profileDirty:false,answerKey:null,answerDrafts:new Map()};
+state.jobSort={key:'added',direction:'desc'};
 function el(tag,text,cls,children){const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;if(Array.isArray(children)){for(const c of children)if(c)n.append(c);}return n;}
 function badge(value){const n=el('span',value??'Unknown','badge');n.dataset.state=value??'unknown';return n;}
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);}
@@ -58,8 +59,14 @@ function queueJobStatus(job,queued,local){
 }
 function visibleJobs(v){
  const filter=$('job-filter').value,query=$('job-search').value.trim().toLocaleLowerCase();
+ const source=$('job-source-filter').value,country=$('job-country-filter').value,assessment=$('job-assessment-filter').value;
+ const from=$('job-added-from').value,to=$('job-added-to').value;
  return v.jobs.filter(job=>{
-  if(query&&![job.company,job.title,job.url].filter(Boolean).join(' ').toLocaleLowerCase().includes(query))return false;
+  if(query&&![job.seq_id==null?'':'#'+job.seq_id,job.company,job.title,job.url,...(job.sources||[]).flatMap(s=>[sourceLabel(s.source_type),s.source_id])].filter(Boolean).join(' ').toLocaleLowerCase().includes(query))return false;
+  if(source&&!(job.sources||[]).some(s=>s.source_type===source))return false;
+  if(country&&postingCountry(job)!==country)return false;
+  if(assessment&&(job.assessment?.recommendation||'Unassessed')!==assessment)return false;
+  if(from||to){const day=addedDay(job.created_at);if(!day||(from&&day<from)||(to&&day>to))return false;}
   if(filter==='canceled')return job.disposition==='canceled';
   if(filter==='submitted')return submitted(job);
   if(filter==='active')return unfinished(job);
@@ -69,13 +76,59 @@ function visibleJobs(v){
    return unfinished(job)&&(problems.includes(job.status)||!!job.failure_reason||(queued?.state==='finished'&&problems.includes(queued.outcome)));
   }
   return true;
+ }).sort((a,b)=>{
+  const av=jobSortValue(v,a),bv=jobSortValue(v,b);
+  if(av==null||bv==null)return av==null?(bv==null?0:1):-1;
+  const order=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),undefined,{numeric:true,sensitivity:'base'});
+  return state.jobSort.direction==='asc'?order:-order;
  });
+}
+function addedDay(value){
+ const date=new Date(value);if(!value||Number.isNaN(date.getTime()))return null;
+ const parts=new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:state.view?.settings?.values?.timezone||'UTC'}).formatToParts(date);
+ const part=type=>parts.find(p=>p.type===type).value;return `${part('year')}-${part('month')}-${part('day')}`;
+}
+function jobSortValue(v,job){
+ const time=value=>value&&Number.isFinite(Date.parse(value))?Date.parse(value):null;
+ switch(state.jobSort.key){
+  case 'sequence':return Number.isFinite(job.seq_id)?job.seq_id:null;
+  case 'company':return [job.company,job.title].filter(Boolean).join(' ')||null;
+  case 'status':return queueJobStatus(job,latestDispatch(v,job),!!v.local_runtime?.workspaces?.length);
+  case 'assessment':return job.assessment?.recommendation||null;
+  case 'country':return postingCountry(job)==='Unavailable'?null:postingCountry(job);
+  case 'posted':return time(postingDate(job));
+  case 'source':return job.sources?.length?sourceLabel(job.sources[0].source_type):null;
+  case 'reference':return job.sources?.map(s=>s.source_id).filter(Boolean).join(' ')||null;
+  case 'disposition':return time(job.last_disposition?.at);
+  case 'duration':return submitted(job)&&Number.isFinite(job.application_timing?.elapsed_seconds)?job.application_timing.elapsed_seconds:null;
+  default:return time(job.created_at);
+ }
+}
+function renderJobFilters(v){
+ const options=(id,values,label,display=x=>x)=>{
+  const select=$(id),before=select.value,unique=[...new Set(values.filter(Boolean))].sort((a,b)=>display(a).localeCompare(display(b)));
+  if(before&&!unique.includes(before))unique.push(before);
+  const items=[['',label],...unique.map(x=>[x,display(x)])],key=JSON.stringify(items);
+  if(select.dataset.options!==key){choice(id,items,before);select.dataset.options=key;}
+ };
+ options('job-source-filter',v.jobs.flatMap(j=>(j.sources||[]).map(s=>s.source_type)),'All sources',sourceLabel);
+ options('job-country-filter',v.jobs.map(postingCountry),'All countries');
+ options('job-assessment-filter',v.jobs.map(j=>j.assessment?.recommendation||'Unassessed'),'All assessments');
+ for(const button of document.querySelectorAll('[data-job-sort]')){
+  button.dataset.label??=button.textContent;
+  const active=button.dataset.jobSort===state.jobSort.key;
+  button.textContent=button.dataset.label+(active?(state.jobSort.direction==='asc'?' ↑':' ↓'):' ↕');
+  button.closest('th').setAttribute('aria-sort',active?(state.jobSort.direction==='asc'?'ascending':'descending'):'none');
+ }
+ const sortButton=document.querySelector(`[data-job-sort="${state.jobSort.key}"]`);
+ $('queue-selection-order').textContent=`Selected jobs queue in table order: ${sortButton.dataset.label}, ${state.jobSort.direction==='asc'?'ascending':'descending'}. They run after the current application and earlier manual requests, ahead of automatic pickups.`;
 }
 function selection(){
  const selected=(state.view?.jobs||[]).filter(j=>state.selected.has(j.id));
  const cancelable=selected.filter(unfinished),restorable=selected.filter(j=>j.disposition==='canceled');
  $('selection').textContent=state.selected.size?`${state.selected.size} job${state.selected.size===1?'':'s'} selected`:'No jobs selected';
- $('start-application-btn').disabled=!cancelable.length||cancelable.length!==selected.length;
+ $('start-application-btn').disabled=!!state.queueSubmitting||!cancelable.length||cancelable.length!==selected.length;
+ $('queue-selected-jobs').disabled=$('start-application-btn').disabled;
  $('cancel-selected').disabled=!cancelable.length;
  $('restore-selected').disabled=!restorable.length;
  $('clear-selection').disabled=!state.selected.size;
@@ -186,12 +239,13 @@ function dispositionCell(job){
  return td;
 }
 function renderQueue(v){
+ renderJobFilters(v);
  renderSessions(v);
  renderAnswers(v);
  renderDispatcher(v);
  const jobs=visibleJobs(v),visibleIds=new Set(jobs.map(j=>j.id));
  for(const id of state.selected)if(!visibleIds.has(id))state.selected.delete(id);
- const key=JSON.stringify([jobs,v.answer_queue,v.dispatch_queue?.items,v.dispatch_queue?.latest_by_job,[...state.selected],$('job-filter').value]);if(key===state.queueKey){selection();return;}state.queueKey=key;
+ const key=JSON.stringify([jobs,v.answer_queue,v.dispatch_queue?.items,v.dispatch_queue?.latest_by_job,[...state.selected],$('job-filter').value,state.jobSort]);if(key===state.queueKey){selection();return;}state.queueKey=key;
  rememberProgress($('queue-rows'));
  const canceledView=$('job-filter').value==='canceled';
  $('select-visible').hidden=!canceledView;$('select-unfinished').hidden=canceledView;
@@ -199,17 +253,19 @@ function renderQueue(v){
  $('cancel-selected').hidden=canceledView;$('cancel-reason').closest('label').hidden=canceledView;
  $('queue-count').textContent=`${jobs.length} shown · ${v.jobs.length} total`;$('queue-rows').replaceChildren();
  for(const job of jobs){
-  const tr=el('tr');
+  const tr=el('tr');tr.dataset.jobId=job.id;
   const check=el('input');check.type='checkbox';check.checked=state.selected.has(job.id);
   check.disabled=submitted(job)&&job.disposition!=='canceled';
   check.setAttribute('aria-label','Select '+postingLabel(job));
   check.onchange=()=>{if(check.checked)state.selected.add(job.id);else state.selected.delete(job.id);selection();};
-  const cell=el('td');cell.append(check);tr.append(cell);
-  const title=el('td');title.append(postingHeading(job));tr.append(title);
+  const cell=el('td');cell.append(el('span',job.seq_id==null?'—':'#'+job.seq_id,'job-sequence'),check);tr.append(cell);
+  const title=el('td');title.append(postingHeading(job));
+  const edit=el('button','Edit URL','edit-job-url');edit.type='button';edit.dataset.editJobUrl=job.id;
+  edit.setAttribute('aria-label','Edit URL for '+postingLabel(job));edit.onclick=()=>editJobUrl(job);title.append(edit);tr.append(title);
   const queued=latestDispatch(v,job);
   const statusTd=el('td');statusTd.append(badge(queueJobStatus(job,queued,!!v.local_runtime?.workspaces?.length)));
   if(v.local_runtime?.workspaces?.length&&unfinished(job)&&!['queued','dispatched'].includes(queued?.state)){
-   statusTd.append(el('small',queued?.automatic_limit_reached?'Six attempts ended without completion. Review the reason; Retry selected starts a new attempt series.':discoverySkipped(job)?'Discovery marked this job Skip. Review its match before explicitly choosing Retry selected.':queued?.state==='finished'?'The worker schedules recovery for interrupted or failed attempts. Review-only results and user stops stay here.':job.intervention_reason||'Active jobs enter the execution queue automatically.'));
+   statusTd.append(el('small',queued?.automatic_limit_reached?'Six attempts ended without completion. Review the reason; Queue selected starts a new attempt series.':discoverySkipped(job)?'Discovery marked this job Skip. Review its match before explicitly choosing Queue selected.':queued?.state==='finished'?'The worker schedules recovery for interrupted or failed attempts. Review-only results and user stops stay here.':job.intervention_reason||'Active jobs enter the execution queue automatically.'));
   }
   if(queued?.attempt_number)statusTd.append(el('small',`Attempt ${queued.attempt_number} of ${v.dispatch_queue?.automatic_attempt_limit||3}`));
   if(queued?.waiting_for_retry)statusTd.append(el('small',`Retry at ${stamp(queued.next_attempt_at)}. Other ready jobs can run first.`));
@@ -235,7 +291,7 @@ function renderQueue(v){
 }
 function renderSessions(v){
  const runtime=v.local_runtime||{sessions:[],workspaces:[]};
- if($('start-application-btn'))$('start-application-btn').textContent=runtime.workspaces.length?'Retry selected':'Start application';
+ if($('start-application-btn'))$('start-application-btn').textContent=runtime.workspaces.length?'Queue selected':'Start application';
  $('local-sessions-card').hidden=!runtime.workspaces.length&&!runtime.sessions.length;
  const historyScroll=$('session-history')?.scrollTop||0;
  rememberProgress($('local-sessions'));$('local-sessions').replaceChildren();
@@ -323,7 +379,7 @@ function renderDispatcher(v){
   `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.counts?.dispatched||0} in progress · Automatic queue ${q.enabled?'on':'paused'}. Active jobs are picked up automatically, one application at a time.`;
  if($('application-schedule'))$('application-schedule').textContent=
   `${q.counts?.dispatched?'An application is running. The next ready job follows after it finishes. ':''}`+
-  `${q.enabled?`Next application check: ${q.next_automatic_at?stamp(q.next_automatic_at):'worker’s next check'}.`:'Automatic applications are paused; Apply now or Run next queued job can start work immediately.'}`+
+  `${q.enabled?`Next application check: ${q.next_automatic_at?stamp(q.next_automatic_at):'worker’s next check'}.`:'Automatic applications are paused; Queue selected or Apply now can request work immediately.'}`+
   `${q.ready_count===0&&q.next_job_at?` Next scheduled retry: ${stamp(q.next_job_at)}.`:''} Up to 6 attempts: 4 in the first 24 hours, then 2 the next day. Targets: 0, 2, 4, 6, 24 and 28 hours; busy or long runs move later. After 6 attempts, review the failure reason.`;
  if($('queue-toggle'))$('queue-toggle').textContent=q.enabled?'Pause automatic queue':'Enable automatic queue';
  // The local queue uses Hermes' configured model and the runtime's actual workspace.
@@ -569,6 +625,31 @@ $('reconnect').onclick=()=>location.reload();
 $('refresh').onclick=refresh;document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function filterJobs(){rememberProgress($('queue-rows'));state.queueKey=null;state.selected.clear();if(state.view)renderQueue(state.view);}
 $('job-filter').onchange=filterJobs;$('job-search').oninput=filterJobs;
+for(const id of ['job-source-filter','job-country-filter','job-assessment-filter','job-added-from','job-added-to'])$(id).onchange=filterJobs;
+$('job-reset-filters').onclick=()=>{
+ for(const id of ['job-search','job-source-filter','job-country-filter','job-assessment-filter','job-added-from','job-added-to'])$(id).value='';
+ $('job-filter').value='all';filterJobs();
+};
+for(const button of document.querySelectorAll('[data-job-sort]'))button.onclick=()=>{
+ const key=button.dataset.jobSort;
+ state.jobSort={key,direction:state.jobSort.key===key&&state.jobSort.direction==='asc'?'desc':'asc'};
+ state.queueKey=null;if(state.view)renderQueue(state.view);
+};
+function editJobUrl(job){
+ const form=$('job-url-form');form.dataset.jobId=job.id;form.dataset.expectedUrl=job.url||'';
+ $('job-edit-url').value=job.url||'';$('job-url-label').textContent=(job.seq_id==null?'':'#'+job.seq_id+' · ')+postingLabel(job);
+ $('job-url-error').textContent='';$('job-url-save').disabled=false;$('job-url-dialog').showModal();$('job-edit-url').focus();
+}
+$('job-url-cancel').onclick=()=>$('job-url-dialog').close();
+$('job-url-form').onsubmit=async event=>{
+ event.preventDefault();if($('job-url-save').disabled)return;
+ const form=$('job-url-form');$('job-url-save').disabled=true;$('job-url-error').textContent='';
+ try{
+  await api('update_job_url',{job_id:form.dataset.jobId,url:$('job-edit-url').value.trim(),expected_url:form.dataset.expectedUrl});
+  $('job-url-dialog').close();notice('Job URL saved. History and source references kept.');state.queueKey=null;await refresh();
+ }catch(error){$('job-url-error').textContent=({job_url_changed:'This URL changed since the editor opened. Cancel and reopen it to use the latest value.',job_url_in_use:'That URL belongs to another saved job. Open that job to edit its link.',invalid_job_url:'Enter a valid http or https job URL.',sensitive_url:'Use the job posting URL, without sign-in codes or password-reset links.'})[error.message]||error.message;}
+ finally{$('job-url-save').disabled=false;}
+};
 $('select-unfinished').onclick=()=>{state.selected=new Set(visibleJobs(state.view).filter(unfinished).map(j=>j.id));state.queueKey=null;renderQueue(state.view);};
 $('select-visible').onclick=()=>{state.selected=new Set(visibleJobs(state.view).filter(j=>j.disposition==='canceled').map(j=>j.id));state.queueKey=null;renderQueue(state.view);};
 $('clear-selection').onclick=()=>{state.selected.clear();state.queueKey=null;renderQueue(state.view);};
@@ -591,14 +672,18 @@ if($('queue-answered-batch'))$('queue-answered-batch').onclick=async()=>{
  }catch(error){notice(answerError(error),true);}
 };
 $('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:crypto.randomUUID(),producer:'dashboard'});
- $('job-search').value='';state.selected.clear();state.queueKey=null;
+ for(const id of ['job-search','job-source-filter','job-country-filter','job-assessment-filter','job-added-from','job-added-to'])$(id).value='';state.selected.clear();state.queueKey=null;
  if(job.disposition==='canceled'){$('job-filter').value='canceled';notice('This job is already saved as canceled. Restore it here if you want to pursue it again.');}
  else if(submitted(job)){$('job-filter').value='submitted';notice('This job is already saved as submitted.');}
  else{$('job-filter').value='active';state.selected.add(job.id);notice('Job saved and selected. Choose Queue selected to apply.');}
  $('intake-form').reset();await refresh();}catch(err){notice(err.message,true);}};
 $('mark-ready').onclick=async()=>{try{if(!state.selected.size)throw Error('Select at least one job.');for(const id of state.selected)await api('eligibility',{job_id:id,decision:'ready',reason:'Explicit operator approval'});notice('Selected eligibility recorded.');await refresh();}catch(e){notice(e.message,true);}};
 $('request-run').onclick=async()=>{try{if(!state.selected.size||!$('candidate').value||!$('browser-profile').value.trim())throw Error('Select jobs, candidate and exact browser profile.');const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:[...state.selected],identity_id:$('candidate').value,browser_profile:$('browser-profile').value.trim()});state.run=r.id;state.attempt=null;notice('Run requested; waiting for worker acceptance.');tab('run');await refresh();}catch(e){notice(e.message,true);}};
-if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{
+if($('start-application-btn')){$('start-application-btn').onclick=async()=>{
+ if(state.queueSubmitting)return;
+ state.queueSubmitting=true;selection();
+ const orderedIds=visibleJobs(state.view).filter(job=>state.selected.has(job.id)).map(job=>job.id);
+ try{
  if(state.view?.local_runtime?.workspaces?.length){
   if(!state.selected.size)throw Error('Select at least one job.');
   const identity_id=$('candidate').value;
@@ -606,8 +691,8 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{
   if(!asset)throw Error('Choose a candidate with a registered resume.');
   const submission_mode=$('main-submission-mode').value;
   if(submission_mode!==state.view.settings.values.submission_mode)await api('configure',{changes:{submission_mode,mode:submission_mode==='submit'?'pilot':'development'},expected_version:state.settingsVersion});
-  await api('queue_enqueue',{job_ids:[...state.selected],identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true,producer:'dashboard',enqueue_origin:'manual_retry'});
-  state.selected.clear();notice('Retry requested. Applications run one at a time; existing scheduled retries keep their due time.');await refresh();return;
+  const result=await api('queue_enqueue',{job_ids:orderedIds,identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_enqueue'});
+  state.selected.clear();notice(`${result.items.length} selected job(s) requested in table order. ${result.queue?.worker_online===false?'The worker is offline; requests are saved until it returns.':'The worker runs them one at a time after the current application and earlier manual requests, ahead of automatic pickups.'}`);await refresh();return;
  }
  if(!state.selected.size)throw Error('Please select at least one job from the queue.');
  const candidateId=$('candidate').value;if(!candidateId)throw Error('Please select a candidate.');
@@ -619,9 +704,10 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{try{
  const opMode=chosenSubMode==='submit'?'pilot':'development';
  await api('configure',{changes:{reasoning_provider:'openai-codex',reasoning_model:chosenModel,reasoning_effort:chosenEffort,submission_mode:chosenSubMode,mode:opMode,browser_mode:chosenBrowserMode},expected_version:state.settingsVersion});
  for(const id of state.selected){await api('eligibility',{job_id:id,decision:'ready',reason:'Operator approved start application'});}
- const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:[...state.selected],identity_id:candidateId,browser_profile:browserProfile});
+ const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:orderedIds,identity_id:candidateId,browser_profile:browserProfile});
  state.run=r.id;state.attempt=null;tab('run');notice('Application run started; waiting for worker acceptance.');await refresh();
-}catch(err){notice(err.message,true);}};}
+}catch(err){notice(err.message,true);}finally{state.queueSubmitting=false;selection();}};}
+$('queue-selected-jobs').onclick=()=>$('start-application-btn').onclick();
 if($('queue-run-next'))$('queue-run-next').onclick=async()=>{try{const q=await api('queue_control',{command:'run_next'});notice(runNextMessage(q));await refresh();}catch(e){notice(e.message,true);}};
 if($('queue-toggle'))$('queue-toggle').onclick=async()=>{try{await api('queue_control',{command:state.view?.dispatch_queue?.enabled?'pause':'resume'});await refresh();}catch(e){notice(e.message,true);}};
 $('run-picker').onchange=()=>{state.run=$('run-picker').value;state.attempt=null;refresh();};

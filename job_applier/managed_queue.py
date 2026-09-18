@@ -112,11 +112,12 @@ class QueueServices:
                 items.append(dict(self._get(db,'dispatch_queue',item_id)))
             if start_now:
                 for item in items:
-                    db.execute('INSERT OR IGNORE INTO dispatch_immediate_requests(request_id,job_id,item_id,requested_at) VALUES (?,?,?,?)',
+                    receipt=db.execute('INSERT OR IGNORE INTO dispatch_immediate_requests(request_id,job_id,item_id,requested_at) VALUES (?,?,?,?)',
                                (request_id,item['job_id'],item['id'],self.now()))
                     if item['state']=='queued':
-                        db.execute('UPDATE dispatch_queue SET immediate_requested_at=COALESCE(immediate_requested_at,?) WHERE id=?',
-                                   (self.now(),item['id']))
+                        if receipt.rowcount:
+                            db.execute('UPDATE dispatch_queue SET immediate_requested_at=? WHERE id=?',
+                                       (self.now(),item['id']))
                         db.execute('UPDATE dispatch_control SET wake_requested=1 WHERE id=1')
                 items=[dict(self._get(db,'dispatch_queue',item['id'])) for item in items]
         return {'items':items, **({'queue':self.queue_status()} if start_now else {})}
@@ -165,7 +166,10 @@ class QueueServices:
         with self.tx() as db:
             if db.execute("SELECT 1 FROM dispatch_queue WHERE state='dispatched'").fetchone():return None
             schedule=attempt_schedule([dict(r) for r in db.execute('SELECT * FROM dispatch_queue ORDER BY rowid')])
-            for row in db.execute("SELECT * FROM dispatch_queue WHERE state='queued' ORDER BY immediate_requested_at IS NULL,immediate_requested_at,created_at,rowid").fetchall():
+            for row in db.execute("""SELECT * FROM dispatch_queue WHERE state='queued'
+                    ORDER BY immediate_requested_at IS NULL,immediate_requested_at,
+                    (SELECT MAX(r.rowid) FROM dispatch_immediate_requests r WHERE r.item_id=dispatch_queue.id),
+                    created_at,rowid""").fetchall():
                 if datetime.fromisoformat(schedule[row['id']]['next_attempt_at'])>datetime.fromisoformat(self.now()):continue
                 try:self._eligible(db,row['job_id'],self._settings_record(db)['values'])
                 except ProtocolError as exc:

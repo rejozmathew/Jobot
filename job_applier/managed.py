@@ -182,6 +182,32 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                     db.execute('INSERT INTO source_observations VALUES (?,?,?,?,?,?)',(uid(),source['id'],*context,now))
             return dict(db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone())
 
+    def update_job_url(self, *, job_id, url, expected_url):
+        """Correct a saved posting link without replacing its identity or history."""
+        canonical=canonical_url(url)
+        new_key=job_key(canonical)
+        identity=linkedin_identity(canonical) or workday_identity(canonical) or greenhouse_query_identity(canonical)
+        keys={new_key}
+        if identity:keys.add(hashlib.sha256(dumps(['requisition_query',identity]).encode()).hexdigest())
+        with self.tx() as db:
+            job=self._get(db,'jobs',job_id)
+            if job['url']!=expected_url:raise ProtocolError('job_url_changed','This URL changed since you opened the editor. Reopen it to edit the latest URL.')
+            if job['url']==canonical:return dict(job)
+            # Reuse intake identity rules; never silently combine two saved jobs.
+            conflict=any(db.execute('SELECT 1 FROM job_identity_keys WHERE identity_key=? AND job_id<>?',(key,job_id)).fetchone() for key in keys)
+            if conflict or any(same_job_url(row['url'],canonical) for row in db.execute('SELECT url FROM jobs WHERE id<>?',(job_id,))):
+                raise ProtocolError('job_url_in_use','That URL belongs to another saved job. Open that job to edit its link.')
+            try:keys.add(job_key(job['url']))
+            except (ValueError,ProtocolError):pass  # A malformed legacy URL can still be corrected.
+            for key in keys:
+                db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(key,job_id,'operator_url_correction'))
+            now=self.now();metadata=json.loads(job['metadata_json'] or '{}')
+            history=metadata.get('url_history')
+            if not isinstance(history,list):history=[]
+            metadata['url_history']=[*history,{'previous_url':job['url'],'url':canonical,'changed_at':now,'source':'operator'}]
+            db.execute('UPDATE jobs SET url=?,metadata_json=?,updated_at=? WHERE id=?',(canonical,dumps(metadata),now,job_id))
+            return dict(self._get(db,'jobs',job_id))
+
     def _enrich_job(self,db,job,*,url,company=None,title=None,source,preview=False):
         """Keep identity/outcomes and explicit labels; retain per-label provenance."""
         from .managed_identity import is_same_application_scope
