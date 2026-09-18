@@ -21,7 +21,7 @@ Find live official roles for the selected candidate profile, verify links, or im
 
 ## Procedure
 1. Read target level, location, work-authorization constraints and dynamic exclusions from selected policy. A senior-manager/IC role is not automatically level-equivalent to senior leadership.
-2. Re-verify the dated [ATS map](references/ats-map-2026-08.md). Use `web_search`, `web_extract`, the configured browser, and the preserved [ATS classifier](scripts/ats_probe.py) as appropriate; never assume a stored host remains current.
+2. Use the [ATS map](references/ats-map-2026-08.md) as leads and verify each selected live posting. Rechecking the entire map is unnecessary. Use `web_search`, `web_extract`, the configured browser, and the preserved [ATS classifier](scripts/ats_probe.py) as appropriate; never assume a stored host remains current.
 3. Greenhouse public API: `https://boards-api.greenhouse.io/v1/boards/{slug}/jobs`. Workday CXS searches use the verified host, tenant and site in a same-origin context. See [discovery and handoff](references/discovery-and-handoff.md).
 4. Validate official-live status and explicit incompatibilities before any form work. Apply the verdict set **Strong apply / Apply / Apply with caveats / Skip**, with honest level, gaps and sponsorship risk; no fabricated fit scores. Capture verified `country` (ISO two-letter code) and `posted_at` (original posting date, `YYYY-MM-DD`) when available. An update or discovery timestamp is not a posting date; omit unavailable fields.
 5. Account for every recovered role, including closed, excluded, incompatible, weaker-fit and blocked items. Keep source IDs and original URLs; deduplicate through app identity rules, not blanket query stripping.

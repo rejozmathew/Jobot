@@ -1,5 +1,21 @@
 # Application runtime: ownership, helper map, and rationale
 
+September 18 throughput repair: the existing navigator bridge can enrich missing
+routes through `integrations/jobnavigator_bridge/resolve_routes.py`. This is an
+intake helper, not an application executor. It observes only a newly created
+background target in the existing signed-in browser, yields to application work,
+and closes its own target. Confirmed routes update the same JobNavigator source
+row through its authenticated API; the existing bridge remains the intake/queue
+writer. Its legacy identity compatibility preserves receipt keys. See the
+integration README for installed callers and the user timer.
+
+Discovery now instructs the executor to publish each verified checkpoint through
+the existing idempotent intake command. A later model failure can leave an
+incomplete discovery report without discarding already published jobs. Greenhouse
+API board/requisition evidence accompanies alternate employer URLs. Application
+briefs name the LinkedIn and Greenhouse helpers, describe compact checkpoints,
+and provide the CLI fallback for an older in-memory native plugin schema.
+
 This is the authoritative local-session architecture, implemented on Windows in
 September 2026. Older HTTP accept/claim/lease startup is **compatibility only**.
 Historical failures in REVIEW_HANDOFF remain historical evidence. Actual delivery

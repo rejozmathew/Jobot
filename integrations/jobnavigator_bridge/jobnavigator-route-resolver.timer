@@ -1,0 +1,10 @@
+[Unit]
+Description=Revisit unresolved JobNavigator routes during idle application windows
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Unit=jobnavigator-route-resolver.service
+
+[Install]
+WantedBy=timers.target

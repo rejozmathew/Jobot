@@ -1,0 +1,24 @@
+--- a/jobnavigator_bridge/engine.py
++++ b/jobnavigator_bridge/engine.py
+@@ -70,12 +70,20 @@
+                 original = self.identity(source_url)
+                 selected = self.identity(execution_url)
+                 proposed_anchor = digest([original["identity"], job["source"], job["external_id"]])
+-                identity_changed = anchor is not None and anchor != proposed_anchor
++                # Older JobBot versions compared LinkedIn by its canonical URL.
++                # Accept that exact legacy representation only with the same
++                # source and external ID; keep real identity changes reviewable.
++                legacy_anchor = digest([digest([original["canonical"]]), job["source"], job["external_id"]])
++                identity_changed = anchor is not None and anchor not in (proposed_anchor, legacy_anchor)
+                 if identity_changed and not approved and not rejected:
+                     if decision.status not in ("excluded", "unavailable"):
+                         decision = Decision("held_for_review", "source_identity_changed")
+                 else:
+                     proposed_url, proposed_target = selected["canonical"], selected["identity"]
++                    # Identity implementation changes do not change an execution
++                    # route. Preserve the durable stage/receipt key for this URL.
++                    if target is not None and anchor_url == proposed_url:
++                        proposed_target = target
+                     old_stage = self.state.stage(target) if target else None
+                     completed_old_route = (old_stage and old_stage["intake_state"] == "ack" and
+                                            old_stage["enqueue_state"] in ("ack", "not_requested"))

@@ -31,6 +31,8 @@ def harvest_brief(config, service, records_file, *, enqueue=False, batch_size=No
     profile=next((executor[i+1] for i,part in enumerate(executor[:-1]) if part=='--profile'),None)
     if profile:command+=['--discovery-profile',profile]
     if enqueue:command.append('--enqueue')
+    checkpoint_command=list(command)
+    checkpoint_command[checkpoint_command.index('--input')+1]=str(records_file.with_name('checkpoint.json'))
     return f'''# Scheduled job discovery — not an application session
 
 Read {REPOSITORY/'skills/job-posting-harvest/SKILL.md'} and follow its discovery procedure.
@@ -74,7 +76,11 @@ eligibility facts. Filter titles/location before reading individual descriptions
 Use the provided intake command directly; reading its source is not required.
 For Greenhouse job details, the description is the JSON `content` field.
 After each verified role, atomically save the current sanitized record array to
-{records_file.with_name('checkpoint.json')}. Keep concise search progress and
+{records_file.with_name('checkpoint.json')}, then immediately publish that verified
+array through this idempotent command argv:
+{json.dumps(checkpoint_command,ensure_ascii=False)}
+Read the per-item receipt before continuing discovery. This preserves useful
+intake even if the model later loses context. Keep concise search progress and
 rejected-URL notes in a separate scratch file. Compaction must retain these paths,
 the selected candidate constraints, and the next useful search. If a prior
 checkpoint is supplied, use it as leads, recheck live status and current policy,
@@ -88,6 +94,13 @@ alerts, source_id identifies the message and the particular job link, not the
 whole mailbox or just the sender. Keep source references stable across reruns.
 Use verdicts Strong apply / Apply / Apply with caveats / Skip. Optionally include validated
 namespace, requisition_id and identity_evidence; no fabricated fit percentages.
+For a verified Greenhouse boards API job, use namespace equal to its board_slug,
+requisition_id from the API's requisition_id (or its id when unavailable), and identity_evidence identifying the
+boards API URL and its absolute_url. Carry the same identity when the employer
+absolute_url and the board URL refer to that API job; this prevents duplicate
+applications through different URL spellings. Reuse an existing retained namespace
+and requisition when rediscovering the job. Never infer a board from a company
+name or a numeric ID alone.
 Also include country as an ISO two-letter code and posted_at as YYYY-MM-DD when
 the source verifies them. posted_at is the original posting date, not a last
 updated date or today's discovery date. Omit unavailable country/date fields.

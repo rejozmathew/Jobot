@@ -39,6 +39,8 @@ facts, selected resume, retained account strategy, saved answers and relevant
 lessons. Do not invent facts, choose another mailbox, or reconstruct the resume.
 
 ## ATS reminders — read the applicable reference while the browser prepares
+LinkedIn Easy Apply: {root/'job-apply'/'references'/'linkedin.md'}; use
+linkedin_easy_apply with {{"seconds":60}} in this owned session for routine filling and navigation.
 Workday: {root/'workday-simplify'/'SKILL.md'}; use the Workday fast_forward helper
 for routine work, then executor-led recovery when its bounded call returns.
 Greenhouse: {root/'job-apply'/'references'/'greenhouse.md'}; call greenhouse_advance
@@ -53,6 +55,21 @@ observed Apply / Email / Next controls. A login route is not a different job.
 Other portals: shared browser tools and approved profile facts; the actual page
 is authoritative. Re-detect the platform after an employer redirect. A known
 hostname or a passing fixture is not a guarantee that the current form works.
+If an already-running native plugin has an older operation enum, invoke the
+deployed helper through {sys.executable} -m job_applier.application_runtime call
+<session-id> <operation> --parameters '<JSON>'. Use the same owned session;
+the CLI reaches the current runtime without restarting the user's other chats.
+
+## Keep useful context small
+Use the session helper first and carry forward its session ID, current step,
+unresolved questions and next action. Fetch approved context once; retrieve a
+specific missing fact when needed. Save large DOM/API outputs in private scratch
+files and return only the relevant controls, errors and changed state to the
+conversation. When a helper returns unresolved questions, answer the whole
+supported batch from approved facts. After compaction, resume the same session
+from a short checkpoint containing IDs, current page, attempted recovery and
+next action. An unchanged snapshot adds no progress; choose a different recovery
+or use the screenshot and current controls to resolve the outstanding issue.
 
 ## Simplify and recovery
 Use enabled Simplify Autofill promptly for bulk filling, then inspect residuals.
