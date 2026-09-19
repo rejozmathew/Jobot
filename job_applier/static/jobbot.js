@@ -517,9 +517,84 @@ function renderResources(v){
  $('assessment-list').replaceChildren();for(const a of v.assessments||[]){const row=el('div',undefined,'event');row.append(el('strong',a.recommendation),el('p',a.score===null?'Unassessed':`${a.score} on scale ${a.scale_min}–${a.scale_max}; not a probability`),el('p',`${a.evaluator} / ${a.model} · ${stamp(a.evaluated_at)}`),el('p',(a.reasons||[]).join('; ')));$('assessment-list').append(row);}if(!v.assessments?.length)$('assessment-list').append(el('p','No external assessments registered.'));
  choice('asset-identity',[['','Select candidate'],...v.candidates.filter(c=>c.state==='active').map(c=>[c.id,c.email+' · '+c.id])]);choice('select-asset',[['','Select version'],...(v.assets||[]).map(a=>[a.id,a.identity_id+' · '+a.kind+' '+a.version])]);choice('select-asset-job',[['','Select job'],...v.jobs.map(j=>[j.id,j.title||j.id])]);
 }
+async function loadModelCatalog(refresh=false){
+ if(state.modelCatalogLoading)return;
+ state.modelCatalogLoading=true;$('refresh-models').disabled=true;
+ $('model-catalog-status').textContent='Loading models from the executor…';
+ try{state.modelCatalog=await api('model_catalog',{refresh});}
+ catch{state.modelCatalog={executor:state.view?.local_runtime?.workspaces?.length?'unknown':'external',status:'unavailable',providers:[]};}
+ finally{state.modelCatalogLoading=false;$('refresh-models').disabled=false;renderModelSelection();}
+}
+function renderModelSelection(){
+ if(!state.modelDraft)return;
+ const catalog=state.modelCatalog||{},draft=state.modelDraft;
+ const local=state.view?.local_runtime?.workspaces?.length||['hermes_desktop','hermes_cli'].includes(catalog.executor);
+ const inherits=local&&!draft.override;
+ const providers=catalog.providers||[];
+ const options=[['','Use executor default'],...providers.map(p=>[p.id,p.name]),['__manual__','Custom…']];
+ const selected=draft.manual?'__manual__':inherits||!draft.provider?'':providers.some(p=>p.id===draft.provider)?draft.provider:'__manual__';
+ choice('settings-provider',options,selected);
+ $('settings-custom-provider').value=draft.provider||'';
+ $('settings-custom-model').value=draft.model||'';
+ $('settings-effort').value=draft.effort||'low';
+ $('settings-worker-label').hidden=Boolean(local);
+ $('model-executor-note').textContent=local
+  ?`Worker: ${catalog.executor==='hermes_cli'?'Hermes CLI':catalog.executor==='hermes_desktop'?'Hermes Desktop':'configured application executor'}. The runtime selects this worker; model choices come from its configured providers.`
+  :'Worker selects the application executor. Provider and model request a matching worker; Custom accepts the IDs configured in that worker.';
+ const current=catalog.model?` Executor default: ${providers.find(p=>p.id===catalog.provider)?.name||catalog.provider} / ${catalog.model}.`:'';
+ $('model-catalog-status').textContent=(catalog.status==='available'?'Models supplied by Hermes.':catalog.status==='unavailable'
+  ?'Model list unavailable. Your selection is preserved; retry Refresh models or enter Custom IDs.'
+  :catalog.status==='manual'?'This worker does not expose a model catalog. Use Custom IDs or its default.':'Loading available models…')+current;
+ updateModelControls();
+}
+function updateModelControls(){
+ const provider=$('settings-provider').value,draft=state.modelDraft;
+ const row=state.modelCatalog?.providers?.find(p=>p.id===provider);
+ const models=(row?.models||[]).map(m=>[m,m]);
+ if(draft?.provider===provider&&draft.model&&!models.some(m=>m[0]===draft.model))models.unshift([draft.model,draft.model+' (saved)']);
+ models.push(['__manual__','Enter model ID…']);
+ choice('settings-model',models,draft?.provider===provider?draft.model:undefined);
+ const manual=provider==='__manual__'||$('settings-model').value==='__manual__';
+ $('settings-model-label').hidden=!provider||provider==='__manual__';
+ $('settings-custom-provider-label').hidden=provider!=='__manual__';
+ $('settings-custom-model-label').hidden=!provider||!manual;
+ const model=manual?$('settings-custom-model').value:$('settings-model').value;
+ $('settings-effort-label').hidden=!provider||row?.capabilities?.[model]?.reasoning===false;
+}
+function rememberModelSelection(){
+ const provider=$('settings-provider').value;
+ state.modelDraft={provider:provider==='__manual__'?$('settings-custom-provider').value.trim():provider,
+  model:provider?((provider==='__manual__'||$('settings-model').value==='__manual__')?$('settings-custom-model').value.trim():$('settings-model').value):'',
+  effort:$('settings-effort').value,override:Boolean(provider),manual:provider==='__manual__'};
+}
+function modelSettingsChanges(){
+ rememberModelSelection();const draft=state.modelDraft;
+ if(draft.override&&(!draft.provider||!draft.model))throw Error('Choose a provider and model, or use the executor default.');
+ return {reasoning_provider:draft.provider||null,reasoning_model:draft.model||null,
+  reasoning_effort:draft.effort||'low',application_model_override:draft.override};
+}
+$('settings-provider').onchange=()=>{
+ const provider=$('settings-provider').value;
+ state.modelDraft={...state.modelDraft,provider,model:'',override:Boolean(provider)};
+ $('settings-custom-provider').value=provider==='__manual__'?'':provider;
+ $('settings-custom-model').value='';$('settings-model').value='';updateModelControls();rememberModelSelection();
+};
+$('settings-model').onchange=()=>{const manual=$('settings-model').value==='__manual__';
+ $('settings-custom-model-label').hidden=!manual;rememberModelSelection();
+ const row=state.modelCatalog?.providers?.find(p=>p.id===$('settings-provider').value);
+ $('settings-effort-label').hidden=row?.capabilities?.[state.modelDraft.model]?.reasoning===false;
+};
+for(const id of ['settings-custom-provider','settings-custom-model','settings-effort'])$(id).oninput=rememberModelSelection;
+$('refresh-models').onclick=()=>{rememberModelSelection();loadModelCatalog(true);};
 function renderSettings(s){
  $('settings-version').textContent=`Version ${s.version}`;
  if(state.settingsVersion===s.version)return;state.settingsVersion=s.version;
+ state.modelDraft={provider:s.values.reasoning_provider,model:s.values.reasoning_model,
+  effort:s.values.reasoning_effort,override:s.values.application_model_override};
+ choice('settings-worker',(s.supported?.worker||['external','hermes']).map(x=>[x,x]),s.values.worker);
+ choice('settings-effort',(s.supported?.reasoning_effort||['low','medium','high','xhigh']).map(x=>[x,x]),s.values.reasoning_effort);
+ renderModelSelection();
+ if(!state.modelCatalog)loadModelCatalog();
  const modelPicker=$('main-model-picker');
  if(modelPicker){
   const models=[['gpt-5.6-luna','Luna (gpt-5.6-luna)'],['gpt-5.6-terra','Terra (gpt-5.6-terra)']];
@@ -533,6 +608,7 @@ function renderSettings(s){
  const box=$('setting-fields');box.replaceChildren();const discoveryBox=$('discovery-setting-fields');discoveryBox?.replaceChildren();
  const discoveryLabels={discovery_batch_size:'Maximum jobs per discovery run',discovery_interval_hours:'Discover jobs every (hours)'};
  for(const [key,value]of Object.entries(s.values)){const label=el('label',discoveryLabels[key]||key.replaceAll('_',' '));let input;
+  if(['worker','reasoning_provider','reasoning_model','reasoning_effort','application_model_override'].includes(key))continue;
   if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const o=el('option',x);o.value=x;input.append(o);}input.value=value;}
   else {input=el('input');if(typeof value==='boolean'){input.type='checkbox';input.checked=value;}else if(typeof value==='number'){input.type='number';input.value=value;const range=s.budget_ranges?.[key];if(range){input.min=range[0];input.max=range[1];}}else{input.type='text';input.value=Array.isArray(value)?value.join(', '):(value??'');}}
   if(key==='discovery_batch_size'){input.min=1;input.max=100;input.step=1;}
@@ -713,7 +789,7 @@ if($('queue-toggle'))$('queue-toggle').onclick=async()=>{try{await api('queue_co
 $('run-picker').onchange=()=>{state.run=$('run-picker').value;state.attempt=null;refresh();};
 for(const b of document.querySelectorAll('[data-control]'))b.onclick=async()=>{try{const r=state.view?.current_run;if(!r)throw Error('No run selected.');await api('control',{run_id:r.run_id,command:b.dataset.control});notice('Control request recorded; observe acknowledgement.');await refresh();}catch(e){notice(e.message,true);}};
 $('copy-handoff').onclick=async()=>{const r=state.view?.current_run;if(!r)return;const text=`Use the canonical job-apply skill to accept JobBot run ${r.run_id} in instance ${state.instance}; pull one job at a time and obey app controls.`;try{await navigator.clipboard.writeText(text);notice('Worker handoff copied.');}catch{notice(text);}};
-$('settings-form').onsubmit=async e=>{e.preventDefault();try{const changes={};for(const n of document.querySelectorAll('[data-setting]')){const k=n.dataset.setting,kind=n.dataset.kind;changes[k]=kind==='boolean'?n.checked:kind==='number'?Number(n.value):kind==='list'?n.value.split(',').map(x=>x.trim()).filter(Boolean):kind==='nullable'?(n.value.trim()||null):n.value;}await api('configure',{changes,expected_version:state.settingsVersion});notice('Settings saved for new requests.');await refresh();}catch(err){notice(err.message,true);}};
+$('settings-form').onsubmit=async e=>{e.preventDefault();try{const changes=modelSettingsChanges();for(const n of document.querySelectorAll('[data-setting]')){const k=n.dataset.setting,kind=n.dataset.kind;changes[k]=kind==='boolean'?n.checked:kind==='number'?Number(n.value):kind==='list'?n.value.split(',').map(x=>x.trim()).filter(Boolean):kind==='nullable'?(n.value.trim()||null):n.value;}await api('configure',{changes,expected_version:state.settingsVersion});notice('Settings saved for new requests.');await refresh();}catch(err){notice(err.message,true);}};
 (async()=>{try{const data=await request('/session',undefined,'GET');state.instance=data.instance_id;showConsole();await refresh();}catch{showLogin();}})();
 $('helper-form').onsubmit=async e=>{e.preventDefault();try{const scope={};if($('helper-platform').value)scope.platform=$('helper-platform').value;if($('helper-namespace').value)scope.namespace=$('helper-namespace').value;await api('helper_register',{helper_id:$('helper-id').value,version:$('helper-version').value,capability:$('helper-capability').value,path:$('helper-path').value,sha256:$('helper-hash').value,scope,preconditions:[],limitations:[],tests:$('helper-tests').value.split('\n').filter(Boolean)});notice('Candidate helper version registered, not activated.');$('helper-form').reset();await refresh();}catch(err){notice(err.message,true);}};
 $('asset-form').onsubmit=async e=>{e.preventDefault();try{await api('register_asset',{identity_id:$('asset-identity').value,kind:$('asset-kind').value,version:$('asset-version').value,storage_ref:$('asset-ref').value,sha256:$('asset-hash').value,provenance:{source:$('asset-source').value}});notice('External document metadata registered; not selected or uploaded.');$('asset-form').reset();await refresh();}catch(err){notice(err.message,true);}};

@@ -1,5 +1,22 @@
 # Application runtime: ownership, helper map, and rationale
 
+Settings model selection: `managed_settings.SettingsServices.model_catalog` exposes
+an operator-only, read-only catalog through `model_settings.model_catalog`, using
+the configured Hermes Desktop profile's `model.options` RPC. Only provider/model
+identifiers, labels and reasoning capability are returned; credentials and endpoint
+URLs stay with Hermes. `queue_runtime.dispatch_one` reads the latest settings once
+through `model_settings.application_selection` and freezes that choice in the
+dispatch's private runtime file. `hermes_desktop.run_session` passes it to
+`session.create`; the Hermes CLI path uses explicit provider/model/reasoning flags.
+No running conversation or global Hermes profile is changed. Existing installations
+inherit their executor default until an operator explicitly saves a model override.
+Custom external commands retain their own model configuration; legacy worker
+requests still use the existing settings/capability matching contract.
+
+The canonical job-apply prompt also carries the user's approved earliest-start
+fallback: calculate 14 calendar days from the current date when no more specific
+approved availability exists, formatted for the employer's date control.
+
 September 18 throughput repair: the existing navigator bridge can enrich missing
 routes through `integrations/jobnavigator_bridge/resolve_routes.py`. This is an
 intake helper, not an application executor. It observes only a newly created

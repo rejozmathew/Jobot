@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.16
+version: 0.5.17
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -168,6 +168,20 @@ belong in their parameters. Native `milestone` maps to `event`, `observe` to
 Native `context`, `report`, and `browser_observe` accept empty parameters.
 
 ## Execute
+
+### Approved earliest start date
+
+The user's standing default for earliest anticipated start date / availability
+to start a new job is **14 calendar days from today**, when no more specific
+approved value exists in the selected profile, saved answers or lessons.
+Calculate it from the current date in the user's configured timezone when
+answering the form, including month/year rollover; do not reuse a date calculated
+for an earlier application. For a field requesting **MM/DD/YYYY**, enter the
+calculated date in that format. For separate month/day/year controls, enter the
+same date's components. This is an approved answer, so a missing explicit date in
+the profile does not require asking the user. This availability default concerns
+starting the prospective job; employment-history and education dates still come
+from their approved facts.
 
 1. Verify the actual role remains eligible and the selected identity, account
    email, contact email, resume and mailbox are the approved ones. Exclusions,

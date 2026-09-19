@@ -310,6 +310,19 @@
       </div>
       <p>Operational settings apply to new requests. Existing attempts retain their immutable snapshots.</p>
       <form id="settings-form">
+        <h3>Application model</h3>
+        <p id="model-executor-note">Choose the provider, then the model for new applications.</p>
+        <div id="model-setting-fields" class="settings-grid">
+          <label id="settings-worker-label">Worker<select id="settings-worker" data-setting="worker" data-kind="string"></select></label>
+          <label>Provider<select id="settings-provider" aria-describedby="model-catalog-status"></select></label>
+          <label id="settings-model-label">Model<select id="settings-model"></select></label>
+          <label id="settings-custom-provider-label" hidden>Custom provider<input id="settings-custom-provider" type="text" placeholder="Provider ID configured in your worker"></label>
+          <label id="settings-custom-model-label" hidden>Model ID<input id="settings-custom-model" type="text" placeholder="Exact model ID"></label>
+          <label id="settings-effort-label">Reasoning effort<select id="settings-effort"></select></label>
+        </div>
+        <p id="model-catalog-status" role="status"></p>
+        <button id="refresh-models" type="button">Refresh models</button>
+        <p>Save settings to use this selection for the next application. Running applications keep their model. Discovery uses its own executor configuration.</p>
         <h3>Job discovery</h3>
         <p>Find the strongest matches, up to the job limit. These settings apply to the next discovery run. Application pickup is separate.</p>
         <div id="discovery-setting-fields" class="settings-grid"></div>

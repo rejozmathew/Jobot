@@ -124,6 +124,9 @@ def run_session(rpc, prompt, config, receipt_path, *, sleep=time.sleep, owner=No
     if receipt is None:
         params={'source':'desktop','cwd':str(REPOSITORY),'hidden':False,'close_on_disconnect':False}
         if options.get('profile'):params['profile']=options['profile']
+        if config.get('application_model'):
+            params.update(model=config['application_model'],provider=config.get('application_provider'))
+            if config.get('application_effort'):params['reasoning_effort']=config['application_effort']
         created=rpc.call('session.create',params)
         receipt={key:created[key] for key in ('session_id','stored_session_id')}
         receipt.update(state='created',backend_owner=owner)

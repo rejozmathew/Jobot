@@ -14,7 +14,7 @@ def dashboard_check(check):
 const fs=require('fs'),{JSDOM}=require(process.argv[1]),d=JSON.parse(fs.readFileSync(0,'utf8'));
 const w=new JSDOM(d.html,{url:'http://localhost/',runScripts:'outside-only'}).window;
 w.setInterval=()=>0;w.fetch=()=>new Promise(()=>{});
-w.eval(d.script+'\nwindow.draw=v=>{state.view=v;renderQueue(v)};window.drawSettings=renderSettings;window.noRefresh=()=>{refresh=async()=>{}};');
+w.eval(d.script+'\nwindow.draw=v=>{state.view=v;renderQueue(v)};window.drawSettings=renderSettings;window.drawModelSelection=c=>{state.modelCatalog=c;renderModelSelection()};window.noRefresh=()=>{refresh=async()=>{}};');
 const doc=w.document;
 const v={jobs:[],candidates:[],assets:[],answer_queue:{groups:[]},
  dispatch_queue:{installed:true,worker_online:true,enabled:true,counts:{},items:[]},

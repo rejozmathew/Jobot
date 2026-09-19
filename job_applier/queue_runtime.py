@@ -25,12 +25,17 @@ def executor_command(config, prompt_file):
         return [sys.executable,'-m','job_applier.hermes_desktop',str(prompt_file)]
     command=config.get('hermes_command')
     if command is None:
-        return ['hermes','chat','-q',f'Read the complete application task in {prompt_file} and execute only that task.']
+        command=['hermes','chat','-q','Read the complete application task in {prompt_file} and execute only that task.']
     if not isinstance(command,list) or not command or not all(isinstance(x,str) and x for x in command):
         raise ProtocolError('invalid_hermes_command')
     if not any('{prompt_file}' in part for part in command):
         raise ProtocolError('hermes_command_requires_prompt_file')
-    return [part.replace('{prompt_file}',str(prompt_file)) for part in command]
+    result=[part.replace('{prompt_file}',str(prompt_file)) for part in command]
+    from .model_settings import executor_kind
+    if executor_kind(config)=='hermes_cli' and config.get('application_model'):
+        result.extend(['--provider',config['application_provider'],'--model',config['application_model']])
+        if config.get('application_effort'):result.extend(['--reasoning',config['application_effort']])
+    return result
 
 
 def private_write(path, text):
@@ -120,13 +125,15 @@ def dispatch_one(config, service, *, launcher=subprocess.Popen):
     item=service.queue_take()
     if not item:return {'state':'empty'}
     root=Path(config['spool_dir'])/'dispatch'/item['id']
-    child_config=dict(config,identity_id=item['identity_id'],resume_asset_id=item['resume_asset_id'])
+    from .model_settings import application_selection
+    child_config=dict(application_selection(config,service.settings_view()['values']),
+                      identity_id=item['identity_id'],resume_asset_id=item['resume_asset_id'])
     child_config['config_path']=str(root/'runtime.json')
     process=None
     try:
         private_write(root/'runtime.json',json.dumps(child_config,indent=2))
         private_write(root/'task.md',application_brief(child_config,service,item))
-        command=executor_command(config,root/'task.md')
+        command=executor_command(child_config,root/'task.md')
         environment=dict(os.environ,JOBBOT_CONFIG=child_config['config_path'])
         # Do not leak the dispatcher's calling conversation into a new Hermes session.
         environment.pop('HERMES_SESSION_ID',None)
@@ -183,6 +190,7 @@ def serve(config, service):
     from .managed_cli import credential
     from .managed_client import Client
     token=credential(config['operator_token_env'],config)
+    service.executor_config=config
     service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}
     with Client(config['base_url'],config['instance_id'],token):pass
     workers=json.loads(credential(config['worker_tokens_env'],config)) if config.get('worker_tokens_env') else {

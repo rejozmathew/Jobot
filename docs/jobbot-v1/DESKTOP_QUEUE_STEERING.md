@@ -25,7 +25,11 @@ Select it in the private runtime configuration:
 
 `yolo` is per-session and should mirror the deployment's existing `--yolo`
 selection; omit it to inherit native approvals. The application model/provider
-come from the selected Hermes profile. Discovery retains its own CLI command
+inherit the selected Hermes profile by default. JobBot Settings can explicitly
+override the application provider/model for new dispatches using the catalog from
+that profile. The selection is passed to `session.create`, not written back to
+the global profile, and a running application retains its existing model.
+Discovery retains its own CLI command
 and profile. The old application CLI command remains available when the
 `hermes_desktop` selection is removed.
 
