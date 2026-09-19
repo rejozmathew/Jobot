@@ -1,5 +1,49 @@
 # Application runtime: ownership, helper map, and rationale
 
+## September 19: form continuity and application deadline
+
+`application_deadline.py` freezes the Settings `application_time_limit_minutes`
+at dispatch (default 30, zero means Off). `queue_runtime` enforces it independently
+of model output and restores it from the private dispatch config after a restart.
+`hermes_desktop` uses the installed `session.interrupt` API for the exact native
+task and confirms idle state; it never terminates the shared model server.
+`workspace_host.remember_native_driver` calls `hermes_desktop.remember_driver`
+in the background to retain the stable native task ID across chat compression.
+That ID is paired with the current driver and refreshed after an explicit attach.
+`workspace_host` reads the same durable budget from session metadata, refuses
+further actions after expiry and performs owned-target cleanup outside a stuck
+helper lock. Manual starts freeze their own budget; same-request recovery retains
+it. The queue waits for cancellation and browser cleanup acknowledgements. A
+temporarily unreachable backend remains cancellation pending, not falsely stopped.
+The original submission evidence and ordinary retry schedule remain authoritative.
+Settings edits affect future requests, not active attempts. The legacy
+`attempt_seconds` field belongs to the old leased-worker interface and is not
+this local application deadline. The dashboard provides a dedicated time-limit
+control and shows each recorded session's deadline.
+
+`managed_sessions.handoff_target` retains the existing Ubuntu Apply popup/same-tab
+implementation and records observed same-tab continuation from a verified owned
+document. Explicit requisition IDs can match posting paths to registration query
+parameters; an ID-free intermediate requires observed owned navigation. The
+initial employer identity remains available to detect a later conflicting job.
+`managed_runtime.browser_observe` gives `next_operation` the same identity and
+writer decision used by execution, and distinguishes current, assigned and
+application URLs. Query redaction does not remove internal identity evidence.
+Workday dispatch can use an accepted employer handoff instead of only the intake URL.
+
+`browser_controls.inventory` retains read-only fields during route recovery and
+returns missing/invalid required controls, exact action shapes and approved contact
+facts. The shared form reader recognizes native, ARIA, label-asterisk and required
+validator evidence, including a nearby unassociated label for a unique field.
+`application_runtime.browser` method `repair` calls `browser_controls.repair_fields`
+to group existing fill/select/check actions in one connection, checking document,
+writer and ownership state between operations. Upload remains the existing
+selected-asset operation. Browser navigation, shared form observations, answer
+history and Workday/Greenhouse callers retain their original responsibilities.
+Dedicated previous-attempt summaries remain deferred.
+
+Validation and deployment evidence: [September 19 repair](FORM_REPAIR_20260919.md).
+
 Settings model selection: `managed_settings.SettingsServices.model_catalog` exposes
 an operator-only, read-only catalog through `model_settings.model_catalog`, using
 the configured Hermes Desktop profile's `model.options` RPC. Only provider/model

@@ -76,9 +76,14 @@ def settle(service, item):
             session=prior
             break
     attempt=service.attempt(session['attempt_id']) if session and session['attempt_id'] else None
+    root=getattr(service,'desktop_dispatch_spool',None)
+    timed_out=bool(root and (Path(root)/'dispatch'/item['id']/'deadline.json').exists())
+    receipt_path=Path(root)/'dispatch'/item['id']/'desktop-session.json' if root else None
+    if receipt_path and receipt_path.exists():
+        timed_out=timed_out or json.loads(receipt_path.read_text()).get('stop_reason')=='application_time_limit'
     service.queue_complete(item['id'],outcome=(attempt or {}).get('outcome') or 'interrupted',
         detail=(attempt or {}).get('evidence') or (session or {}).get('reason') or
-            'Executor exited without a recorded application outcome.',
+            ('application_time_limit: Application time limit reached' if timed_out else 'Executor exited without a recorded application outcome.'),
         session_id=session['id'] if session else None)
     return True
 
@@ -90,6 +95,9 @@ def recover_dispatch(service):
                 SELECT 1 FROM application_sessions s WHERE s.job_id=q.job_id
                 AND s.identity_id=q.identity_id AND s.ended_at IS NULL))''')]
     for item in rows:
+        if item['state']=='dispatched':
+            from .application_deadline import dispatch_expired
+            dispatch_expired(service,item)
         active=any(not session['ended_at'] for session in find_sessions(service,item))
         if item['state']=='finished' and not active:continue
         if process_matches(json.loads(item['executor_identity_json'] or '{}')):return False
@@ -126,8 +134,12 @@ def dispatch_one(config, service, *, launcher=subprocess.Popen):
     if not item:return {'state':'empty'}
     root=Path(config['spool_dir'])/'dispatch'/item['id']
     from .model_settings import application_selection
-    child_config=dict(application_selection(config,service.settings_view()['values']),
+    effective_settings=service.settings_view()['values']
+    child_config=dict(application_selection(config,effective_settings),
                       identity_id=item['identity_id'],resume_asset_id=item['resume_asset_id'])
+    from .application_deadline import freeze,Deadline,dispatch_expired
+    child_config=freeze(child_config,effective_settings,service.now())
+    deadline=Deadline(child_config['application_deadline'])
     child_config['config_path']=str(root/'runtime.json')
     process=None
     try:
@@ -143,8 +155,11 @@ def dispatch_one(config, service, *, launcher=subprocess.Popen):
         identity=process_identity(process.pid)
         with service.tx() as db:
             db.execute('UPDATE dispatch_queue SET executor_identity_json=? WHERE id=?',(dumps(identity or {}),item['id']))
+        item=dict(item,executor_identity_json=dumps(identity or {}))
         while process.poll() is None:
-            service.queue_heartbeat(process_identity(os.getpid()),current_item=item['id'],detail='In progress')
+            expired=dispatch_expired(service,item,clock=deadline)
+            service.queue_heartbeat(process_identity(os.getpid()),current_item=item['id'],
+                detail='Application time limit reached; stopping executor and cleaning up' if expired else 'In progress')
             time.sleep(2)
         finished=settle(service,item)
         return {'state':'finished' if finished else 'closing_browser','item_id':item['id'],'executor_exit_code':process.returncode}

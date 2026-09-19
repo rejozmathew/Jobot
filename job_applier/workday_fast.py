@@ -622,11 +622,18 @@ def advance(config,client,ownership,params):
     if history_matches(config.get('legacy_history_paths',[]),package['job']['url']):
         return {'status':'blocked','reason':'legacy_history_suppression'}
     from .managed_context import platform_for_url
-    if platform_for_url(package['job']['url'])!='workday':raise ValueError('workday_only')
+    handed_off=False
+    if platform_for_url(package['job']['url'])!='workday':
+        gate=client.call('browser_observe',**ownership,target_id=params['target_id'],cdp_url=config.get('cdp_url'))
+        if gate.get('platform')!='workday' or gate.get('identity',{}).get('status')!='same_job':raise ValueError('workday_only')
+        route=gate.get('application_url') or gate.get('url')
+        if platform_for_url(route)!='workday':route=gate['url']
+        package=dict(package,job=dict(package['job'],url=route),platform='workday')
+        handed_off=True
     endpoint=urlsplit(config.get('cdp_url',''))
     if endpoint.scheme!='http' or endpoint.hostname not in ('127.0.0.1','localhost','::1') or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment or endpoint.path:
         raise ValueError('explicit_loopback_cdp_required')
-    client.call('bind_target',**ownership,target_id=params['target_id'],url=package['job']['url'])
+    if not handed_off:client.call('bind_target',**ownership,target_id=params['target_id'],url=package['job']['url'])
     spool=Path(config['spool_dir'])
     if not spool.is_absolute():raise ValueError('absolute_spool_required')
     spool.mkdir(parents=True,exist_ok=True)

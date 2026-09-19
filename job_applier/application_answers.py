@@ -242,8 +242,8 @@ def approved_answer(question, profile):
            'phone':'phone','phone number':'phone','mobile phone number':'phone','linkedin profile':'linkedin','website':'website'}
     if label in names:return identity.get(names[label])
     address=identity.get('address') or {}
-    if label in ('city','state','country','zip','postal code','street address') and isinstance(address,dict):
-        return address.get({'postal code':'zip','street address':'street'}.get(label,label))
+    if label in ('city','state','country','zip','zip code','postal code','street address','address','address line 1') and isinstance(address,dict):
+        return address.get({'postal code':'zip','zip code':'zip','street address':'street','address':'street','address line 1':'street'}.get(label,label))
     if label in ('location','city, state','city, state, country'):return identity.get('location')
     if label in ('total years of experience','years of work experience','total professional experience'):
         return profile.get('years_experience')

@@ -200,6 +200,29 @@ def is_workday_application_scope(job_url, candidate_url):
     return workday_identity(urlunsplit((p.scheme, p.netloc, destination.path, '', ''))) == expected
 
 
+def form_route_identity(url):
+    """Explicit requisition evidence on generic posting/registration routes.
+
+    This is a live-flow comparison only: it does not rewrite historical keys.
+    Unknown query parameters and employer path prefixes remain significant.
+    """
+    try:
+        p=urlsplit(canonical_url(url))
+        keys={'jobid','job_id','reqid','requisitionid','requisition_id'}
+        query=parse_qsl(p.query,keep_blank_values=True)
+        values=[v for k,v in query if k.casefold() in keys]
+        parts=p.path.strip('/').split('/')
+        markers={'jobdetail','jobs','job','positions','postings'}
+        index=next((i for i,part in enumerate(parts[:-1]) if part.casefold() in markers and
+                    re.fullmatch(r'[A-Za-z0-9_.-]*\d[A-Za-z0-9_.-]*',parts[i+1])),None)
+        if index is not None:values.append(parts[index+1])
+        if not values or len(set(values))!=1 or not re.fullmatch(r'[A-Za-z0-9_.-]{1,150}',values[0]):return None
+        prefix='/'.join(parts[:index] if index is not None else parts[:-1]).casefold()
+        opaque=tuple((k,v) for k,v in query if k.casefold() not in keys)
+        return p.scheme,p.netloc,prefix,values[0],opaque
+    except (ValueError,ProtocolError):return None
+
+
 def application_match(job_url, candidate_url):
     """Separate a conflicting identity from a page the helper cannot recognize."""
     if is_same_application_scope(job_url, candidate_url):return {'status': 'same_job'}
@@ -214,6 +237,8 @@ def application_match(job_url, candidate_url):
         if gh_expected and gh_actual:different = different or gh_expected != gh_actual
         icims_expected,icims_actual=icims_identity(job_url),icims_identity(candidate_url)
         if icims_expected and icims_actual:different=different or icims_expected!=icims_actual
+        route_expected,route_actual=form_route_identity(job_url),form_route_identity(candidate_url)
+        if route_expected and route_actual:different=different or route_expected[:4]!=route_actual[:4]
         return {'status': 'different_job' if different else 'identity_unresolved'}
     except ValueError:return {'status': 'identity_unresolved'}
 
@@ -252,6 +277,8 @@ def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
             if not query_requisition(job_url) or not query_requisition(candidate_url):return False
             expected_gh,actual_gh=greenhouse_query_identity(job_url),greenhouse_query_identity(candidate_url)
             if expected_gh and actual_gh:return expected_gh==actual_gh
+        route_expected,route_actual=form_route_identity(job_url),form_route_identity(candidate_url)
+        if route_expected and route_actual:return route_expected==route_actual
         if job_p.query!=cand_p.query:return False
         expected_path = job_p.path.rstrip('/')
         actual_path = cand_p.path.rstrip('/')

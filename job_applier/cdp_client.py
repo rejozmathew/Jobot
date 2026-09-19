@@ -40,10 +40,105 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import ipaddress
 import os
 import re
+import time
 import urllib.request
+from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Any, Optional
+
+
+def _loopback_endpoint(cdp_url: str):
+    endpoint=urlsplit(cdp_url.rstrip('/'))
+    if (endpoint.scheme!='http' or endpoint.hostname not in ('127.0.0.1','localhost','::1')
+            or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment or endpoint.path):
+        raise ValueError('owned_target_requires_loopback_cdp')
+    return endpoint
+
+
+def _public_destination(url: str) -> str:
+    parsed=urlsplit(str(url or '').strip())
+    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
+        return ''
+    host=parsed.hostname.rstrip('.').casefold()
+    if host in ('localhost','localhost.localdomain') or host.endswith('.localhost'):
+        return ''
+    try:
+        address=ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        if not address.is_global:return ''
+    query=parse_qsl(parsed.query,keep_blank_values=True)
+    if any(key.casefold() in ('access_token','refresh_token','otp','password','reset_token','authorization_code')
+           for key,_ in query):return ''
+    tracking={'utm_source','utm_medium','utm_campaign','utm_term','utm_content'}
+    query=sorted((key,value) for key,value in query if key.casefold() not in tracking)
+    return urlunsplit((parsed.scheme.lower(),parsed.netloc.lower(),parsed.path.rstrip('/'),urlencode(query),''))
+
+
+def _target_rows(cdp_url: str) -> list[dict]:
+    _loopback_endpoint(cdp_url)
+    with urllib.request.urlopen(cdp_url.rstrip('/')+'/json/list',timeout=5) as response:
+        rows=json.load(response)
+    return [dict(row,targetId=row.get('targetId') or row.get('id')) for row in rows if row.get('type')=='page']
+
+
+@dataclass(frozen=True)
+class ApplyTargetObservation:
+    cdp_url: str
+    current_target_id: str
+    expected_public_url: str
+    baseline_target_ids: frozenset[str]
+    browser_context_id: Optional[str]
+    armed_at: float
+
+
+def arm_target_observation(cdp_url: str, current_target_id: str, expected_url: Optional[str], *, targets=None):
+    """Snapshot targets before an external Apply activation.
+
+    An in-page/Easy Apply button has no public external destination and therefore
+    does not create a popup requirement.
+    """
+    expected=_public_destination(expected_url)
+    if not expected:return None
+    _loopback_endpoint(cdp_url)
+    rows=[dict(row,targetId=row.get('targetId') or row.get('id')) for row in (targets if targets is not None else _target_rows(cdp_url))]
+    current=next((row for row in rows if row.get('targetId')==current_target_id and row.get('type')=='page'),None)
+    if current is None:raise ValueError('owned_target_not_found')
+    return ApplyTargetObservation(cdp_url.rstrip('/'),current_target_id,expected,
+        frozenset(row.get('targetId') for row in rows if row.get('type')=='page' and row.get('targetId')),
+        current.get('browserContextId'),time.monotonic())
+
+
+async def wait_for_apply_target(observation, *, inventory=None, current_url=None, timeout=2.0, poll_interval=.05):
+    """Resolve only one correlated same-tab or popup destination after Apply."""
+    if observation is None:return None
+    inventory=inventory or (lambda: asyncio.to_thread(_target_rows,observation.cdp_url))
+    deadline=asyncio.get_running_loop().time()+max(0,timeout)
+    while True:
+        live_url=await current_url() if current_url else ''
+        if _public_destination(live_url)==observation.expected_public_url:
+            return {'target_id':observation.current_target_id,'url':live_url,'kind':'same_tab'}
+        rows=await inventory()
+        candidates=[]
+        for raw in rows:
+            row=dict(raw,targetId=raw.get('targetId') or raw.get('id'))
+            target_id=row.get('targetId')
+            if row.get('type')!='page' or not target_id or target_id in observation.baseline_target_ids:continue
+            if observation.browser_context_id is not None and row.get('browserContextId')!=observation.browser_context_id:continue
+            opener=row.get('openerId')
+            if opener is not None and opener!=observation.current_target_id:continue
+            if _public_destination(row.get('url'))==observation.expected_public_url:candidates.append(row)
+        if len(candidates)==1:
+            row=candidates[0]
+            return {'target_id':row['targetId'],'url':row['url'],'kind':'popup'}
+        # Never choose among ambiguous matching tabs, even if one is newer.
+        if len(candidates)>1:return None
+        if asyncio.get_running_loop().time()>=deadline:return None
+        await asyncio.sleep(poll_interval)
 
 
 # ---------------------------------------------------------------------------

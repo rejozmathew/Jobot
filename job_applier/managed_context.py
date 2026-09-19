@@ -20,7 +20,9 @@ class ContextServices:
             if worker_id is not None and attempt['worker_id']!=worker_id:raise ProtocolError('attempt_forbidden')
             from .managed_sessions import local_session
             session=local_session(db,attempt_id)
-            if session:attempt['local_session_id']=session['id']
+            if session:
+                attempt['local_session_id']=session['id']
+                attempt['application_deadline']=json.loads(session['metadata_json']).get('application_deadline')
             job=dict(self._get(db,'jobs',attempt['job_id']))
             metadata=json.loads(job['metadata_json'] or '{}')
             selected_platform=platform or metadata.get('platform') or (attempt['platform'] if attempt['platform']!='unknown' else platform_for_url(job['url']))

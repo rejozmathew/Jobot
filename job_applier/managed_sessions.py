@@ -5,6 +5,7 @@ Legacy leases remain for explicit compatibility runs, never for local sessions.
 """
 import hashlib
 import json
+import re
 from datetime import datetime
 
 from .managed_identity import RELATED
@@ -93,7 +94,7 @@ class SessionServices:
             if selected:
                 run_id=uid();snapshot=dict(settings)
                 # Startup/model gaps are telemetry, not an authorization expiry.
-                # The host enforces optional maximum_runtime_seconds by stopping its child.
+                # The host and dispatcher enforce the frozen application deadline.
                 snapshot['ownership_mode']='local-session-v1'
                 snapshot['browser_mode']=json.loads(self._get(db,'browser_workspaces',selected)['config_json']).get('mode','headed')
                 versions=dict(metadata or {},protocol=2,transport='local',browser_profile=selected)
@@ -231,6 +232,74 @@ class SessionServices:
             meta=json.loads(s['metadata_json']);meta['browser_attachment']=attachment
             db.execute('UPDATE application_sessions SET metadata_json=?,target_id=COALESCE(?,target_id) WHERE id=?',
                        (dumps(meta),target_id,session_id))
+
+    def handoff_target(self, attempt_id, *, worker_id, fence, current_target_id,
+                       new_target_id, url, evidence, expected_url=None, source_url=None):
+        """Atomically move one local session to a correlated application target."""
+        from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope
+        from urllib.parse import urlsplit,urlunsplit
+        if any(not isinstance(value,str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,250}',value)
+               for value in (current_target_id,new_target_id)):
+            raise ProtocolError('invalid_target_id')
+        if not isinstance(evidence,str) or not evidence.strip():raise ProtocolError('evidence_required')
+        canonical=canonical_url(url);identity=job_key(canonical)
+        display=urlunsplit(urlsplit(canonical)._replace(query='',fragment=''))
+        with self.tx() as db:
+            attempt=self._owner(db,attempt_id,worker_id,fence)
+            session=local_session(db,attempt_id)
+            if not session or session['target_id']!=current_target_id:raise ProtocolError('target_not_owned')
+            current=db.execute("SELECT * FROM owned_targets WHERE attempt_id=? AND target_id=? AND state!='closed'",
+                               (attempt_id,current_target_id)).fetchone()
+            if current is None:raise ProtocolError('target_not_owned')
+            job=self._get(db,'jobs',attempt['job_id'])
+            meta=json.loads(session['metadata_json'])
+            anchor=meta.get('application_identity_url') or job['url']
+            alias=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',
+                             (job['id'],identity)).fetchone()
+            correlated=False
+            if expected_url is not None:
+                correlated=canonical_url(expected_url)==canonical
+            if source_url is not None and current_target_id==new_target_id:
+                from .managed_identity import application_match
+                source=canonical_url(source_url)
+                verified_source=(job_key(source)==current['identity_key'] or is_same_application_scope(job['url'],source)
+                                 or is_same_application_scope(current['url'],source))
+                same_origin=urlsplit(source)[:2]==urlsplit(canonical)[:2]
+                no_conflict=all(application_match(base,canonical)['status']!='different_job'
+                                for base in (source,current['url']))
+                if urlsplit(anchor)[:2]==urlsplit(canonical)[:2]:
+                    no_conflict=no_conflict and application_match(anchor,canonical)['status']!='different_job'
+                # Only host-observed navigation from the owned verified document
+                # establishes continuity for an intermediate page without an ID.
+                correlated=verified_source and same_origin and no_conflict
+            if not alias and not is_same_application_scope(job['url'],canonical) and not correlated:
+                raise ProtocolError('target_job_mismatch')
+            occupied=db.execute("SELECT * FROM owned_targets WHERE profile=? AND target_id=? AND state!='closed'",
+                                (attempt['browser_profile'],new_target_id)).fetchone()
+            if occupied and occupied['attempt_id']!=attempt_id:raise ProtocolError('target_owned_elsewhere')
+            now=self.now();safe=safe_text(evidence)
+            if new_target_id==current_target_id:
+                db.execute('UPDATE owned_targets SET url=?,identity_key=?,evidence=?,updated_at=? WHERE id=?',
+                           (display,identity,safe,now,current['id']))
+            elif not occupied:
+                db.execute('INSERT INTO owned_targets(id,attempt_id,profile,target_id,url,state,evidence,created_at,updated_at,identity_key) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                    (uid(),attempt_id,attempt['browser_profile'],new_target_id,display,'open',safe,now,now,identity))
+                db.execute("UPDATE owned_targets SET state='preserved',evidence=?,updated_at=? WHERE id=?",
+                           (safe,now,current['id']))
+                db.execute('INSERT INTO target_history VALUES (?,?,?,?,?)',(uid(),current['id'],'preserved',safe,now))
+            meta=json.loads(session['metadata_json']);attachment=meta.get('browser_attachment')
+            meta['application_route_url']=canonical
+            if source_url is None:meta['application_identity_url']=canonical
+            if source_url is not None:
+                meta['last_application_transition']={'source':source_url.split('?')[0],
+                    'destination':display,'observed_at':now,'evidence':safe}
+            if isinstance(attachment,dict):
+                attachment['target_ids']=sorted(set(attachment.get('target_ids',[]))|{current_target_id,new_target_id})
+                meta['browser_attachment']=attachment
+            db.execute('UPDATE application_sessions SET target_id=?,metadata_json=? WHERE id=?',
+                       (new_target_id,dumps(meta),session['id']))
+            return {'session_id':session['id'],'attempt_id':attempt_id,'job_id':attempt['job_id'],
+                    'target_id':new_target_id,'previous_target_id':current_target_id,'url':display}
 
     def session_stopped(self, session_id, *, reason, paused=False, browser_stopped=False, tabs_closed=False):
         if browser_stopped is not True and tabs_closed is not True:raise ProtocolError('owned_browser_stop_evidence_required')

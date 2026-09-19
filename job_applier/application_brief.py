@@ -16,6 +16,7 @@ def application_brief(config, service, item):
     selection.update(identity_id=item['identity_id'],resume_asset_id=item['resume_asset_id'],
                      platform_hint=platform_for_url(job['url']),submission_mode=settings['submission_mode'],
                      application_email=service.candidate(item['identity_id'])['email'])
+    selection['application_deadline']=config.get('application_deadline',{})
     start=[sys.executable,'-m','job_applier.application_runtime','start','--job-id',job['id'],
            '--config',config['config_path'],'--request-id','queue:'+item['id'],'--wait-seconds','0']
     return f'''# One application — fresh execution context
@@ -23,6 +24,9 @@ def application_brief(config, service, item):
 Apply to exactly ONE job in this fresh conversation. Do not discover or apply to
 other jobs, resume another conversation, or launch another application agent.
 JobBot owns the queue; you own this application's execution and recorded outcome.
+The saved application_deadline below is enforced outside the model. Continue
+recovery within that overall budget; reloads and replacements do not reset it.
+If expires_at is null the operator has turned the overall time limit off.
 
 ## Assigned job and approved selection
 {json.dumps(selection,ensure_ascii=False,indent=2)}

@@ -313,6 +313,8 @@ function renderSessions(v){
   debug.append(el('p',`Host ${s.host_alive?'running':'offline'} · Driver ${s.driver_recently_active?'recently active':'idle or disconnected'} · Writer ${s.writer_state}`));
   debug.append(el('p',`Executor: ${metadata.provider||'unknown'} / ${metadata.model||'unknown'} · effort ${metadata.reasoning_effort||'unknown'}`));
   n.append(el('small',`Requested ${stamp(s.requested_at)} · Connected ${stamp(s.connected_at)} · Ended ${stamp(s.ended_at)} · Total ${duration(s.elapsed_seconds)}`));
+  const deadline=s.metadata?.application_deadline;
+  if(deadline)n.append(el('small',deadline.expires_at?`Time limit: ${deadline.limit_seconds/60} minutes · Deadline ${stamp(deadline.expires_at)}`:'Application time limit: Off'));
   n.append(el('small',`Queue ${duration(s.queue_seconds)} · Browser startup ${duration(s.startup_seconds)} · Last verified progress ${stamp(s.last_verified_progress_at)}`));
   if(s.first_autofill_at)n.append(el('small',`First Autofill ${stamp(s.first_autofill_at)} · Ready to Autofill ${duration(s.ready_to_autofill_seconds)}`));
   if(s.reason)debug.append(el('p',s.reason,'job-reason'));
@@ -589,6 +591,10 @@ $('refresh-models').onclick=()=>{rememberModelSelection();loadModelCatalog(true)
 function renderSettings(s){
  $('settings-version').textContent=`Version ${s.version}`;
  if(state.settingsVersion===s.version)return;state.settingsVersion=s.version;
+ const limit=s.values.application_time_limit_minutes??30;
+ $('settings-time-limit-enabled').checked=limit>0;
+ $('settings-time-limit-minutes').value=limit||30;
+ $('settings-time-limit-minutes').disabled=limit===0;
  state.modelDraft={provider:s.values.reasoning_provider,model:s.values.reasoning_model,
   effort:s.values.reasoning_effort,override:s.values.application_model_override};
  choice('settings-worker',(s.supported?.worker||['external','hermes']).map(x=>[x,x]),s.values.worker);
@@ -608,7 +614,7 @@ function renderSettings(s){
  const box=$('setting-fields');box.replaceChildren();const discoveryBox=$('discovery-setting-fields');discoveryBox?.replaceChildren();
  const discoveryLabels={discovery_batch_size:'Maximum jobs per discovery run',discovery_interval_hours:'Discover jobs every (hours)'};
  for(const [key,value]of Object.entries(s.values)){const label=el('label',discoveryLabels[key]||key.replaceAll('_',' '));let input;
-  if(['worker','reasoning_provider','reasoning_model','reasoning_effort','application_model_override'].includes(key))continue;
+  if(['worker','reasoning_provider','reasoning_model','reasoning_effort','application_model_override','application_time_limit_minutes'].includes(key))continue;
   if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const o=el('option',x);o.value=x;input.append(o);}input.value=value;}
   else {input=el('input');if(typeof value==='boolean'){input.type='checkbox';input.checked=value;}else if(typeof value==='number'){input.type='number';input.value=value;const range=s.budget_ranges?.[key];if(range){input.min=range[0];input.max=range[1];}}else{input.type='text';input.value=Array.isArray(value)?value.join(', '):(value??'');}}
   if(key==='discovery_batch_size'){input.min=1;input.max=100;input.step=1;}
@@ -789,7 +795,8 @@ if($('queue-toggle'))$('queue-toggle').onclick=async()=>{try{await api('queue_co
 $('run-picker').onchange=()=>{state.run=$('run-picker').value;state.attempt=null;refresh();};
 for(const b of document.querySelectorAll('[data-control]'))b.onclick=async()=>{try{const r=state.view?.current_run;if(!r)throw Error('No run selected.');await api('control',{run_id:r.run_id,command:b.dataset.control});notice('Control request recorded; observe acknowledgement.');await refresh();}catch(e){notice(e.message,true);}};
 $('copy-handoff').onclick=async()=>{const r=state.view?.current_run;if(!r)return;const text=`Use the canonical job-apply skill to accept JobBot run ${r.run_id} in instance ${state.instance}; pull one job at a time and obey app controls.`;try{await navigator.clipboard.writeText(text);notice('Worker handoff copied.');}catch{notice(text);}};
-$('settings-form').onsubmit=async e=>{e.preventDefault();try{const changes=modelSettingsChanges();for(const n of document.querySelectorAll('[data-setting]')){const k=n.dataset.setting,kind=n.dataset.kind;changes[k]=kind==='boolean'?n.checked:kind==='number'?Number(n.value):kind==='list'?n.value.split(',').map(x=>x.trim()).filter(Boolean):kind==='nullable'?(n.value.trim()||null):n.value;}await api('configure',{changes,expected_version:state.settingsVersion});notice('Settings saved for new requests.');await refresh();}catch(err){notice(err.message,true);}};
+$('settings-time-limit-enabled').onchange=()=>{$('settings-time-limit-minutes').disabled=!$('settings-time-limit-enabled').checked;};
+$('settings-form').onsubmit=async e=>{e.preventDefault();try{const changes=modelSettingsChanges();changes.application_time_limit_minutes=$('settings-time-limit-enabled').checked?Number($('settings-time-limit-minutes').value):0;for(const n of document.querySelectorAll('[data-setting]')){const k=n.dataset.setting,kind=n.dataset.kind;changes[k]=kind==='boolean'?n.checked:kind==='number'?Number(n.value):kind==='list'?n.value.split(',').map(x=>x.trim()).filter(Boolean):kind==='nullable'?(n.value.trim()||null):n.value;}await api('configure',{changes,expected_version:state.settingsVersion});notice('Settings saved for new requests.');await refresh();}catch(err){notice(err.message,true);}};
 (async()=>{try{const data=await request('/session',undefined,'GET');state.instance=data.instance_id;showConsole();await refresh();}catch{showLogin();}})();
 $('helper-form').onsubmit=async e=>{e.preventDefault();try{const scope={};if($('helper-platform').value)scope.platform=$('helper-platform').value;if($('helper-namespace').value)scope.namespace=$('helper-namespace').value;await api('helper_register',{helper_id:$('helper-id').value,version:$('helper-version').value,capability:$('helper-capability').value,path:$('helper-path').value,sha256:$('helper-hash').value,scope,preconditions:[],limitations:[],tests:$('helper-tests').value.split('\n').filter(Boolean)});notice('Candidate helper version registered, not activated.');$('helper-form').reset();await refresh();}catch(err){notice(err.message,true);}};
 $('asset-form').onsubmit=async e=>{e.preventDefault();try{await api('register_asset',{identity_id:$('asset-identity').value,kind:$('asset-kind').value,version:$('asset-version').value,storage_ref:$('asset-ref').value,sha256:$('asset-hash').value,provenance:{source:$('asset-source').value}});notice('External document metadata registered; not selected or uploaded.');$('asset-form').reset();await refresh();}catch(err){notice(err.message,true);}};

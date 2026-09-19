@@ -140,6 +140,7 @@ class RuntimeServices:
                 if not same_job_url(expected_canonical,target['url']) and not same_job_url(expected_canonical,job['url']):
                     raise ProtocolError('target_job_mismatch')
         settings=json.loads(a['settings_json'])
+        anchor=(json.loads(session['metadata_json']).get('application_identity_url') if session else None) or job['url']
         def verify_url(url):
             try:
                 identity=job_key(canonical_url(url))
@@ -149,7 +150,8 @@ class RuntimeServices:
                 self._owner(db,attempt_id,worker_id,fence)
                 related=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone() if identity else None
                 if identity!=target['identity_key'] and not related:
-                    if not is_same_application_scope(job['url'], url) and not is_same_application_scope(target['url'], url) and not is_workday_candidate_home(job['url'], url):
+                    if urlsplit(anchor)[:2]==urlsplit(url)[:2] and application_match(anchor,url)['status']=='different_job':return False
+                    if not is_same_application_scope(job['url'], url) and not is_same_application_scope(anchor,url) and not is_same_application_scope(target['url'], url) and not is_workday_candidate_home(job['url'], url):
                         return False
                 return True
         async def read_bound_browser():
@@ -161,7 +163,7 @@ class RuntimeServices:
                 before_url=await page.evaluate('location.href')
                 before_scope=verify_url(before_url)
                 from .browser_controls import observe_writers
-                async def read_writers():return await observe_writers(page,{'job':dict(job),'attempt':dict(a)})
+                async def read_writers():return await observe_writers(page,{'job':dict(job,url=before_url) if before_scope else dict(job),'attempt':dict(a)})
                 before=await read_writers()
                 # Only a native exact-requisition confirmation can settle a submit
                 # after the extension disappears. This is read-only and server-owned.
@@ -192,13 +194,13 @@ class RuntimeServices:
                 stable=stable and before.get('application_frames')==after.get('application_frames')
                 confirmed=confirmed_before and not after.get('panel') and await native_confirmation()
                 match={'status':'same_job'} if before_scope and after_scope else application_match(job['url'],after_url)
-                return after,stable,browser.observed_mode,confirmed,match
+                return after,stable,browser.observed_mode,confirmed,match,after_url
             finally:
                 await browser.close()
         self.action_start(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,tool_name='browser_observe',writes_browser=False)
         try:
             import asyncio
-            obs,stable,observed_mode,native_confirmed,match=asyncio.run(read_bound_browser())
+            obs,stable,observed_mode,native_confirmed,match,live_url=asyncio.run(read_bound_browser())
             from .managed_context import platform_for_url
             obs_url=obs.get('url') or target['url']
             detected_platform=platform_for_url(obs_url)
@@ -253,21 +255,27 @@ class RuntimeServices:
                     self.event(attempt_id,worker_id=worker_id,fence=fence,event_id=uid(),event_type='checkpoint',observed_at=self.now(),
                         payload=dict(semantic,task_state='completed',evidence='Simplify settled on the current page; remaining questions can be reviewed'))
             from .browser_controls import next_operation
-            guidance=next_operation(detected_platform,obs)
+            permitted=quiescent and match['status']=='same_job' and not (
+                obs.get('activity',{}).get('busy_indicator') and obs.get('activity',{}).get('waiting_for_input'))
+            guidance=next_operation(detected_platform,obs,identity=match,quiescent=permitted)
+            from .managed_identity import public_url,form_route_identity
+            requisition=form_route_identity(live_url)
             return {
                 'operation':'browser_observe',
                 'status':status,
                 'writer_state':new_writer,
                 'quiescent':quiescent,
                 'identity':match,
-                'native_takeover_authorized':quiescent and match['status']=='same_job' and not (
-                    obs.get('activity',{}).get('busy_indicator') and obs.get('activity',{}).get('waiting_for_input')),
+                'native_takeover_authorized':permitted,
                 'observed_browser_mode':observed_mode,
                 'platform':detected_platform,
                 'company':self.job(job['id'])['company'],
                 'next_operation':guidance,
                 'target_id':target['target_id'],
-                'url':target['url'],
+                'url':public_url(live_url),
+                'assigned_url':public_url(job['url']),
+                'application_url':public_url(anchor),
+                'identity_evidence':{'observed_requisition':requisition[3] if requisition else None},
                 'observation':obs,
                 'action_id':action_id,
                 'instruction':'Observe ongoing work or use its enabled Stop/Cancel. Before submission, a broken page or missing Simplify panel can be recovered with browser reload or session restart even when writer settlement is unknown. Inspect the new page and continue; this observation is not an application outcome.',

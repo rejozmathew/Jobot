@@ -12,7 +12,7 @@ DEFAULTS={'mode':'development','submission_mode':'review','worker':'external','a
     'field_seconds':60,'no_progress_seconds':45,'attempt_seconds':300,'lease_seconds':60,
     'reasoning_provider':None,'reasoning_model':None,'reasoning_effort':'low','application_model_override':False,'learning_activation':'manual',
     'notifications':'none','excluded_companies':[],'market_countries':['US'],'browser_mode':'headed',
-    'discovery_batch_size':5,'discovery_interval_hours':4}
+    'discovery_batch_size':5,'discovery_interval_hours':4,'application_time_limit_minutes':30}
 CHOICES={'mode':('development','pilot'),'submission_mode':('review','submit'),
     'worker':('external','hermes'),'autofill':('simplify','native'),'trigger':('manual',),
     'allowed_fallback':('targeted','block'),'learning_activation':('manual',),'notifications':('none',),
@@ -29,6 +29,8 @@ def validate_settings(values):
         if out[key] not in allowed:raise ProtocolError('unsupported_'+key)
     if type(out['screenshots']) is not bool:raise ProtocolError('invalid_screenshot_policy')
     if type(out['application_model_override']) is not bool:raise ProtocolError('invalid_model_override')
+    if type(out['application_time_limit_minutes']) is not int or not 0<=out['application_time_limit_minutes']<=1440:
+        raise ProtocolError('invalid_application_time_limit')
     if out['mode']=='development' and out['submission_mode']!='review':raise ProtocolError('development_submission_disabled')
     if out['timezone'] not in available_timezones()|{'UTC'}:raise ProtocolError('unsupported_timezone')
     for key,(low,high) in BOUNDS.items():

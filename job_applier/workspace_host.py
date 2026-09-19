@@ -146,6 +146,47 @@ class WorkspaceHost:
             row=db.execute('SELECT * FROM application_sessions WHERE workspace_id=? AND ended_at IS NULL',(self.workspace_id,)).fetchone()
             return dict(row) if row else None
 
+    def session_deadline(self, session):
+        from .application_deadline import Deadline
+        budget=json.loads(session.get('metadata_json') or '{}').get('application_deadline')
+        if not budget:return Deadline(None)  # Older sessions retain their original unlimited budget.
+        if not hasattr(self,'deadline_clocks'):self.deadline_clocks={}
+        if session['id'] not in self.deadline_clocks:
+            self.deadline_clocks[session['id']]=Deadline(budget)
+        return self.deadline_clocks[session['id']]
+
+    def expire_session(self, session):
+        """Cancellation/target closure cannot wait behind a blocked browser helper."""
+        from .application_deadline import request_stop,REASON
+        from .hermes_desktop import cancel_driver,native_driver_id
+        request_stop(self.service,[session])
+        try:
+            native_id=native_driver_id(session)
+            cancelled=cancel_driver(self.config,session['driver_id'],native_id)
+            # Preparation observes stop and owns any as-yet-unrecorded launch.
+            # Closing already recorded targets also wakes stuck navigation calls.
+            if session['id'] in self.preparing:
+                if self.existing_browser:asyncio.run(self.close_application_tabs(session))
+                return
+            if not cancelled:
+                # Stop browser activity, but retain supervision until native
+                # cancellation is confirmed. Do not report completed cleanup.
+                if self.existing_browser:asyncio.run(self.close_application_tabs(session))
+                elif self.browser:self.browser.stop()
+                return
+            self.stop_session(session,REASON)
+            self.exit.set()  # Retire even if a cancelled helper has not unwound.
+        except Exception as exc:
+            with self.service.tx() as db:
+                db.execute('UPDATE browser_workspaces SET reason=? WHERE id=?',
+                    ('Application time limit reached; cleanup pending: '+error_detail(exc)['code'],self.workspace_id))
+        finally:self.deadline_cleanup=False
+
+    def remember_native_driver(self, session):
+        from .hermes_desktop import remember_driver
+        try:remember_driver(self.config,self.service,session)
+        finally:self.native_binding=False
+
     def start_browser(self):
         w=self.workspace
         if self.existing_browser:
@@ -188,6 +229,7 @@ class WorkspaceHost:
         raise ProtocolError('browser_endpoint_not_ready',w['cdp_url'])
 
     async def prepare_target(self, session):
+        if self.session_deadline(session).expired():raise ProtocolError('application_time_limit')
         w=self.workspace;endpoint=w['cdp_url']
         if self.existing_browser:
             mode=w['mode']
@@ -291,10 +333,12 @@ class WorkspaceHost:
     def prepare(self, session):
         try:
             with self.busy:
+                if self.session_deadline(session).expired():raise ProtocolError('application_time_limit')
                 self.start_browser()
                 target,ready=asyncio.run(self.prepare_target(session))
                 current=self.service.session(session['id'])
                 with self.service.tx() as db:control=self.service._get(db,'runs',current['run_id'])['control']
+                if self.session_deadline(session).expired():raise ProtocolError('application_time_limit')
                 if control!='running':raise ProtocolError('startup_cancelled')
                 self.service.session_connected(session['id'],self.host_id,target,ready)
         except Exception as exc:
@@ -397,6 +441,10 @@ class WorkspaceHost:
             if self.active_session():raise ProtocolError('workspace_still_occupied')
             self.exit.set();return {'host_shutdown_requested':True}
         if session['state'] not in ('connected','waiting'):raise ProtocolError('local_session_not_connected')
+        if self.session_deadline(session).expired():
+            from .application_deadline import request_stop
+            request_stop(self.service,[session])
+            raise ProtocolError('application_time_limit','The saved application deadline has expired; supervision is stopping this attempt.')
         op=request['operation'];params=request.get('parameters') or {}
         if not isinstance(params,dict):raise ProtocolError('invalid_payload')
         service=Service(self.config['db_path'],instance_id=self.config['instance_id'])
@@ -451,7 +499,7 @@ class WorkspaceHost:
             from .application_runtime import browser_action
             return browser_action(cfg,client,own,package,session['target_id'],params)
         from .managed_api import WORKER
-        prohibited={'accept_run','claim','resume_run','checkpoint','ack_run_control','ack_control','bind_target','extend_budget','next_request'}
+        prohibited={'accept_run','claim','resume_run','checkpoint','ack_run_control','ack_control','bind_target','handoff_target','extend_budget','next_request'}
         if op not in WORKER or op in prohibited:raise ProtocolError('unsupported_session_operation')
         if any(k in params for k in ('attempt_id','worker_id','fence','cdp_url','target_id')):raise ProtocolError('session_resolves_ownership')
         if op in ('browser_observe','target_state'):params=dict(params,target_id=session['target_id'])
@@ -516,6 +564,7 @@ class WorkspaceHost:
                 server=threading.Thread(target=self.serve_requests,args=(listener,),daemon=True);server.start()
                 last_seen=0
                 last_tab_check=0
+                last_native_binding=0
                 idle_since=None
                 try:
                     while not self.exit.wait(.25):
@@ -533,17 +582,30 @@ class WorkspaceHost:
                             if time.monotonic()-idle_since>60:break
                             continue
                         idle_since=None
+                        # Read-only native identity capture runs beside browser work;
+                        # an unavailable backend must not delay startup or helpers.
+                        from .hermes_desktop import native_driver_id
+                        if (isinstance(self.config.get('hermes_desktop'),dict) and
+                            not native_driver_id(session) and
+                            not getattr(self,'native_binding',False) and time.monotonic()-last_native_binding>10):
+                            self.native_binding=True;last_native_binding=time.monotonic()
+                            thread=threading.Thread(target=self.remember_native_driver,args=(session,),daemon=True)
+                            thread.start();self.threads.append(thread)
                         with self.service.tx() as db:run=dict(self.service._get(db,'runs',session['run_id']))
-                        maximum=self.config.get('maximum_runtime_seconds')
-                        expired=maximum is not None and (datetime.fromisoformat(self.service.now())-datetime.fromisoformat(session['requested_at'])).total_seconds()>maximum
+                        expired=self.session_deadline(session).expired()
+                        if expired:
+                            if not getattr(self,'deadline_cleanup',False):
+                                self.deadline_cleanup=True
+                                thread=threading.Thread(target=self.expire_session,args=(session,),daemon=True)
+                                thread.start();self.threads.append(thread)
+                            continue
                         # Startup owns the child reference until it observes the pending
                         # control. Never acknowledge stop while a launch can still occur.
                         if session['id'] in self.preparing:continue
-                        if session['state']=='finishing' or run['control'] in ('pause_requested','stop_requested') or expired:
+                        if session['state']=='finishing' or run['control'] in ('pause_requested','stop_requested'):
                             if self.busy.acquire(blocking=False):
                                 try:
-                                    self.stop_session(session,'Maximum runtime reached' if expired else session['reason'] or run['control'],
-                                                      paused=run['control']=='pause_requested' and not expired)
+                                    self.stop_session(session,session['reason'] or run['control'],paused=run['control']=='pause_requested')
                                 except Exception as exc:
                                     with self.service.tx() as db:
                                         db.execute('UPDATE browser_workspaces SET reason=? WHERE id=?',(error_detail(exc)['detail'],self.workspace_id))

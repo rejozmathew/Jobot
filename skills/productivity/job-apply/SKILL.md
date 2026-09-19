@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.17
+version: 0.5.18
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -44,7 +44,7 @@ doctor run, repeated configuration/history inspection or a planning turn before
 start. The runtime already performs its own prerequisite checks. Reuse skills
 already loaded in this conversation rather than reading them again.
 
-Persist toward the authorized submission: perform the next recovery, inspect its
+Persist within the operator-selected application deadline: perform the next recovery, inspect its
 effect, and continue until accepted confirmation or an evidenced unresolved
 obstacle remains after plausible recovery. Persistence means changing the action
 when evidence changes, not repeating the same failing click or inspection.
@@ -78,7 +78,14 @@ eligibility and truthful submission evidence still apply. A helper's
 inability alone is never evidence that the application cannot proceed.
 User corrections are instructions to adjust and continue the authorized task.
 An apology or discovery of an executor mistake is not a stop request. Stop only
-when the user actually requests stopping or a real application outcome requires it.
+when the user requests stopping, the saved application deadline expires, or a real application outcome requires it.
+
+Settings controls the overall application time limit: 30 minutes by default,
+an adjustable duration, or Off. The runtime returns the frozen deadline in the
+session context and enforces it outside the model, including during model calls
+and user-input waits. Reloads, reconnects and replacement sessions in one dispatch
+do not reset it. Expiry stops the owned executor and releases its browser before
+the queue moves on; it does not erase submission evidence or forbid a later retry.
 
 These shared rules apply to all ATS platforms. Respect app-owned controls and
 selected profile facts. Use bounded recovery for demonstrated blockers and actual
@@ -123,6 +130,18 @@ refresh continuation. Other shared forms use `browser` with
 the Workday runner on Greenhouse. `browser_observe` accepts empty parameters;
 `method` belongs to `browser`. After execution begins, status requests a fresh
 observation instead of reusing the original document's Autofill control.
+
+For routine residuals on any portal, a browser snapshot includes
+`remaining_required`, validation, `required_evidence`, approved contact facts in
+`answer_context.identity`, and exact supported operation shapes. Use one browser
+call with `{"method":"repair","fields":[{"method":"fill","ref":"<current ref>","value":"<approved answer>"}]}`;
+fields may also use `select` (exact value/label) or `check` (boolean). It verifies
+each field and returns a fresh screen. Use approved facts and existing consent
+policy; requiredness alone does not supply an answer or permission to consent.
+For a file control use `{"method":"upload","ref":"<current file ref>","asset_id":"<selected asset id>"}`.
+These ordinary controls should not require source searches or per-employer scripts.
+An unresolved route still exposes the owned page's inventory and visual recovery;
+follow its current identity evidence instead of inferring identity from a redacted URL.
 
 For confirmed LinkedIn Easy Apply, use `linkedin_easy_apply` with `{"seconds":60}`
 in the current owned session. It batches routine fields, approved answers and the

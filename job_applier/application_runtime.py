@@ -113,6 +113,8 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     driver=driver_identity(driver_id)
     if bool(url)==bool(job_id):raise ProtocolError('one_url_or_job_id_required')
     service=prepare_local(config)
+    from .application_deadline import freeze
+    config=freeze(config,service.settings_view()['values'],entered_at)
     if service.settings.get('mode')!='development' and config.get('require_simplify') is False:
         raise ProtocolError('official_simplify_required')
     maximum=config.get('maximum_runtime_seconds')
@@ -157,6 +159,7 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     limit=config.get('concurrency_limit',len(workspaces))
     if type(limit) is not int or not 1<=limit<=len(workspaces):raise ProtocolError('invalid_concurrency_limit')
     meta['startup_timing']={'runtime_entered_at':entered_at,'preflight_seconds':round(time.monotonic()-entered_clock,3)}
+    meta['application_deadline']=config['application_deadline']
     session=service.reserve_session(request_id=requested,job_id=job['id'],identity_id=identity_id,driver_id=driver,
         workspace_ids=[w['id'] for w in workspaces],concurrency_limit=limit,metadata=meta,resume_asset_id=resume)
     if session['state']=='preparing':
@@ -197,6 +200,9 @@ def handle(service, session_id, *, include_context=True):
         package=service.application_context(state['attempt_id'])
         result['context']=package
     result['workspace']=state['workspace'];result['metadata']=state['metadata']
+    from .application_deadline import Deadline
+    budget=state['metadata'].get('application_deadline')
+    if budget:result['application_deadline']={**budget,'remaining_seconds':Deadline(budget).remaining()}
     result['application_kind']=state['metadata'].get('application_kind',
         'reattempt' if state['metadata'].get('fresh_employer_storage') else 'first_attempt')
     from .hermes_gmail import mailbox_handoff
@@ -296,17 +302,58 @@ def error_detail(exc):
             'detail':safe_text(str(exc))[:1000]}
 
 
+def external_apply_destination(control,current_url):
+    """Return an observed external Apply href; Easy Apply stays in-page."""
+    if not isinstance(control,dict) or control.get('submission_control'):return None
+    label=' '.join(str(control.get('text') or control.get('label') or '').split())
+    if not re.match(r'^apply(?:\b|\s)',label,re.I) or re.search(r'\beasy\s+apply\b',label,re.I):return None
+    href=control.get('href')
+    try:
+        destination=urlsplit(href)
+    except (TypeError,ValueError):return None
+    # LinkedIn commonly wraps an external Apply destination in its own redirect
+    # endpoint. Unwrap only the explicit URL parameter; never infer a route from
+    # the absence of one.
+    linkedin_wrapper=((destination.hostname or '').casefold().endswith('linkedin.com')
+                      and ('/redir/' in destination.path or destination.path.rstrip('/')=='/safety/go'))
+    if linkedin_wrapper:
+        from urllib.parse import parse_qs
+        values=parse_qs(destination.query).get('url',[])
+        if len(values)!=1:return None
+        href=values[0]
+    from .cdp_client import _public_destination
+    return href if _public_destination(href) else None
+
+
+async def click_and_follow_external_apply(browser,page,control,activate,client,ownership,target_id):
+    """Arm before Apply, then hand one correlated destination to the owned session."""
+    import asyncio
+    from .cdp_client import arm_target_observation,wait_for_apply_target
+    current=await page.evaluate('location.href')
+    destination=external_apply_destination(control,current)
+    observation=await asyncio.to_thread(arm_target_observation,browser.base_url,target_id,destination) if destination else None
+    result=await activate()
+    if not observation or not (result.get('clicked') or result.get('status')=='clicked'):
+        return result
+    found=await wait_for_apply_target(observation,current_url=lambda:page.evaluate('location.href'))
+    if not found:return result
+    handoff=client.call('handoff_target',**ownership,current_target_id=target_id,
+        new_target_id=found['target_id'],url=found['url'],expected_url=destination,
+        evidence='Observed external Apply '+found['kind']+' with the armed public destination')
+    return dict(result,target_handoff=handoff)
+
+
 def browser_action(config,client,ownership,package,target_id,params):
     """Shared, session-owned form operations and one-time submission."""
     import asyncio
     from .cdp_client import CDPBrowser
     from .managed_identity import is_same_application_scope, is_workday_candidate_home, is_post_submit_scope, application_match, public_url
     from .managed_context import platform_for_url
-    from .browser_controls import FORM, observe, inventory, form_action, inspect_control, click_control, upload_file
+    from .browser_controls import FORM, observe, inventory, form_action, inspect_control, click_control, upload_file, next_operation
     from .managed_shared import uid
     method=params.get('method')
-    if method not in ('snapshot','screenshot','evaluate','click','fill','press','select','check','apply_policy','request_answers','apply_answers','submit','navigate','reload','upload','simplify'):
-        raise ProtocolError('unsupported_browser_method')
+    if method not in ('snapshot','screenshot','evaluate','click','fill','press','select','check','repair','apply_policy','request_answers','apply_answers','submit','navigate','reload','upload','simplify'):
+        raise ProtocolError('unsupported_browser_method','Use snapshot for current controls; upload takes ref and selected asset_id; repair takes fields with method fill/select/check, ref and approved value.')
     reads=method in ('snapshot','screenshot')
     async def execute():
         nonlocal method,params
@@ -332,12 +379,21 @@ def browser_action(config,client,ownership,package,target_id,params):
                         'evidence':'Observed Autofill control activated'})
             pending=package['attempt'].get('submission_pending',bool(package['attempt'].get('submit_intent_at')))
             identity=application_match(package['job']['url'],url)
+            owned_gate=None
+            if identity['status']!='same_job' or method=='snapshot':
+                # A correlated external Apply target is attempt-owned even before
+                # an operator elects to make that route the job's future URL.
+                owned_gate=await asyncio.to_thread(client.call,'browser_observe',**ownership,
+                    target_id=target_id,cdp_url=config['cdp_url'])
+                if owned_gate.get('identity',{}).get('status'):identity=owned_gate['identity']
+            browser_package=dict(package,job=dict(package['job'],url=url)) if identity['status']=='same_job' else package
+            page.application_package=browser_package
             recovery_navigation=(method=='reload' and is_same_application_scope(package['job']['url'],url)) or (method=='navigate' and is_same_application_scope(package['job']['url'],params.get('url','')))
             if not reads and not recovery_navigation and identity['status']!='same_job' and not (
                 (reads or method=='submit') and ((pending and is_post_submit_scope(package['job']['url'],url)) or is_workday_candidate_home(package['job']['url'],url))):
                 raise ProtocolError('target_job_mismatch' if identity['status']=='different_job' else 'job_identity_unresolved')
-            if not pending and method in ('fill','select','check','apply_policy','request_answers') and platform_for_url(package['job']['url'])=='workday':
-                observed=await observe(page,package)
+            if not pending and method in ('fill','select','check','repair','apply_policy','request_answers') and platform_for_url(url)=='workday':
+                observed=await observe(page,browser_package)
                 if (observed.get('workday') and observed.get('step') in ('my_information','my_experience','application_questions','voluntary_disclosures','self_identify')
                     and not observed.get('auth') and not observed.get('native_authentication_required') and not observed.get('autofill_attempted')
                     and observed.get('status') in ('ready','complete','needs_review') and observed.get('controls',{}).get('autofill',{}).get('enabled')):
@@ -377,7 +433,9 @@ def browser_action(config,client,ownership,package,target_id,params):
                 return await submit(page,client.call,package,ownership,config,target_id,activate,
                     confirmation_only=confirmation_only,application_control=target)
             if not reads and method!='reload':
-                gate=await asyncio.to_thread(client.call,'browser_observe',**ownership,target_id=target_id,cdp_url=config['cdp_url'])
+                gate=owned_gate or await asyncio.to_thread(client.call,'browser_observe',**ownership,target_id=target_id,cdp_url=config['cdp_url'])
+                if not recovery_navigation and gate.get('identity',{}).get('status') not in (None,'same_job'):
+                    raise ProtocolError('target_job_mismatch' if gate['identity']['status']=='different_job' else 'job_identity_unresolved')
                 extension_action=method=='simplify' or (method=='click' and params.get('source')=='simplify')
                 permitted=gate.get('quiescent') if recovery_navigation else gate.get('native_takeover_authorized',gate.get('quiescent'))
                 if not extension_action and not permitted:
@@ -412,36 +470,33 @@ def browser_action(config,client,ownership,package,target_id,params):
                 evidence=await screenshot_evidence();succeeded=True;return evidence
             if method=='snapshot':
                 visual_reason=None
-                if identity['status']!='same_job':
-                    visual_reason='identity_unresolved_on_owned_page'
-                    result={'url':public_url(url),'target_id':target_id,'submission_pending':pending,
-                            'identity':identity,'recovery_only':identity['status']!='same_job',
-                            'instruction':'Inspect this owned tab or navigate back to the assigned job before form writes.'}
-                else:
-                    try:
-                        observed=await observe(page,package)
-                        metadata=observed.get('job_metadata')
-                        if metadata is None:
-                            metadata=await page.evaluate_function(FORM,{'method':'metadata'})
-                        try:client.call('observe_job_metadata',**ownership,metadata=metadata)
-                        except Exception:pass  # Optional labels cannot disguise a browser action.
-                        result=inventory(observed,package)
-                        native_progress=any(control.get('enabled') for control in observed.get('native',{}).values())
-                        simplify_progress=any(observed.get('controls',{}).get(key,{}).get('enabled') for key in ('continue','submit'))
-                        if not native_progress and not simplify_progress:
-                            visual_reason='expected_progress_control_not_found'
-                        frames=observed.get('application_frames') or {}
-                        if isinstance(frames,dict) and frames.get('diagnostics'):
-                            visual_reason='embedded_form_inspection_incomplete'
-                        if result.get('verification'):
-                            from .hermes_gmail import mailbox_handoff
-                            result['verification']['mailbox']=mailbox_handoff(config)
-                            result['verification']['next_operation']={'operation':'credentials',
-                                'parameters':{'mode':'verification','action':'inspect','refs':result['verification']['groups'][0]['refs']}}
-                    except Exception as exc:
-                        result={'url':public_url(url),'target_id':target_id,'identity':identity,
-                                'observation_error_type':type(exc).__name__}
-                        visual_reason='structured_observation_failed'
+                try:
+                    observed=await observe(page,browser_package)
+                    metadata=observed.get('job_metadata')
+                    if metadata is None:
+                        metadata=await page.evaluate_function(FORM,{'method':'metadata'})
+                    try:client.call('observe_job_metadata',**ownership,metadata=metadata)
+                    except Exception:pass  # Optional labels cannot disguise a browser action.
+                    result=inventory(observed,package)
+                    native_progress=any(control.get('enabled') for control in observed.get('native',{}).values())
+                    simplify_progress=any(observed.get('controls',{}).get(key,{}).get('enabled') for key in ('continue','submit'))
+                    if not native_progress and not simplify_progress:
+                        visual_reason='expected_progress_control_not_found'
+                    frames=observed.get('application_frames') or {}
+                    if isinstance(frames,dict) and frames.get('diagnostics'):
+                        visual_reason='embedded_form_inspection_incomplete'
+                    if result.get('verification'):
+                        from .hermes_gmail import mailbox_handoff
+                        result['verification']['mailbox']=mailbox_handoff(config)
+                        result['verification']['next_operation']={'operation':'credentials',
+                            'parameters':{'mode':'verification','action':'inspect','refs':result['verification']['groups'][0]['refs']}}
+                except Exception as exc:
+                    result={'url':public_url(url),'target_id':target_id,'identity':identity,
+                            'observation_error_type':type(exc).__name__}
+                    visual_reason='structured_observation_failed'
+                result.update(identity=identity,recovery_only=identity['status']!='same_job')
+                result['next_operation']=next_operation(platform_for_url(url),observed if 'observed' in locals() else {},identity=identity,quiescent=(owned_gate or {}).get('native_takeover_authorized'))
+                if identity['status']!='same_job':visual_reason='identity_unresolved_on_owned_page'
                 result['title']=await page.evaluate('document.title')
                 result['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
                 if pending:
@@ -489,16 +544,33 @@ def browser_action(config,client,ownership,package,target_id,params):
                 succeeded=bool(result.get('committed') or result.get('pressed') and 'committed' not in result)
                 if result.get('committed'):result.update(await remember_answers(source='executor_'+method))
                 return result
+            if method=='repair':
+                from .browser_controls import repair_fields,observe_writers
+                initial_url=await page.evaluate('location.href')
+                initial_document=await page.evaluate('performance.timeOrigin')
+                async def checkpoint():
+                    heartbeat=client.call('heartbeat',**ownership)
+                    if heartbeat.get('control') not in (None,'running'):raise ValueError('control_pending')
+                    if await page.evaluate('location.href')!=initial_url or await page.evaluate('performance.timeOrigin')!=initial_document:
+                        raise ValueError('application_document_changed')
+                    writer=await observe_writers(page,browser_package)
+                    if writer.get('status') in ('active','unknown'):
+                        raise ValueError('writer_settlement_required')
+                result=await repair_fields(page,params.get('fields'),checkpoint=checkpoint)
+                result['screen']=inventory(await observe(page,browser_package),package)
+                succeeded=any(field.get('committed') for field in result['fields'])
+                if succeeded:result.update(await remember_answers(source='executor_repair'))
+                return result
             if method=='apply_policy':
                 from .application_answers import apply_policy
-                result=await apply_policy(page,package,await observe(page,package),posted_range=params.get('salary_range'))
+                result=await apply_policy(page,package,await observe(page,browser_package),posted_range=params.get('salary_range'))
                 succeeded=not any(not field['committed'] for field in result['fields']);return result
             if method in ('request_answers','apply_answers'):
                 from .application_answers import apply_policy,save_answer_history
                 from .browser_controls import required_questions
                 from .managed_questions import question_key
                 refs=params.get('refs') or ([params['ref']] if params.get('ref') else [])
-                policy=await apply_policy(page,package,await observe(page,package),posted_range=params.get('salary_range'))
+                policy=await apply_policy(page,package,await observe(page,browser_package),posted_range=params.get('salary_range'))
                 captured=await required_questions(page,refs,include_answered=method=='apply_answers')
                 saved=client.call('questions_for_attempt',attempt_id=ownership['attempt_id'])['questions']
                 by_key={q['question_key']:q for q in saved if q['state']!='superseded'}
@@ -564,7 +636,7 @@ def browser_action(config,client,ownership,package,target_id,params):
                 succeeded=result.get('execution')=='clicked';return result
             if method=='click' and params.get('ref'):
                 from .simplify_boundary import CLICK
-                observed=await observe(page,package)
+                observed=await observe(page,browser_package)
                 # A ref is resolved against the fresh owned inventory below.
                 # An omitted signature is not evidence that the screen changed.
                 # Preserve an explicit caller signature and return its recovery.
@@ -584,7 +656,11 @@ def browser_action(config,client,ownership,package,target_id,params):
                     dispatched_at=datetime.now(timezone.utc).isoformat()
                     result=await document.evaluate_function(CLICK,{'ref':local['ref'],'operation':local['operation'],'url':extension['url'],'page_ref':extension.get('page_ref')})
                     if local['operation']=='autofill' and (result.get('clicked') or result.get('status')=='clicked'):record_autofill(dispatched_at)
-                else:result=await click_control(page,{'ref':params['ref']},step=observed['step'],page_signature=observed['page_signature'])
+                else:
+                    click_info=await inspect_control(page,{'ref':params['ref']})
+                    async def activate_native_ref():
+                        return await click_control(page,{'ref':params['ref']},step=observed['step'],page_signature=observed['page_signature'])
+                    result=await click_and_follow_external_apply(browser,page,click_info,activate_native_ref,client,ownership,target_id)
                 succeeded=bool(result.get('clicked') or result.get('status')=='clicked')
                 if succeeded and params.get('source')!='simplify' and not observed.get('auth'):
                     result.update(await remember_answers(page_name=observed.get('step','form'),source='executor_click'))
@@ -603,11 +679,21 @@ def browser_action(config,client,ownership,package,target_id,params):
             if not isinstance(selector,str) or not selector:raise ProtocolError('observed_selector_required')
             if method=='click':
                 await remember_answers()
-                result=await click_control(page,{'selector':selector})
+                click_info=await inspect_control(page,{'selector':selector})
+                async def activate_native_selector():return await click_control(page,{'selector':selector})
+                result=await click_and_follow_external_apply(browser,page,click_info,activate_native_selector,client,ownership,target_id)
                 succeeded=result.get('clicked') is True
                 if succeeded:result.update(await remember_answers(source='executor_click'))
                 return result
         finally:
+            if succeeded and method in ('click','upload','simplify') and identity['status']=='same_job' and not result.get('target_handoff'):
+                try:
+                    current_url=await page.evaluate('location.href')
+                    if current_url!=url:
+                        client.call('handoff_target',**ownership,current_target_id=target_id,new_target_id=target_id,
+                            url=current_url,source_url=url,evidence='Observed navigation after supported '+method+' in the owned application')
+                except Exception:
+                    pass  # Fresh observation retains explicit identity/recovery evidence.
             if aid:
                 client.call('action_end',**ownership,action_id=aid,status='success' if succeeded else 'failed',duration_seconds=time.monotonic()-started)
                 if task_context:

@@ -26,6 +26,7 @@ WORKER=WORKER|frozenset({'request_question','park_questions','answer_from_user',
 WORKER=WORKER|frozenset({'observe_job_metadata'})
 WORKER=WORKER|frozenset({'record_submission_rejection'})
 WORKER=WORKER|frozenset({'progress'})
+WORKER=WORKER|frozenset({'handoff_target'})
 READS=READS|frozenset({'questions_for_attempt'})
 
 

@@ -323,7 +323,13 @@
         <p id="model-catalog-status" role="status"></p>
         <button id="refresh-models" type="button">Refresh models</button>
         <p>Save settings to use this selection for the next application. Running applications keep their model. Discovery uses its own executor configuration.</p>
-        <h3>Job discovery</h3>
+          <h3>Application time limit</h3>
+          <div class="settings-grid">
+            <label><input id="settings-time-limit-enabled" type="checkbox"> Stop applications at the time limit (uncheck for Off)</label>
+            <label>Time limit in minutes<input id="settings-time-limit-minutes" type="number" min="1" max="1440" step="1" value="30"></label>
+          </div>
+          <p>Default: 30 minutes per application. Includes model calls and recovery; excludes time queued. At the limit, JobBot stops the application and moves on after cleanup. Saved changes apply to new applications.</p>
+          <h3>Job discovery</h3>
         <p>Find the strongest matches, up to the job limit. These settings apply to the next discovery run. Application pickup is separate.</p>
         <div id="discovery-setting-fields" class="settings-grid"></div>
         <details open style="margin-bottom: 16px;">

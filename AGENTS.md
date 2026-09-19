@@ -2,6 +2,8 @@
 
 ## Application execution (any harness)
 
+- Recovery continues within the operator-selected overall application deadline. Settings defaults to 30 minutes, supports an adjustable duration and Off, and applies to new attempts. Supervision cancels the owned executor and cleans up at expiry; browser reloads, reconnects and same-dispatch replacement sessions do not reset that clock. Preserve submission evidence and record the timeout distinctly from a user stop. This operator-authorized deadline is separate from a helper's resumable call budget.
+
 - Helpers assist the application executor; they do not bound its reasoning or decide that an application is over. Across every ATS, a helper miss, retry limit, unsupported control or expired call slice means inspect the evidence/options and try another supported approach in the same owned session. Keep moving toward submission; record recovery timing for later engineering. Finish blocked only for an evidenced unresolved obstacle after executor recovery, never merely because a helper returned `blocked` or `inspection_required`.
 - When an expected control is missing, immediately take and visually inspect an owned-page screenshot, including embedded frames, overlays and inner scroll areas. Before ending an application for an unresolved obstacle, inspect a fresh screenshot and try the remaining plausible recovery. Capturing an image without reading it is not inspection. A user correction means continue; a CAPTCHA notice alone is not a challenge. This applies across every ATS and helper, without adding a separate approval or finish-permission gate.
 - Read `skills/productivity/job-apply/SKILL.md`; for Workday also read `skills/productivity/workday-simplify/SKILL.md`.

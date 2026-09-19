@@ -8,9 +8,15 @@ FORM=(ROOT/'form_controls.js').read_text(encoding='utf-8')
 POINTER=(ROOT/'workday_click.js').read_text(encoding='utf-8')
 
 
-def next_operation(platform, observed=None):
+def next_operation(platform, observed=None, *, identity=None, quiescent=None):
     """Actionable guidance from actual readiness; all actions retain their own guards."""
     observed=observed or {};status=observed.get('status')
+    if identity and identity.get('status')!='same_job':
+        return {'operation':'browser','parameters':{'method':'snapshot'},
+                'instruction':'Inspect the owned page controls and identity evidence. Recover the observed application route before retrying a form action; this helper result does not end the application.'}
+    if quiescent is False:
+        return {'operation':'browser_observe','parameters':{},
+                'instruction':'Observe the active writer or use its enabled Stop/Cancel. Recover a broken page with reload or restart and inspect the new document.'}
     if platform=='workday':
         return {'operation':'fast_forward','parameters':{'seconds':60},
                 'instruction':'Continue the owned Workday application with its routine runner.'}
@@ -52,7 +58,7 @@ def next_operation(platform, observed=None):
 
 async def observe(page, package):
     from .managed_context import platform_for_url
-    if platform_for_url(package['job']['url'])=='workday':
+    if platform_for_url(await page.evaluate('location.href'))=='workday':
         from .workday_fast import observe_page
         return await observe_page(page,package)
     from .simplify_boundary import OBSERVE
@@ -187,7 +193,8 @@ def inventory(observed, package):
     result['next_operation']=next_operation(package.get('platform'),observed)
     if observed.get('verification',{}).get('groups'):result['verification']=observed['verification']
     result['instruction']=('Use observed refs with browser select, check, fill, press or click. Values come from approved facts or explicit user choices. '
-        'Complete required questions using answer_context.standard_answers, approved profile facts and saved answers before requesting human input. '
+        'Use browser repair with fields:[{method:fill|select|check,ref,value}] to fix routine fields together and return verified results plus a fresh screen. '
+        'Upload uses method:upload,ref,asset_id from selected_documents. Complete required questions using answer_context.standard_answers, answer_context.identity, approved profile facts and saved answers before requesting human input. '
         'A helper mismatch or failed selection is a recovery handoff, not an application outcome. Inspect actual options, refresh stale controls, '
         'if an expected control is missing, take and visually inspect an owned screenshot immediately, inspect embedded frames and scroll containers, then try another supported interaction. '
         'Before concluding that recovery is exhausted, inspect a fresh screenshot and attempt the remaining plausible actions. Keep the session open and continue after progress. '
@@ -195,8 +202,47 @@ def inventory(observed, package):
         'Use browser submit for the final action; it captures confirmation before closing.')
     profile=package['attempt'].get('profile_json') or {}
     if isinstance(profile,str):profile=json.loads(profile)
+    identity=profile.get('identity') or {}
+    result['answer_context']['identity']={k:identity[k] for k in (
+        'first_name','last_name','full_name','email','phone','location','linkedin','website') if k in identity}
+    address=identity.get('address')
+    if isinstance(address,dict):
+        result['answer_context']['identity']['address']={k:address[k] for k in (
+            'street','address_line1','address_line2','city','state','zip','postal_code','country') if k in address}
+    missing={field['ref'] for field in remaining_submission_work(observed)['required_fields']}
+    result['remaining_required']=[]
+    for field in observed.get('inventory',[]):
+        if not field.get('enabled') or field.get('private') or not field.get('required'):continue
+        if field.get('ref') not in missing and not field.get('validation',{}).get('rejected') and not (field.get('type')=='file' and not field.get('present')):continue
+        method=('upload' if field.get('type')=='file' else
+                'check' if (field.get('role') or field.get('type')) in ('checkbox','radio') else
+                'select' if field.get('tag')=='SELECT' or field.get('role')=='combobox' or field.get('haspopup') in ('listbox','menu','true') else 'fill')
+        result['remaining_required'].append(dict(field,state='invalid' if field.get('validation',{}).get('rejected') else 'missing',
+            action={'method':method,'ref':field.get('ref')}))
+    result['supported_operations']={
+        'repair':{'method':'repair','fields':[{'method':'fill|select|check','ref':'<observed ref>','value':'<approved value>'}]},
+        'upload':{'method':'upload','ref':'<observed file ref>','asset_id':'<selected asset id>'},
+        'snapshot':{'method':'snapshot'}}
+    result['selected_documents']=[{k:asset.get(k) for k in ('id','kind','version')} for asset in package.get('documents',{}).get('assets',[])]
     result['answer_policy']=profile.get('application_answer_policy',{})
     if 'application_frames' in observed:result['application_frames']=observed['application_frames']
+    return result
+
+
+async def repair_fields(page, fields, *, checkpoint=None):
+    """Group existing typed operations; preserve individual verification/failures."""
+    if not isinstance(fields,list) or any(not isinstance(f,dict) or f.get('method') not in ('fill','select','check')
+        or not isinstance(f.get('ref'),str) or not f['ref'] for f in fields):
+        raise ValueError('repair_requires_observed_typed_fields')
+    result={'fields':[],'remaining':[]}
+    for index,field in enumerate(fields):
+        try:
+            if checkpoint:await checkpoint()
+            applied=await form_action(page,field,**({'checkpoint':checkpoint} if checkpoint else {}))
+        except (ValueError,TimeoutError) as exc:
+            result.update(reason=str(exc),remaining=fields[index:])
+            break
+        result['fields'].append({'ref':field['ref'],'method':field['method'],**applied})
     return result
 
 

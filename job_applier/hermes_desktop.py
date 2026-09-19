@@ -118,10 +118,73 @@ def session_active(rpc, session_id, *, stored_session_id=None):
                (stored_session_id and row.get('session_key')==stored_session_id))
 
 
+def interrupt_owned(rpc, session_id=None, stored_session_id=None):
+    """Interrupt matching live turns; acknowledgement is a fresh idle observation."""
+    rows=rpc.call('session.active_list',{})['sessions']
+    active=[row for row in rows if row['status']!='idle' and
+            (row['id']==session_id or (stored_session_id and row.get('session_key')==stored_session_id))]
+    for row in active:rpc.call('session.interrupt',{'session_id':row['id']})
+    return not active or not session_active(rpc,session_id,stored_session_id=stored_session_id)
+
+
+def cancel_dispatch(config, receipt_path):
+    if not receipt_path.exists():return False  # Monitor checks its deadline before creating/submitting.
+    receipt=json.loads(receipt_path.read_text())
+    if receipt.get('state')=='finished':return True
+    try:
+        with connection(config['hermes_desktop']) as (rpc,_):
+            cancelled=interrupt_owned(rpc,receipt.get('session_id'),receipt.get('stored_session_id'))
+            # During submit, keep the monitor until it receives the RPC result
+            # and performs its own deadline check; absence from active_list can
+            # precede the backend accepting the already-sent prompt.
+            return cancelled and receipt.get('state')=='submitted'
+    except (OSError,ValueError,TimeoutError,ConnectionClosed,httpx.HTTPError):return False
+
+
+def remember_driver(config, service, session):
+    """Retain the native task ID before chat compression can rotate its key."""
+    if not isinstance(config.get('hermes_desktop'),dict):return
+    if native_driver_id(session):return
+    try:
+        with connection(config['hermes_desktop']) as (rpc,_):
+            rows=rpc.call('session.active_list',{})['sessions']
+        matches=[row['id'] for row in rows if row.get('session_key')==session['driver_id']]
+        if len(matches)!=1:return
+        with service.tx() as db:
+            current=service._get(db,'application_sessions',session['id'])
+            if current['ended_at'] or current['driver_id']!=session['driver_id']:return
+            metadata=json.loads(current['metadata_json'])
+            metadata['native_session_id']=matches[0]
+            metadata['native_driver_id']=session['driver_id']
+            db.execute('UPDATE application_sessions SET metadata_json=? WHERE id=?',
+                       (json.dumps(metadata),session['id']))
+    except (OSError,ValueError,TimeoutError,ConnectionClosed,httpx.HTTPError):return
+
+
+def native_driver_id(session):
+    """An explicit attach may replace the driver; never cancel its predecessor."""
+    metadata=json.loads(session.get('metadata_json') or '{}')
+    return metadata.get('native_session_id') if metadata.get('native_driver_id')==session['driver_id'] else None
+
+
+def cancel_driver(config, driver_id, native_session_id=None):
+    if not isinstance(config.get('hermes_desktop'),dict):return True
+    try:
+        with connection(config['hermes_desktop']) as (rpc,_):
+            return interrupt_owned(rpc,session_id=native_session_id,stored_session_id=driver_id)
+    except (OSError,ValueError,TimeoutError,ConnectionClosed,httpx.HTTPError):return False
+
+
 def run_session(rpc, prompt, config, receipt_path, *, sleep=time.sleep, owner=None):
     options=config['hermes_desktop']
+    from .application_deadline import Deadline
+    deadline=Deadline(config.get('application_deadline'))
     receipt=json.loads(receipt_path.read_text()) if receipt_path.exists() else None
     if receipt is None:
+        if deadline.expired():
+            receipt={'state':'finished','stop_reason':'application_time_limit'}
+            write_receipt(receipt_path,receipt)
+            return receipt
         params={'source':'desktop','cwd':str(REPOSITORY),'hidden':False,'close_on_disconnect':False}
         if options.get('profile'):params['profile']=options['profile']
         if config.get('application_model'):
@@ -140,10 +203,19 @@ def run_session(rpc, prompt, config, receipt_path, *, sleep=time.sleep, owner=No
         # Persist before sending: a lost reply must not submit the application task twice.
         receipt['state']='submitting'
         write_receipt(receipt_path,receipt)
+        if deadline.expired():
+            receipt.update(state='finished',stop_reason='application_time_limit')
+            write_receipt(receipt_path,receipt)
+            return receipt
         rpc.call('prompt.submit',{'session_id':receipt['session_id'],'text':prefix+prompt,'surface':'desktop'})
         receipt['state']='submitted'
         write_receipt(receipt_path,receipt)
-    while session_active(rpc,receipt['session_id']):
+    if receipt.get('state')=='finished':return receipt
+    while session_active(rpc,receipt['session_id'],stored_session_id=receipt.get('stored_session_id')):
+        if deadline.expired():
+            receipt['stop_reason']='application_time_limit'
+            write_receipt(receipt_path,receipt)
+            if interrupt_owned(rpc,receipt['session_id'],receipt.get('stored_session_id')):break
         sleep(2)
     receipt['state']='finished'
     write_receipt(receipt_path,receipt)
@@ -159,6 +231,7 @@ def orphan_is_active(service, item, *, check_finished=False):
     receipt_path=Path(root)/'dispatch'/item['id']/'desktop-session.json'
     if not receipt_path.exists():return False
     receipt=json.loads(receipt_path.read_text())
+    if receipt.get('state')=='finished' and not receipt.get('session_id'):return False
     # A user can resume the native conversation after its monitor has exited.
     # Retained replacement browsers require a fresh check, even for old receipts.
     if receipt['state']=='finished' and not check_finished:return False

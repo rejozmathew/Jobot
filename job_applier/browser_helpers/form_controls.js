@@ -9,9 +9,19 @@
   .find(e=>visible(e)&&(e.matches('.jobs-easy-apply-modal,[data-test-modal-id="easy-apply-modal"]')||e.querySelector('[data-test-form-element]'))):null;
  const liGroup=e=>liModal?.contains(e)?e.closest('[data-test-form-element]'):null;
  const liQuestion=e=>text(liGroup(e)?.querySelector('legend,[data-test-form-builder-radio-button-form-component__title],label'));
+ const nearbyLabel=e=>{
+  for(let p=e.parentElement;p&&p!==document.body;p=p.parentElement){
+   if(p.matches('form,fieldset,section,[role="dialog"]'))break;
+   const controls=p.querySelectorAll('input:not([type="hidden"]),textarea,select,[role="combobox"],[role="checkbox"]');
+   if(controls.length!==1||controls[0]!==e)break;
+   const labels=[...p.querySelectorAll('label')].filter(n=>!n.htmlFor||n.htmlFor===e.id);
+   if(labels.length===1)return text(labels[0]);
+  }
+  return '';
+ };
  const label=e=>e.getAttribute('aria-label')||[...(e.labels||[])].map(text).join(' ')||
   (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)).filter(Boolean).map(text).join(' ')||
-  e.getAttribute('placeholder')||text(e.closest('label'))||'';
+  text(e.closest('label'))||nearbyLabel(e)||e.getAttribute('placeholder')||'';
  const nodes=()=>[...(liModal||document).querySelectorAll('input:not([type="hidden"]),textarea,select,button,a,[role="button"],[role="checkbox"],[role="radio"],[role="combobox"]')].filter(e=>visible(e)&&native(e));
  const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
  const checked=e=>['checkbox','radio'].includes(e.getAttribute('role'))?e.getAttribute('aria-checked')==='true':!!e.checked;
@@ -88,7 +98,10 @@
  const privateControl=e=>e.type==='password'||privateInputs.has(e)||/^(INPUT|TEXTAREA)$/.test(e.tagName)&&codePattern.test([e.name,e.id,e.autocomplete,label(e)].join(' '));
  scope.privateControl=privateControl;
  if(args.method==='verification')return {groups};
- const required=e=>!!e.required||e.getAttribute('aria-required')==='true'||/\*\s*$/.test(label(e))||/\*\s*$/.test(liQuestion(e));
+ const requiredEvidence=e=>[e.required?'required':null,e.getAttribute('aria-required')==='true'?'aria-required':null,
+  /\*\s*$/.test(label(e))||/\*\s*$/.test(liQuestion(e))?'label_asterisk':null,
+  e.getAttribute('data-val-required')?'required_validator':null].filter(Boolean);
+ const required=e=>requiredEvidence(e).length>0;
  const choice=e=>e.tagName==='SELECT'||e.getAttribute('role')==='combobox'||['listbox','menu','true'].includes(e.getAttribute('aria-haspopup'));
  const widget=e=>{
   let found=e;
@@ -142,7 +155,7 @@
   }
   return '';
  };
- const describe=e=>({...descriptor(e),ref:remember(e),enabled:enabled(e),required:required(e),private:privateControl(e),validation:validation(e),
+ const describe=e=>({...descriptor(e),ref:remember(e),enabled:enabled(e),required:required(e),required_evidence:requiredEvidence(e),private:privateControl(e),validation:validation(e),
   present:choice(e)?!!selectedValue(e):!!e.value,...(selectedValue(e)?{selected_value:selectedValue(e)}:{}),checked:['checkbox','radio'].includes(e.type)||e.getAttribute('role')==='checkbox'?checked(e):undefined,
   ...(e.tagName==='SELECT'?{options:[...e.options].map(o=>({value:o.value,label:o.text,disabled:o.disabled||o.parentElement.disabled}))}:{}),
   expanded:e.getAttribute('aria-expanded'),haspopup:e.getAttribute('aria-haspopup')});
@@ -290,7 +303,7 @@
  }
  if(args.method==='inspect'){
   scope.beforeMenus=[...document.querySelectorAll('[role="listbox"],[role="menu"]')].filter(visible);
-  return {...describe(el),...value(),checked:checked(el),submission_control:
+  return {...describe(el),...value(),checked:checked(el),href:el.href||'',submission_control:
    /^(?:submit|submit application|send application)$/i.test(text(el)||el.value||label(el))&&
    !el.closest('form')?.querySelector('input[type="password"]')};
  }
