@@ -39,12 +39,36 @@ The expanded focused run passed 206 tests with one Linux-only skip, including
 isolated-browser form repair. Native task identity regressions reproduced the
 compression and driver replacement cases; the final targeted run passed 29 tests
 with one Linux-only skip. A full managed run passed 988 tests with five Linux-only
-skips; a final rerun includes the driver replacement adjustment. No employer
-application or private profile is a test fixture.
+skips. The final frozen-source run covered 994 cases: 988 passed, five Linux-only
+cases skipped, and one version-metadata assertion failed because the local Git
+checkpoint changed HEAD during the run. With HEAD stable, all three tests in that
+module passed. No implementation change was needed for that validation race.
+
+On the deployed Ubuntu files, 114 of 115 affected tests initially passed. The
+Settings UI test needed the existing Node executable added to the noninteractive
+SSH PATH; that exact case then passed. All 14 Linux platform tests passed,
+including the Windows-skipped process/socket cases. A disposable-process check
+also exercised `application_deadline.stop_process`: the owned child exited with
+SIGKILL, the supervisor remained alive, and repeated cleanup succeeded. No employer
+application or private profile was used as a test fixture, and no live Hermes
+application was interrupted for validation.
+
+Logs and JUnit remain in the ignored private artifacts area: `repair-final.*`,
+`repair-version-green.*`, `repair-deployed.*`, `repair-deployed-ui-green.*`,
+`repair-linux-platform.*`, and `repair-linux-stop-process.json`.
 
 ## Deployment
 
-Pending final validation. Queue pickup is temporarily paused through its normal
-control API while the already running application finishes. The prior queue
-setting is recorded privately for restoration after deployment. Runtime changes
-will be applied only at an idle boundary, with backups and source-hash checks.
+Completed on the existing authoritative Ubuntu runtime from local implementation
+checkpoint `eb5c19d`. Queue pickup was paused through its normal control API while
+the existing application finished; no active application was stopped to deploy.
+The deployment checked all original source hashes and saved source plus SQLite
+backups in the configured private spool under `deployments/form-repair-20260919`.
+It applied 23 changed files and verified all 26 bundle files, preserving the
+independent route-reconciliation overlay and private runtime configuration.
+
+Both `jobbot-dashboard.service` and `jobbot-queue.service` are active. The dashboard
+serves the new controls, and the versioned settings API durably saved the effective
+30-minute limit in revision 11. The queue's prior enabled state was restored only
+after validation. Settings edits apply to subsequent attempts; existing submission
+history, answer history and retry scheduling were retained.
