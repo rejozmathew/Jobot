@@ -8,6 +8,7 @@ PAYLOAD_FIELDS = frozenset({
     'source', 'fallback_reason', 'residual_fields', 'field_key', 'field_label', 'elapsed_seconds',
     'field_attribution', 'activity', 'next_step',
     'dispatch_id','document_id','frame_id',
+    'writer_documents','prior_document_cancelled',
     'stage_id','task_id','parent_id','task_state','handler','execution','verification_result',
 })
 SECRET = re.compile(r'''(?ix)(?:\b(?:password|passwd|otp|(?:access_|refresh_|reset_)?token|api[_-]?key|cookie|authorization|secret)[\\"']*\s*[=:]|\bbearer\s+\S+)''')
@@ -37,6 +38,14 @@ def safe_payload(payload):
     result={}
     for key,value in payload.items():
         if key not in PAYLOAD_FIELDS: continue
+        if key=='writer_documents' and isinstance(value,list):
+            result[key]=[dict(document_id=d['document_id'],**{k:d.get(k) is True for k in ('pending','participant','settled')})
+                for d in value if isinstance(d,dict) and isinstance(d.get('document_id'),str) and re.fullmatch(
+                    r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}',d['document_id'])]
+            continue
+        if key=='prior_document_cancelled':
+            if type(value) is bool:result[key]=value
+            continue
         if key in ('input_tokens','output_tokens'):
             if isinstance(value,int) and not isinstance(value,bool) and value>=0: result[key]=value
             continue

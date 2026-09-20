@@ -40,13 +40,13 @@ def _save_answer_history(config,package,attempt_id,answers,*,page,source,basis=N
         if any(not isinstance(v,str) or not v.strip() for v in row.values()):continue
         if re.search(r'password|passwd|\botp\b|(?:security|verification|authentication)[\s_-]*code|one[\s_-]?time|token|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card',row['question']+' '+row['field'],re.I):continue
         row.update(page=answer.get('page') or page,source=source,answer_basis=basis or 'not_recorded')
-        if source=='greenhouse_fast' and answer.get('verified') is True and answer.get('question_key'):
+        if source in ('greenhouse_fast','icims_fast') and answer.get('verified') is True and answer.get('question_key'):
             row.update(verified=True,question_key=answer['question_key'],answer_value=answer.get('answer_value'),
                        answer_basis=answer.get('answer_basis') or basis)
         try:reject_secrets(row)
         except ValueError:continue
         previous=next((r for r in reversed(history['answers']) if r['page']==row['page'] and r['field']==row['field'] and r['question']==row['question']),None)
-        if previous and previous['answer']==row['answer'] and (source!='greenhouse_fast' or
+        if previous and previous['answer']==row['answer'] and (source not in ('greenhouse_fast','icims_fast') or
             previous.get('verified') and previous.get('question_key')==row.get('question_key')):continue
         row['observed_at']=datetime.now(timezone.utc).isoformat()
         history['answers'].append(row);added+=1

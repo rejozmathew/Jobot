@@ -15,9 +15,12 @@
   let hosts=Array.from(document.querySelectorAll('.simplify-jobs-shadow-root'));
   if(!hosts.length && document.querySelector('.simplify-jobs-shadow-root')) hosts=[document.querySelector('.simplify-jobs-shadow-root')];
   const roots=hosts.map(h=>h && (h.shadowRoot || (h.tagName ? h : null))).filter(Boolean);
+  // Survives SPA URL/headings; only replacement of the actual document cancels it.
+  const writer=window.__jobbotWriter||(window.__jobbotWriter={document_id:crypto.randomUUID(),participant:false,pending:false,terminal:false});
   let scope=window.__jobbotSimplifyScope;
   if(!scope || scope.url!==location.href) scope=window.__jobbotSimplifyScope={url:location.href,id:crypto.randomUUID(),controls:new Map()};
   scope.controls=new Map();
+  scope.writer=writer;
   // Employer credentials belong to the native Workday account routine. Recheck
   // the live form at click time too: it can appear after an extension snapshot.
   scope.workday=workday;
@@ -44,7 +47,7 @@
       if(!visible(button))continue;
       const label=(button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').trim().toLowerCase();
       let kind=null;
-      if(/^autofill this page$/.test(label)) kind='autofill';
+      if(/^(?:autofill this page|run autofill again)$/.test(label)) kind='autofill';
       else if(/^autofill\s+\d+\s+skills?$/.test(label)) kind='autofill_skills';
       else if(/^continue application$/.test(label)) kind='continue';
       else if(/^start application$/.test(label)) kind='start';
@@ -134,6 +137,11 @@
   }
   const getRenderedText = (root) => {
     if(!root) return '';
+    if(document.createTreeWalker&&typeof NodeFilter!=='undefined'){
+      const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),parts=[];let n;
+      while(n=walker.nextNode())if(n.parentElement&&!n.parentElement.closest('style,script,[hidden]')&&visible(n.parentElement))parts.push(n.textContent);
+      return parts.join(' ').replace(/\s+/g,' ').trim();
+    }
     if(typeof root.querySelectorAll === 'function') {
       const all = root.querySelectorAll('*');
       if(all && all.length > 0) {
@@ -153,11 +161,20 @@
   let login_kind=null;
   let reviewCount=null;
   let activity={busy_indicator:false,explicit_writer:false,waiting_for_input:false};
+  const rendered=new Map(roots.map(r=>[r,getRenderedText(r)]));
+  const review_items=[];
+  for(const root of roots){
+    const heading=[...root.querySelectorAll('h1,h2,h3,h4,[role="heading"]')].find(e=>/need(?:s)?\s+(?:to\s+)?review/i.test(e.textContent||''));
+    const list=heading?.nextElementSibling;
+    if(list)for(const row of list.querySelectorAll('li,[role="listitem"]')){
+      if(visible(row)){const label=(row.innerText||row.textContent||'').replace(/\s+/g,' ').trim();if(label)review_items.push({label:label.slice(0,300)});}
+    }
+  }
   if(roots.length > 0) {
     let hasActive=false, hasReview=false, hasComplete=false, hasLogin=false, hasUnsupported=false;
     for(const r of roots) {
       const busy = (typeof r.querySelector==='function') ? r.querySelector('[aria-busy="true"]') : null;
-      const text = getRenderedText(r);
+      const text = rendered.get(r);
       if(busy || /autofilling|filling your application|autofill in progress|stop account step|creating (?:your )?account/i.test(text)) hasActive=true;
       if(/filling your application|autofill in progress|stop (?:account step|autofill)|creating (?:your )?account/i.test(text)) activity.explicit_writer=true;
       const mInput = text.match(/(\d+)\s+fields?\s+need(?:s)?\s+(?:your\s+input|review)/i);
@@ -207,12 +224,20 @@
     if(receipt.state==='none'){receipt.external_pass_observed=true;receipt.automatic_count=Math.max(1,receipt.automatic_count);receipt.started_at=Date.now();}
     receipt.state='active';receipt.saw_activity=true;
   }
+  if(!workday&&!greenhouse&&status==='active'){writer.participant=true;writer.pending=true;writer.terminal=false;writer.saw_active=true;}
+  // Completion evidence cannot override a concurrently observed active writer.
+  const terminal=roots.some(r=>/autofill complete|application autofilled|\d+\s+fields?\s+needs?\s+(?:review|your input)/i.test(rendered.get(r)))&&status!=='active';
+  if(terminal&&(!writer.pending||writer.saw_active||writer.dispatch_fingerprint&&writer.dispatch_fingerprint!==fingerprint)){writer.terminal=true;writer.pending=false;}
+  scope.last_fingerprint=fingerprint;
   return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,inventory,login_kind,
+    writer_document_id:writer.document_id,writer_participant:writer.participant,writer_pending:writer.pending,
+    terminal_evidence:terminal,settled_evidence:writer.terminal&&!writer.pending,review_items,
+    review_items_unavailable:!review_items.length,
     ...(greenhouse?{greenhouse:true,document_id:documentId,autofill_receipt:{...receipt,pending_age_ms:receipt.started_at?Math.max(0,Date.now()-receipt.started_at):0}}:{}),
     ...(workday?{workday:true,autofill_page_key:scope.autofillPageKey,autofill_attempted:scope.autofillAttempts.has(scope.autofillPageKey)}:{}),
     native_authentication_required:scope.nativeAuthenticationRequired()||workday&&
       ['sign_in','create_account','create_account_autofill'].some(k=>controls[k].enabled),
-    panel_text:roots.map(getRenderedText).join(' ').replace(/\s+/g,' ').slice(0,2200),
+    panel_text:roots.map(r=>rendered.get(r)).join(' ').replace(/\s+/g,' ').slice(0,2200),
     review_count:reviewCount,writer_safe:status!=='active'&&status!=='unknown',activity,
     source:fixture?'fixture':'observed_dom',field_summary:{visible:fields.length,required:fields.filter(x=>x.required).length,invalid:fields.filter(x=>x.invalid).length}};
 })()

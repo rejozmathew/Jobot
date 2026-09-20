@@ -102,6 +102,7 @@ async def observe_page(page,package):
 
 def screen_inventory(observed,package):
     import hashlib
+    from .form_audit import audit
     # Values, spinners and ordinary rerenders are not new decisions. New questions,
     # native validation and auth transitions are useful evidence for another one.
     evidence=[observed.get('page_signature'),observed.get('step'),observed.get('auth_ui'),
@@ -115,7 +116,8 @@ def screen_inventory(observed,package):
     if isinstance(profile,str):profile=json.loads(profile)
     return {'screen_key':key,'page_signature':observed.get('page_signature'),'url':observed.get('url'),
         'step':observed.get('step'),'auth':observed.get('auth'),'auth_ui':observed.get('auth_ui'),
-        'native':observed.get('inventory',[]),'errors':observed.get('blocking_errors',[]),'refresh_error':observed.get('refresh_error',False),
+        'native':observed.get('inventory',[]),'audit':audit(observed),
+        'errors':observed.get('blocking_errors',[]),'refresh_error':observed.get('refresh_error',False),
         'browser_recovery':{'available':True,
             'screenshot':{'operation':'browser','parameters':{'method':'screenshot'}},
             'visual_instruction':'If an expected control is missing, take this screenshot and inspect it with the harness image tool. Inspect embedded frames, overlays and scroll containers; continue from what is visible. Before giving up on any portal, inspect a fresh image and try the remaining plausible recovery. Capturing an image without reading it is not visual inspection.',

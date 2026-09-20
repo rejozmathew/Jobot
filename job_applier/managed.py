@@ -574,6 +574,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                 raise ProtocolError('newer_attempt_exists')
             if a['outcome'] in ('applied','already_applied'):
                 if outcome!=a['outcome']:raise ProtocolError('already_applied')
+                self._settle_reconciled_queue(db,a)
                 # Browser acknowledgement is distinct from immutable success/history.
                 changed=db.execute("UPDATE browser_leases SET state='released' WHERE profile=? AND generation=? AND attempt_id=? AND state='quarantined'",(a['browser_profile'],a['fence'],a['id'])).rowcount
                 if changed:
@@ -585,6 +586,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             key=hashlib.sha256(dumps(['reconciled',outcome,evidence,source]).encode()).hexdigest()
             if a['completed_at'] and a['finish_key']==key:return dict(a)
             result=self._complete(db,a,outcome,evidence,quiescent=True,finish_key=key,reconciled=True)
+            if outcome in ('applied','already_applied'):self._settle_reconciled_queue(db,a)
             now=self.now()
             payload=dumps({'operation':'submission_reconciled','status':outcome,'evidence':evidence,'source':source})
             audit_key=hashlib.sha256(dumps([a['id'],'operator',now,payload]).encode()).hexdigest()

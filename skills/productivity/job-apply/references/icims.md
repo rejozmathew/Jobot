@@ -37,5 +37,40 @@ controls the full application; this reference records observed iCIMS behavior.
   to iCIMS. If an email verification appears, use the common Hermes mail/code
   instructions and continue. No helper miss alone establishes failure.
 
-This reference is based on the observed ComPsych posting-to-email transition.
-It does not claim that every iCIMS application has the same later steps.
+## Owned iCIMS runner and compact recovery
+
+Call `icims_advance` with `{"seconds":60}`. The runner follows observed stage cues,
+not a fixed page count: posting/Apply, Email/Next, credentials, Candidate Profile,
+questions, review and confirmation. It uses the existing frame router, shared
+`browser` audit/repair, private credentials and final submission service.
+
+After autofill, missing passwords/confirmation go through the retained private
+credential helper. Empty optional Preferred Name, consent, reasons for leaving
+and similar fields remain empty. An accepted resume widget is not reuploaded
+merely because FileList is empty or Simplify lists Resume for review. Actual
+upload/validation errors still require repair. Unknown screening answers return
+as one grouped question handoff; answer with current `ref`, `question_key`,
+`answer` and approved `basis`, then resume `icims_advance`.
+
+On a page establishing Candidate Profile, observed Submit Profile (button or
+input-submit) is an intermediate action. Read the resulting screening/validation
+page; never record applied for profile acceptance. A repaired password can be
+resubmitted even when its old server banner remains until the next request.
+Final application submission uses the common submission mode/evidence policy.
+
+For an older in-memory native schema use the current session and actual driver:
+
+```sh
+.venv/bin/python -m job_applier.application_runtime call SESSION_ID icims_advance --parameters '{"seconds":60}'
+.venv/bin/python -m job_applier.application_runtime call SESSION_ID browser --parameters '{"method":"audit"}'
+```
+
+An unknown writer returns an audit plus concrete owned inspection/Stop guidance;
+actual pending writers must settle before repair. Do not reload a populated form
+merely for optional blanks, review counts or unfamiliar panel text. Open shadow
+roots and accepted frames are supported; inaccessible/custom controls remain
+explicit coverage handoffs. A helper slice or unsupported control never decides
+that the application has failed.
+
+ComPsych's entry transition and the supplied Cotiviti screenshots motivated this
+flow. Synthetic fixture validation is not a verified live employer submission.

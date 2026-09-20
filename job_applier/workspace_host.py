@@ -474,8 +474,9 @@ class WorkspaceHost:
                     'instruction':('The application tab is reopening; the shared browser and your other tabs stay open. '
                         if self.existing_browser else 'The owned browser is restarting. ')+
                         'This is the same attempt. Read status until connected, then inspect and continue; this is not an application outcome.'}
-        if op in ('fast_forward','linkedin_easy_apply','greenhouse_advance'):
-            if op=='greenhouse_advance':from .greenhouse_fast import advance
+        if op in ('fast_forward','linkedin_easy_apply','greenhouse_advance','icims_advance'):
+            if op=='icims_advance':from .icims_fast import advance
+            elif op=='greenhouse_advance':from .greenhouse_fast import advance
             elif op=='linkedin_easy_apply':from .linkedin_easy_apply import advance
             else:from .workday_fast import advance
             return advance(cfg,client,own,dict(params,target_id=session['target_id']))

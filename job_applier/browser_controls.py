@@ -14,16 +14,25 @@ def next_operation(platform, observed=None, *, identity=None, quiescent=None):
     if identity and identity.get('status')!='same_job':
         return {'operation':'browser','parameters':{'method':'snapshot'},
                 'instruction':'Inspect the owned page controls and identity evidence. Recover the observed application route before retrying a form action; this helper result does not end the application.'}
+    if platform=='icims':
+        return {'operation':'icims_advance','parameters':{'seconds':60},
+                'instruction':'Continue iCIMS through its owned runner: settle Simplify, audit, private credentials/grouped repair, then the observed stage action. A helper handoff is resumable.'}
     if quiescent is False:
+        if status=='unknown':
+            from .form_audit import recovery
+            return recovery(observed)
         return {'operation':'browser_observe','parameters':{},
-                'instruction':'Observe the active writer or use its enabled Stop/Cancel. Recover a broken page with reload or restart and inspect the new document.'}
+                'instruction':'Observe active work or use the enabled Stop/Cancel; do not write concurrently.'}
     if platform=='workday':
         return {'operation':'fast_forward','parameters':{'seconds':60},
                 'instruction':'Continue the owned Workday application with its routine runner.'}
     if platform=='greenhouse' or observed.get('greenhouse'):
         return {'operation':'greenhouse_advance','parameters':{'seconds':60},
                 'instruction':'Batch the owned Greenhouse form with Simplify and approved residual answers; return one grouped answer plan for unresolved questions and resume this operation.'}
-    if status in ('active','unknown'):
+    if status=='unknown':
+        from .form_audit import recovery
+        return recovery(observed)
+    if status=='active':
         return {'operation':'browser_observe','parameters':{},
                 'instruction':'Observe the current writer until it settles. Inspect an unusable page with the shared recovery controls.'}
     if platform=='linkedin':
@@ -37,21 +46,15 @@ def next_operation(platform, observed=None, *, identity=None, quiescent=None):
                     'instruction':'Follow the observed external Apply through the existing correlated employer target handoff and ATS handler.'}
         return {'operation':'browser','parameters':{'method':'snapshot'},
                 'instruction':'Inspect the assigned LinkedIn job. A missing employer URL does not establish Easy Apply. Follow login or current application evidence.'}
-    if platform=='icims' and 'native' not in observed:
-        return {'operation':'browser','parameters':{'method':'snapshot'},
-                'instruction':'Inspect the iCIMS posting and embedded application controls before choosing Autofill. Open Apply on the posting; use the current Email/Next controls on the login page.'}
-    apply=(observed.get('native') or {}).get('apply',{})
-    if platform=='icims' and apply.get('enabled'):
-        return {'operation':'browser','parameters':{'method':'click','ref':apply['ref']},
-                'instruction':'Open the observed iCIMS Apply control, including its embedded frame, before filling application details.'}
     for action in ('continue','autofill'):
+        if action=='autofill' and (status in ('complete','needs_review') or observed.get('settled_evidence')):continue
         if observed.get('controls',{}).get(action,{}).get('enabled'):
             return {'operation':'browser','parameters':{'method':'simplify','action':action},
                     'instruction':('Start enabled Autofill now; inspect remaining questions after filling settles.' if action=='autofill' else
                                    'Use enabled Continue and inspect the next application step.')}
     if status in ('complete','needs_review','unsupported'):
         return {'operation':'browser','parameters':{'method':'snapshot'},
-                'instruction':'Inspect remaining required questions. Preserve existing selections and use approved facts with shared select/check/fill operations.'}
+                'instruction':'Read audit: handle required_missing, invalid_blockers and credential_tasks, ignore optional_ignored and stale Simplify review items, then use the enabled native next action. Preserve existing answers.'}
     return {'operation':'browser_observe','parameters':{},
             'instruction':'Read the owned page and Simplify controls, then follow the returned next operation.'}
 
@@ -82,13 +85,16 @@ async def observe(page, package):
             writers.append((frame,writer))
             simplify_inventory.extend(dict(c,ref=frame.wrap(c['ref']),document='application_frame') for c in writer.get('inventory',[]))
             child=await frame.evaluate_function(FORM,{'method':'observe','page_signature':shared.get('page_signature')})
+            writer['audit_document_id']=child.get('document_id','document')
             for field in child['inventory']:
-                field['ref']=frame.wrap(field['ref']);field['document']='application_frame'
+                field['ref']=frame.wrap(field['ref']);field['document']=frame.wrap('document');field['document_id']=frame.wrap(field.get('document_id','document'))
                 native['inventory'].append(field)
             for kind,control in child['native'].items():
                 native['native'][kind]=({'enabled':False,'ref':None} if kind in native['native'] else
                     dict(control,ref=frame.wrap(control.get('ref'))))
             native['blocking_errors'].extend(child['blocking_errors'])
+            for key in ('coverage_diagnostics','validation_summary'):native.setdefault(key,[]).extend(child.get(key,[]))
+            if child.get('stage',{}).get('name') not in (None,'unknown'):native['stage']=child['stage']
             native['auth']=native.get('auth') or child.get('auth')
             if not native.get('job_metadata') and child.get('job_metadata'):native['job_metadata']=child['job_metadata']
             for group in child.get('verification',{}).get('groups',[]):
@@ -97,7 +103,8 @@ async def observe(page, package):
                     **({'resend_ref':frame.wrap(group['resend_ref'])} if group.get('resend_ref') else {})))
         native['application_frames']={'count':len(router.frames),'diagnostics':router.diagnostics}
         shared=_merge_writers(shared,writers,router.diagnostics)
-    return dict(shared,**native,simplify_inventory=simplify_inventory)
+    result=dict(shared,**native,simplify_inventory=simplify_inventory)
+    return result
 
 
 async def wait_for_page_recovery(page,package,*,seconds=12):
@@ -125,16 +132,31 @@ async def wait_for_page_recovery(page,package,*,seconds=12):
 def _merge_writers(root, children, diagnostics):
     merged=dict(root)
     documents=[root]+[value for _,value in children]
+    settled=any(d.get('terminal_evidence') or d.get('settled_evidence') for d in documents)
+    # Unrecognized decoration is not a participant. Pending writers remain relevant.
+    relevant=[d for d in documents if not (settled and d.get('status')=='unknown' and
+              d.get('writer_participant') is False and not d.get('writer_pending'))]
+    relevant=relevant or documents
     priorities=('active','unknown','login_required','needs_review','ready','complete','unsupported','missing')
-    merged['status']=next(status for status in priorities if any(d.get('status')==status for d in documents))
+    merged['status']=next(status for status in priorities if any(d.get('status')==status for d in relevant))
     merged['panel']=any(d.get('panel') for d in documents)
-    merged['writer_safe']=all(d.get('writer_safe') for d in documents)
+    merged['writer_pending']=any(d.get('writer_pending') for d in documents)
+    merged['writer_safe']=not merged['writer_pending'] and all(d.get('writer_safe') or d.get('settled_evidence') for d in relevant)
+    merged['settled_evidence']=settled and not merged['writer_pending'] and not any(d.get('status')=='active' for d in documents)
+    merged['writer_documents']=[{'document_id':d.get('writer_document_id'),
+        'pending':bool(d.get('writer_pending')),'participant':bool(d.get('writer_participant')),
+        'settled':bool(d.get('settled_evidence') or d.get('terminal_evidence'))} for d in documents]
     merged['activity']={key:any(d.get('activity',{}).get(key) for d in documents)
                         for key in ('busy_indicator','explicit_writer','waiting_for_input')}
     merged['source']='fixture' if any(d.get('source')=='fixture' for d in documents) else root.get('source','observed_dom')
     merged['application_frames']=[{'frame_id':frame.frame_id,'document':frame.nonce,
-        **{k:value.get(k) for k in ('fingerprint','page_signature','page_ref','status')}} for frame,value in children]
+        **{k:value.get(k) for k in ('fingerprint','page_signature','page_ref','status','writer_document_id','writer_pending')}} for frame,value in children]
     merged['frame_diagnostics']=list(diagnostics)
+    merged['review_items']=list(root.get('review_items',[]))+[
+        {'label':item if isinstance(item,str) else item['label'],'document_id':frame.wrap(value.get('audit_document_id','document'))}
+        for frame,value in children for item in value.get('review_items',[])]
+    counts=[d.get('review_count') for d in documents if isinstance(d.get('review_count'),int)]
+    if counts:merged['review_count']=sum(counts)
     return merged
 
 
@@ -169,22 +191,12 @@ async def observe_writers(page,package):
 
 def remaining_submission_work(observed):
     """Describe visible unfinished work without inferring unknown field values."""
-    fields=observed.get('inventory',[]);required=[]
-    for field in fields:
-        if not field.get('enabled') or not field.get('required') or field.get('type')=='file':continue
-        kind=field.get('role') or field.get('type')
-        if kind=='radio':
-            # Required radio groups are answered by any checked member.
-            if not field.get('name'):continue
-            missing=not any(f.get('name')==field['name'] and f.get('document')==field.get('document') and f.get('checked') for f in fields)
-        elif kind=='checkbox':
-            # Checkbox groups (select-all-that-apply) are satisfied by any checked member.
-            if not field.get('name'):missing=field.get('checked') is False
-            else:missing=not any(f.get('name')==field['name'] and f.get('document')==field.get('document') and f.get('checked') for f in fields)
-        else:missing=field.get('present') is False
-        if missing:required.append(field)
+    from .form_audit import classify
+    required=[dict(f) for f,state,mandatory,present,members in classify(observed)
+              if mandatory and state in ('missing','credential','invalid')]
     groups=[g for g in observed.get('verification',{}).get('groups',[]) if g.get('complete') is False]
     return {'required_fields':required,'verification_groups':groups,'errors':observed.get('blocking_errors',[])}
+
 
 
 def inventory(observed, package):
@@ -209,16 +221,11 @@ def inventory(observed, package):
     if isinstance(address,dict):
         result['answer_context']['identity']['address']={k:address[k] for k in (
             'street','address_line1','address_line2','city','state','zip','postal_code','country') if k in address}
-    missing={field['ref'] for field in remaining_submission_work(observed)['required_fields']}
-    result['remaining_required']=[]
-    for field in observed.get('inventory',[]):
-        if not field.get('enabled') or field.get('private') or not field.get('required'):continue
-        if field.get('ref') not in missing and not field.get('validation',{}).get('rejected') and not (field.get('type')=='file' and not field.get('present')):continue
-        method=('upload' if field.get('type')=='file' else
-                'check' if (field.get('role') or field.get('type')) in ('checkbox','radio') else
-                'select' if field.get('tag')=='SELECT' or field.get('role')=='combobox' or field.get('haspopup') in ('listbox','menu','true') else 'fill')
-        result['remaining_required'].append(dict(field,state='invalid' if field.get('validation',{}).get('rejected') else 'missing',
-            action={'method':method,'ref':field.get('ref')}))
+    report=result['audit']
+    residuals={f['ref']:f for f in report['required_missing']+report['invalid_blockers'] if f['required']}
+    result['remaining_required']=[dict(residuals[f['ref']],state='missing' if residuals[f['ref']]['presence']=='missing' else 'invalid')
+        for f in observed.get('inventory',[]) if f.get('ref') in residuals]
+    result['credential_tasks']=report['credential_tasks']
     result['supported_operations']={
         'repair':{'method':'repair','fields':[{'method':'fill|select|check','ref':'<observed ref>','value':'<approved value>'}]},
         'upload':{'method':'upload','ref':'<observed file ref>','asset_id':'<selected asset id>'},

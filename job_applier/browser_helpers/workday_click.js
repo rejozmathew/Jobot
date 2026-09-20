@@ -74,7 +74,7 @@
    return ['sign in','create account'].includes(label)&&(wrapper.getAttribute('aria-label')||'').trim().toLowerCase()===label;
   };
   for(const [fx,fy] of points){
-   const x=left+(right-left)*fx,y=top+(bottom-top)*fy,hit=document.elementFromPoint(x,y);
+   const x=left+(right-left)*fx,y=top+(bottom-top)*fy,hit=(el.getRootNode().elementFromPoint?.(x,y)||document.elementFromPoint(x,y));
    if(hit&&(hit===el||el.contains(hit)))return {pointer_ready:true,x,y,...credentialCheck};
    if(hit&&authWrapperHit(hit))return {pointer_ready:true,x,y,control_resolution:'workday_auth_wrapper',...credentialCheck};
    if(!covering&&hit)covering={tag:hit.tagName,role:hit.getAttribute('role'),

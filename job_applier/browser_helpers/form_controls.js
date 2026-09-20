@@ -1,7 +1,20 @@
 // Generic form inventory and value operations for the existing owned CDP target.
 (args) => {
+ const started=performance.now();
  const visible=e=>!!e&&e.isConnected&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden';
- const native=e=>!e.closest('.simplify-jobs-shadow-root,[id*="simplify"]');
+ const native=e=>{for(let n=e;n;n=n.getRootNode()?.host)if(n.closest('.simplify-jobs-shadow-root,[id*="simplify"]'))return false;return true;};
+ const auditRoots=[document],collected=[],coverage=[];let queries=0;
+ for(let i=0;i<auditRoots.length;i++){
+  queries++;
+  for(const e of auditRoots[i].querySelectorAll('*')){
+   if(!native(e))continue;
+   collected.push(e);
+   if(e.shadowRoot)auditRoots.push(e.shadowRoot);
+   else if((e.tagName.includes('-')||e.getAttribute('role')==='group')&&!e.children.length&&!e.textContent?.trim())
+    coverage.push({reason:'opaque_widget',label:e.getAttribute('aria-label')||e.tagName});
+  }
+ }
+ const byId=(e,id)=>e.getRootNode().getElementById?.(id)||null;
  const text=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
  const linkedin=location.hostname==='linkedin.com'||location.hostname.endsWith('.linkedin.com');
  const greenhouse=/(^|\.)greenhouse\.io$/.test(location.hostname)||new URL(location.href).searchParams.has('gh_jid')||!!window.__jobbotGreenhouseOwner;
@@ -20,13 +33,15 @@
   return '';
  };
  const label=e=>e.getAttribute('aria-label')||[...(e.labels||[])].map(text).join(' ')||
-  (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)).filter(Boolean).map(text).join(' ')||
+  (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>byId(e,id)).filter(Boolean).map(text).join(' ')||
   text(e.closest('label'))||nearbyLabel(e)||e.getAttribute('placeholder')||'';
- const nodes=()=>[...(liModal||document).querySelectorAll('input:not([type="hidden"]),textarea,select,button,a,[role="button"],[role="checkbox"],[role="radio"],[role="combobox"]')].filter(e=>visible(e)&&native(e));
- const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
- const checked=e=>['checkbox','radio'].includes(e.getAttribute('role'))?e.getAttribute('aria-checked')==='true':!!e.checked;
+ const controlSelector='input:not([type="hidden"]),textarea,select,button,a,[role="button"],[role="checkbox"],[role="radio"],[role="combobox"],[role="textbox"],[role="switch"],[role="listbox"]';
+ const allControls=collected.filter(e=>e.matches(controlSelector)&&(!liModal||liModal.contains(e)));
+ const currentNodes=allControls.filter(visible),nodes=()=>currentNodes;
+ const enabled=e=>!e.disabled&&!e.matches(':disabled')&&e.getAttribute('aria-disabled')!=='true';
+ const checked=e=>['checkbox','radio','switch'].includes(e.getAttribute('role'))?(['true','false'].includes(e.getAttribute('aria-checked'))?e.getAttribute('aria-checked')==='true':null):!!e.checked;
  const descriptor=e=>({tag:e.tagName,type:e.type||'',role:e.getAttribute('role')||'',name:e.name||'',
-  label:label(e).slice(0,300),text:/^(BUTTON|A)$/.test(e.tagName)||e.getAttribute('role')==='button'?text(e).slice(0,200):'',
+  label:label(e).slice(0,300),text:e.tagName==='INPUT'&&e.type==='submit'?e.value:/^(BUTTON|A)$/.test(e.tagName)||e.getAttribute('role')==='button'?text(e).slice(0,200):'',
   automation_id:e.getAttribute('data-automation-id')||'',...(greenhouse?{id:e.id||'',section:text(e.closest('fieldset,section,[role="group"]')?.querySelector('legend,h1,h2,h3'))}:{}),...(liGroup(e)?{question:liQuestion(e)}:{})});
  const key=e=>JSON.stringify(descriptor(e));
  let scope=window.__jobbotFormScope;
@@ -34,6 +49,11 @@
  scope.page_signature=args.page_signature||scope.page_signature||location.origin+location.pathname;
  scope.step='form';
  window.__jobbotFormScope=scope;
+ scope.elementRefs=scope.elementRefs||new WeakMap();scope.identities=scope.identities||new WeakMap();
+ const identity=e=>{if(!e)return null;if(!scope.identities.has(e))scope.identities.set(e,crypto.randomUUID());return scope.identities.get(e);};
+ const document_id=window.__jobbotAuditDocument||(window.__jobbotAuditDocument=crypto.randomUUID());
+ const keys=new Map(),counts=new Map();
+ for(const e of currentNodes){const k=key(e);keys.set(e,k);counts.set(k,(counts.get(k)||0)+1);}
  if(greenhouse&&!scope.structureObserver){
   scope.structureEpoch=0;
   const fieldNode=n=>n.nodeType===1&&(n.matches('input:not([type="hidden"]),select,textarea,[role="combobox"],[role="checkbox"],[role="radio"]')||
@@ -45,10 +65,12 @@
   scope.structureObserver.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['required','aria-required','name','id']});
  }
  const remember=e=>{
-  const k=key(e),matches=nodes().filter(n=>key(n)===k);
-  let ref=scope.verificationElementRefs?.get(e)||(matches.length===1?scope.keys.get(k):null);
+  const k=keys.get(e)||key(e),unique=counts.get(k)===1;
+  const existing=scope.elementRefs.get(e);
+  let ref=scope.verificationElementRefs?.get(e)||(existing&&scope.bindings.get(existing)===k?existing:null)||(unique&&e.type!=='password'?scope.keys.get(k):null);
   if(!ref)ref='form:'+crypto.randomUUID();
-  if(matches.length===1)scope.keys.set(k,ref);
+  scope.elementRefs.set(e,ref);
+  if(unique)scope.keys.set(k,ref);
   scope.inventory.set(ref,e);scope.bindings.set(ref,k);return ref;
  };
  const codePattern=/\botp\b|one[\s_-]?time|(?:security|verification|authentication)[\s_-]*code/i;
@@ -113,15 +135,34 @@
   }
   return found;
  };
+ const serverErrors=collected.filter(e=>visible(e)&&e.matches('[role="alert"],.validation-summary-errors,.iCIMS_ErrorMessage')&&/required|invalid|could not be accepted|does not match|failed/i.test(text(e)));
+ scope.serverErrors=scope.serverErrors||new WeakMap();
+ scope.errorEpoch=scope.errorEpoch||new WeakMap();scope.errorObservers=scope.errorObservers||new WeakMap();
+ for(const error of serverErrors)if(!scope.errorObservers.has(error)){
+  const observer=new MutationObserver(()=>scope.errorEpoch.set(error,(scope.errorEpoch.get(error)||0)+1));
+  observer.observe(error,{subtree:true,childList:true,characterData:true,attributes:true});scope.errorObservers.set(error,observer);
+ }
+ const serverError=e=>serverErrors.filter(n=>{
+  if(e.id&&[...n.querySelectorAll('a[href]')].some(a=>a.getAttribute('href')==='#'+e.id))return true;
+  const q=label(e).replace(/\*/g,'').trim();
+  return q&&new RegExp('^'+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*:', 'i').test(text(n))||e.type==='file'&&/resume|\bcv\b/i.test(label(e)+' '+e.name)&&/^resume\s*:/i.test(text(n));
+ });
  const validation=e=>{
   const ids=((e.getAttribute('aria-errormessage')||'')+' '+(e.getAttribute('aria-describedby')||'')).split(/\s+/).filter(Boolean);
-  const errors=ids.map(id=>document.getElementById(id)).filter(n=>visible(n)&&text(n)&&
+  const errors=ids.map(id=>byId(e,id)).filter(n=>visible(n)&&text(n)&&
    ((e.getAttribute('aria-errormessage')||'').split(/\s+/).includes(n.id)||n.matches('[role="alert"],.error,.field-error,[class*="error"]')));
   const nativeInvalid=e.willValidate&&e.validity&&!e.validity.valid&&!(choice(e)&&e.validity.valueMissing&&selectedValue(e));
-  const rejected=e.getAttribute('aria-invalid')==='true'||!!nativeInvalid||errors.length>0;
-  return {rejected,aria_invalid:e.getAttribute('aria-invalid')==='true',associated_error:errors.length>0};
+  const server=serverError(e),signature=server.map(n=>identity(n)+':'+(scope.errorEpoch.get(n)||0)+':'+text(n)).join('|');
+  const current=privateControl(e)?!!e.value:JSON.stringify([e.value,!!e.checked]);
+  let receipt=scope.serverErrors.get(e);
+  if(signature&&(!receipt||receipt.signature!==signature)){receipt={signature,initial:current,repaired:false};scope.serverErrors.set(e,receipt);}
+  if(receipt&&receipt.initial!==current)receipt.repaired=true;
+  const stale=!!signature&&!!receipt?.repaired;
+  const rejected=e.getAttribute('aria-invalid')==='true'||!!nativeInvalid||errors.length>0||!!signature&&!stale;
+  return {rejected,aria_invalid:e.getAttribute('aria-invalid')==='true',associated_error:errors.length>0,
+   value_missing:!!(e.willValidate&&e.validity?.valueMissing),server_error:!!signature&&!stale,prior_cycle_error:stale};
  };
- const meaningful=value=>!!value&&!/^(?:select(?: one| an option)?|please select|choose(?: an? option)?)[.\s…]*$/i.test(value);
+ const meaningful=value=>!!value&&!/^[\s—–-]*(?:select(?: one| an option)?|please select|make a selection|choose(?: an? option)?)[.\s…—–-]*$/i.test(value);
  const selectedValue=e=>{
   const workday=window.__jobbotWorkdayScope;
   if(workday?.url===location.href&&workday.selectedValue)return workday.selectedValue(e);
@@ -155,10 +196,33 @@
   }
   return '';
  };
- const describe=e=>({...descriptor(e),ref:remember(e),enabled:enabled(e),required:required(e),required_evidence:requiredEvidence(e),private:privateControl(e),validation:validation(e),
-  present:choice(e)?!!selectedValue(e):!!e.value,...(selectedValue(e)?{selected_value:selectedValue(e)}:{}),checked:['checkbox','radio'].includes(e.type)||e.getAttribute('role')==='checkbox'?checked(e):undefined,
+ const attachment=e=>{
+  if(e.type!=='file')return null;
+  if(validation(e).rejected&&!e.validity?.valueMissing)return 'rejected';
+  if(e.files?.length)return 'selected';
+  let root=e.parentElement;
+  while(root&&root!==document.body&&!root.matches('form')){
+   if(root.querySelectorAll('input[type="file"]').length>1)break;
+   const contents=text(root),file=[...root.querySelectorAll('a,span,p')].some(n=>visible(n)&&/\.(?:pdf|docx?|rtf)\b/i.test(text(n)));
+   const replace=[...root.querySelectorAll('button,a,[role="button"]')].some(n=>visible(n)&&/replace|remove|delete/i.test(text(n)));
+   if(file&&replace)return /uploading|processing/i.test(contents)?'pending':'accepted';
+   root=root.parentElement;
+  }
+  return 'missing';
+ };
+ const describe=e=>{
+  const attached=e.type==='file'?attachment(e):null,v=validation(e);
+  if(attached==='accepted'&&v.value_missing&&!v.aria_invalid&&!v.associated_error&&!v.server_error)v.rejected=false;
+  return {...descriptor(e),ref:remember(e),enabled:enabled(e),required:required(e)||serverError(e).some(n=>/required/i.test(text(n))),required_evidence:requiredEvidence(e),private:privateControl(e),validation:v,
+  document_id,root_id:identity(e.getRootNode()),form_id:identity(e.form||e.closest('form')),
+  section_id:identity(e.closest('fieldset,section,[role="group"],[role="radiogroup"]')),
+  section:text(e.closest('fieldset,section,[role="group"],[role="radiogroup"]')?.querySelector('legend,h1,h2,h3')),
+  group_id:e.type==='radio'?identity(e.form||e.getRootNode())+':'+e.name:identity(e.closest('[role="radiogroup"]')),
+  ...(e.type==='file'?{attachment:attached}:{}),
+  present:e.type==='file'?['accepted','selected'].includes(attached):choice(e)?!!selectedValue(e):typeof e.value==='string'?!!e.value.trim():null,...(selectedValue(e)?{selected_value:selectedValue(e)}:{}),checked:['checkbox','radio'].includes(e.type)||['checkbox','radio','switch'].includes(e.getAttribute('role'))?checked(e):undefined,
   ...(e.tagName==='SELECT'?{options:[...e.options].map(o=>({value:o.value,label:o.text,disabled:o.disabled||o.parentElement.disabled}))}:{}),
-  expanded:e.getAttribute('aria-expanded'),haspopup:e.getAttribute('aria-haspopup')});
+  expanded:e.getAttribute('aria-expanded'),haspopup:e.getAttribute('aria-haspopup')};
+ };
  const metadata=()=>{
   const postings=[];
   const visit=value=>{
@@ -212,17 +276,34 @@
  }
  if(args.method==='observe'){
   const inventory=nodes().map(describe),controls={};
+  for(const e of allControls.filter(e=>!visible(e)&&e.willValidate&&!e.validity.valid))
+   inventory.push({...describe(e),present:null,hidden_validation:true});
+  const headings=collected.filter(e=>visible(e)&&e.matches('h1,h2,h3,[aria-current="step"]')).map(text);
+  const cues=headings.join(' ');let stage='unknown';
+  if(/candidate profile/i.test(cues))stage='candidate_profile';
+  else if(/application received|thank you.*appl/i.test(cues))stage='confirmation';
+  else if(/review.*application|application.*review/i.test(cues))stage='review';
+  else if(/screening|application questions/i.test(cues))stage='screening';
+  else if(groups.length)stage='verification';
+  else if(nodes().some(e=>e.type==='password'))stage=nodes().filter(e=>e.type==='password').length>1?'create_account':'sign_in';
+  else if(nodes().some(e=>e.type==='email'))stage='email_entry';
   const labels={'save and continue':'continue','continue':'continue','next':'continue','next step':'continue',
     'apply':'apply','apply now':'apply','apply for this job':'apply','apply manually':'apply','start application':'apply',
     'submit':'submit','submit application':'submit','send application':'submit'};
   for(const item of inventory){
-   const kind=labels[item.text.toLowerCase()];if(!kind)continue;
-   controls[kind]=controls[kind]?{enabled:false,ref:null}:{ref:item.ref,enabled:item.enabled};
+   const kind=item.text.toLowerCase()==='submit profile'&&stage==='candidate_profile'?'continue':labels[item.text.toLowerCase()];if(!kind)continue;
+   controls[kind]=controls[kind]?{enabled:false,ref:null}:{ref:item.ref,enabled:item.enabled,label:item.text};
   }
   const errors=[...document.querySelectorAll('[aria-invalid="true"],[role="alert"]')].filter(e=>visible(e)&&native(e))
    .filter(e=>e.getAttribute('aria-invalid')==='true'||/required|invalid|must (?:select|enter)/i.test(text(e)))
    .map(e=>(label(e)||text(e)).slice(0,180)).slice(0,8);
-  return {step:'form',native:controls,inventory,blocking_errors:errors,auth:nodes().some(e=>e.type==='password'),
+  return {step:'form',stage:{name:stage,evidence:[stage==='unknown'?'unrecognized_stage':'observed_headings_and_controls']},
+    document_id,observation_id:crypto.randomUUID(),coverage_diagnostics:coverage,
+    audit_metrics:{dom_ms:performance.now()-started,root_queries:queries,controls:inventory.length},
+    native:controls,inventory,blocking_errors:errors,validation_summary:serverErrors.map(n=>{
+      const fields=currentNodes.filter(e=>serverError(e).includes(n));
+      return {associated:fields.length>0,state:fields.length&&fields.every(e=>validation(e).prior_cycle_error)?'prior_cycle':'current'};
+    }),auth:nodes().some(e=>e.type==='password'),
     page_signature:scope.page_signature,job_metadata:metadata(),verification:{groups},...(greenhouse?{greenhouse:true}:{}),
     ready_state:document.readyState,structure:JSON.stringify(inventory.filter(i=>['INPUT','SELECT','TEXTAREA'].includes(i.tag)||['combobox','checkbox','radio'].includes(i.role)).map(i=>[i.id,i.name,i.tag,i.type,i.role,i.label,i.required,i.section]))};
  }
@@ -290,7 +371,7 @@
   let options=[];
   if(el.tagName==='SELECT')options=[...el.options].filter(o=>!o.disabled&&!o.parentElement.disabled&&o.value!==''&&
     meaningful(o.text.trim())).map(o=>({value:o.value,label:o.text.trim()}));
-  const radios=kind==='radio'?[...(group||document).querySelectorAll('input[type="radio"],[role="radio"]')]
+  const radios=kind==='radio'?[...(el.type==='radio'?(el.form||el.getRootNode()):(group||el.getRootNode())).querySelectorAll('input[type="radio"],[role="radio"]')]
     .filter(e=>visible(e)&&enabled(e)&&(!el.name||e.name===el.name)):[];
   if(kind==='radio')options=radios.map(e=>({value:e.value||label(e),label:label(e),ref:remember(e)}));
   const read=value().value,actual=Array.isArray(read)?read.join('; '):read.trim();
@@ -307,7 +388,7 @@
    /^(?:submit|submit application|send application)$/i.test(text(el)||el.value||label(el))&&
    !el.closest('form')?.querySelector('input[type="password"]')};
  }
- if(args.method==='focus'){el.focus();return {committed:document.activeElement===el};}
+ if(args.method==='focus'){el.focus();return {committed:(el.getRootNode().activeElement||document.activeElement)===el};}
  if(args.method==='begin_menu_inspection'){
   scope.menuInspection={ref:args.ref,element:el};return {started:true};
  }
@@ -324,7 +405,7 @@
   const proto=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
   el.focus();Object.getOwnPropertyDescriptor(proto,'value').set.call(el,args.value);
   el.dispatchEvent(new Event('input',{bubbles:true}));
-  if(args.method==='search')return {committed:false,focused:el.isConnected&&document.activeElement===el,search_updated:el.value===args.value};
+  if(args.method==='search')return {committed:false,focused:el.isConnected&&(el.getRootNode().activeElement||document.activeElement)===el,search_updated:el.value===args.value};
   el.dispatchEvent(new Event('change',{bubbles:true}));el.blur();
   return {committed:el.isConnected&&el.value===args.value};
  }

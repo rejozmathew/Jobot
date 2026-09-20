@@ -182,6 +182,13 @@ class RuntimeServices:
                 # URL. Workday login ownership depends on the full job redirect.
                 after_url=await page.evaluate('location.href')
                 after_scope=verify_url(after_url)
+                # Read-only audit remains available even when a writer prevents repair.
+                audit_observation=None
+                if not after.get('workday') and not after.get('greenhouse') and after.get('status') in ('complete','needs_review','unknown','missing','unsupported'):
+                    try:
+                        from .browser_controls import observe
+                        audit_observation=await observe(page,{'job':dict(job,url=after_url) if after_scope else dict(job),'attempt':dict(a)})
+                    except Exception:pass
                 if after_scope and before_url==after_url:
                     try:
                         from .browser_controls import FORM
@@ -194,13 +201,13 @@ class RuntimeServices:
                 stable=stable and before.get('application_frames')==after.get('application_frames')
                 confirmed=confirmed_before and not after.get('panel') and await native_confirmation()
                 match={'status':'same_job'} if before_scope and after_scope else application_match(job['url'],after_url)
-                return after,stable,browser.observed_mode,confirmed,match,after_url
+                return after,stable,browser.observed_mode,confirmed,match,after_url,audit_observation
             finally:
                 await browser.close()
         self.action_start(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,tool_name='browser_observe',writes_browser=False)
         try:
             import asyncio
-            obs,stable,observed_mode,native_confirmed,match,live_url=asyncio.run(read_bound_browser())
+            obs,stable,observed_mode,native_confirmed,match,live_url,audit_observation=asyncio.run(read_bound_browser())
             from .managed_context import platform_for_url
             obs_url=obs.get('url') or target['url']
             detected_platform=platform_for_url(obs_url)
@@ -211,11 +218,19 @@ class RuntimeServices:
                 unended_writer=db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1 AND id!=?',(attempt_id,action_id)).fetchone()
                 prior_writer=a['writer_state']
                 has_active_autofill=(prior_writer in ('active','unknown') or bool(unended_writer))
+                documents=obs.get('writer_documents') or ([{'document_id':obs['writer_document_id'],
+                    'pending':bool(obs.get('writer_pending'))}] if obs.get('writer_document_id') else [])
+                previous=db.execute("SELECT payload_json FROM managed_events WHERE attempt_id=? AND json_extract(payload_json,'$.operation')='writer_documents' ORDER BY rowid DESC LIMIT 1",(attempt_id,)).fetchone()
+                prior_documents=json.loads(previous[0]).get('writer_documents',[]) if previous else []
+                old_ids={d.get('document_id') for d in prior_documents if d.get('pending')} or {d.get('document_id') for d in prior_documents}
+                new_ids={d.get('document_id') for d in documents}
+                document_cancelled=bool(old_ids and new_ids and None not in old_ids|new_ids and not old_ids&new_ids and
+                    not obs.get('frame_diagnostics') and not obs.get('writer_pending'))
 
                 if unended_writer:
                     new_writer='active'
                     quiescent=False
-                elif status=='active':
+                elif status=='active' or obs.get('writer_pending'):
                     new_writer='active'
                     quiescent=False
                 elif stable and native_confirmed and a['submit_intent_at'] and not other_actions:
@@ -227,7 +242,7 @@ class RuntimeServices:
                         for k in ('create_account_autofill','create_account','sign_in')))
                     explicit_settlement=status=='unsupported' and obs.get('writer_safe') and not any(
                         obs.get('activity',{}).get(k) for k in ('busy_indicator','explicit_writer'))
-                    if stable and obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready or explicit_settlement):
+                    if stable and (document_cancelled or obs.get('settled_evidence') or obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready or explicit_settlement)):
                         new_writer='idle'
                         quiescent=True
                     else:
@@ -249,6 +264,9 @@ class RuntimeServices:
                 if detected_platform != 'unknown':
                     db.execute('UPDATE application_attempts SET platform=? WHERE id=?',(detected_platform,attempt_id))
             self.action_end(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,status='success')
+            if documents and documents!=prior_documents:
+                self.event(attempt_id,worker_id=worker_id,fence=fence,event_id=uid(),event_type='checkpoint',observed_at=self.now(),
+                    payload={'operation':'writer_documents','writer_documents':documents,'prior_document_cancelled':document_cancelled})
             if quiescent and match['status']=='same_job' and obs.get('status') in ('complete','needs_review'):
                 with self.tx() as db:semantic=self._field_context(db,self._get(db,'application_attempts',attempt_id))
                 if semantic.get('stage_id')=='fill_application':
@@ -258,10 +276,16 @@ class RuntimeServices:
             permitted=quiescent and match['status']=='same_job' and not (
                 obs.get('activity',{}).get('busy_indicator') and obs.get('activity',{}).get('waiting_for_input'))
             guidance=next_operation(detected_platform,obs,identity=match,quiescent=permitted)
+            compact={}
+            if audit_observation is not None:
+                from .form_audit import audit
+                compact['audit']=audit(audit_observation,writer={'ui_status':status,'state':new_writer,
+                    'native_takeover_authorized':permitted,'terminal_evidence':obs.get('settled_evidence',False)})
             from .managed_identity import public_url,form_route_identity
             requisition=form_route_identity(live_url)
             return {
                 'operation':'browser_observe',
+                **compact,
                 'status':status,
                 'writer_state':new_writer,
                 'quiescent':quiescent,

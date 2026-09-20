@@ -35,6 +35,8 @@ class SimplifyBoundary:
         result.update(panel=raw.get('panel') is True,status=raw['status'],controls=controls,
             source='fixture' if raw.get('source')=='fixture' else 'observed_dom')
         result['login_kind']=raw.get('login_kind')
+        for key in ('writer_document_id','writer_participant','writer_pending','terminal_evidence','settled_evidence','review_items','review_items_unavailable'):
+            if key in raw:result[key]=raw[key]
         result['native_authentication_required']=raw.get('native_authentication_required') is True
         if raw.get('workday') is True:
             result['workday']=True
@@ -106,6 +108,7 @@ class SimplifyBoundary:
             any(before.get(k) and after.get(k) and before[k]!=after[k] for k in ('page_ref','page_signature')))
 
     def _result(self,observed,changed,writer,reason):
+        if observed.get('writer_pending'):writer='unknown'
         return {'status':observed.get('status','unknown'),'changed':bool(changed),
             'writer_state':writer,'reason':reason,'native_takeover_authorized':writer=='idle' and not (
                 observed.get('activity',{}).get('busy_indicator') and observed.get('activity',{}).get('waiting_for_input')),
@@ -118,6 +121,31 @@ class SimplifyBoundary:
                 'A helper limit is not a terminal application outcome; keep working on the open session.')}
 
     async def perform(self,operation,*,retry=False,credential_evidence=None,automatic=False):
+        result=await self._perform(operation,retry=retry,credential_evidence=credential_evidence,automatic=automatic)
+        if self.checkpoint:await self.checkpoint()
+        # One semantic audit at the handoff, not during every lightweight poll.
+        # Specialized runners already collect their native inventory themselves.
+        observation=result.get('observation',{})
+        if not observation.get('workday') and not observation.get('greenhouse'):
+            from .browser_controls import FORM,observe
+            from .form_audit import audit,recovery
+            try:
+                package=getattr(self.page,'application_package',None)
+                if package:
+                    native=await observe(self.page,package)
+                else:
+                    native=dict(observation,**await self.page.evaluate_function(FORM,{'method':'observe'}))
+                if native.get('status')=='active' or native.get('writer_pending'):
+                    result.update(native_takeover_authorized=False,writer_state='unknown')
+                result['audit']=audit(native,writer={
+                    'ui_status':result['status'],'state':result['writer_state'],
+                    'native_takeover_authorized':result['native_takeover_authorized']})
+            except (AttributeError,RuntimeError,TypeError,KeyError):
+                result['audit_unavailable']='Inspect the owned document with browser audit/screenshot.'
+            if not result.get('native_takeover_authorized'):result['next_operation']=recovery(observation)
+        return result
+
+    async def _perform(self,operation,*,retry=False,credential_evidence=None,automatic=False):
         if operation not in ('autofill','autofill_skills','continue','start','sign_in','stop'):raise ValueError('Unsupported Simplify operation')
         self.execution='not_executed'
         self.deadline=self.clock()+self.budget
@@ -150,7 +178,7 @@ class SimplifyBoundary:
         if (operation=='autofill' and before.get('workday') and not already and
             before['status'] in ('ready','complete','needs_review') and before['controls'].get('autofill',{}).get('enabled')):
             decision={'action':'autofill','reason':'first_page_autofill_before_manual_repair'}
-        active=before['status']=='active' or pending;clicked=False
+        active=before['status']=='active' or pending or before.get('writer_pending');clicked=False
         try:
             if operation=='stop':
                 control=before['controls']['stop']
@@ -168,6 +196,9 @@ class SimplifyBoundary:
                     settled=current.get('panel') and current.get('observed_writer_safe',current.get('writer_safe')) and current['status'] in ('ready','complete','needs_review','unsupported','login_required')
                     signature=tuple(current.get(k) for k in ('status','fingerprint','page_ref','native_structure'))
                     if settled and previous==signature:
+                        if current.get('writer_document_id'):
+                            await self.page.evaluate_function('()=>{if(window.__jobbotWriter){window.__jobbotWriter.pending=false;window.__jobbotWriter.terminal=true}}')
+                        current=dict(current,writer_pending=False,settled_evidence=True)
                         if current.get('greenhouse'):
                             await self.page.evaluate_function('(state)=>{const r=window.__jobbotGreenhouseDocument?.current;if(r)r.state=state}', 'stopped')
                             current=await self.observe()

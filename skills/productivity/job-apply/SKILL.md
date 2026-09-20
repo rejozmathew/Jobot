@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.18
+version: 0.5.19
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -131,6 +131,23 @@ the Workday runner on Greenhouse. `browser_observe` accepts empty parameters;
 `method` belongs to `browser`. After execution begins, status requests a fresh
 observation instead of reusing the original document's Autofill control.
 
+For iCIMS use `icims_advance` with `{"seconds":60}` in this owned session. It
+settles the writer, audits current required/invalid work, privately fills missing
+credentials, batches approved residual answers and advances the observed stage.
+A slice or unfamiliar control returns a handoff; continue the same application.
+Return unfamiliar questions together using `answers:[{ref,question_key,answer,basis}]`.
+Use approved facts; never infer No for prior employment or relatives.
+
+Use `browser` with `{"method":"audit"}` for compact post-autofill evidence.
+The same `audit` is included in snapshots and shared post-autofill handoffs.
+Act on `required_missing`, `invalid_blockers` (including invalid optional values)
+and private `credential_tasks`. Ignore `optional_ignored`; Simplify review rows
+are advisory and do not require repeated Autofill. Unknown presence or incomplete
+coverage needs targeted inspection, not fabricated emptiness. Filled values and
+secrets are not repeated in the compact audit. Audit is read-only; current writer
+and ownership checks still govern writes. Do not reload an otherwise usable form
+because a review counter is nonzero. Use the existing ATS runner to advance.
+
 For routine residuals on any portal, a browser snapshot includes
 `remaining_required`, validation, `required_evidence`, approved contact facts in
 `answer_context.identity`, and exact supported operation shapes. Use one browser
@@ -179,7 +196,7 @@ that session automatically. The portable equivalent is:
 ```
 
 Portable operation names include `context`, `report`, `browser_observe`,
-`fast_forward`, `linkedin_easy_apply`, `credentials`, `browser`, `restart`, `event`, `progress`, `record_account_event`,
+`fast_forward`, `icims_advance`, `linkedin_easy_apply`, `credentials`, `browser`, `restart`, `event`, `progress`, `record_account_event`,
 `report_upload`, `submission_intent`, `finish`, `request_mail_for_attempt`,
 `match_mail_for_attempt`, and `account_lock`. No attempt/fence/target/CDP fields
 belong in their parameters. Native `milestone` maps to `event`, `observe` to
@@ -661,3 +678,12 @@ The authoritative helper/lifecycle map is
 [APPLICATION_RUNTIME.md](../../../docs/jobbot-v1/APPLICATION_RUNTIME.md).
 Older accept/claim/fence/HTTP instructions are compatibility history, not this
 conversation's startup procedure. Do not invoke `run_applier.py apply`.
+
+### Explicit stop and manual completion
+
+When the user says stop or reports that they finished this application, issue
+the existing structured `stop` immediately. Do not take another application
+screenshot, audit, or recovery action. After stop acknowledgement, use the
+existing reconcile operation with `source:"user_reported"` for their completion
+report. Preserve the stop time and report source; do not claim employer
+confirmation or invent an executor Submit timestamp.

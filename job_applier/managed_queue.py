@@ -33,6 +33,12 @@ def attempt_schedule(rows):
 
 
 class QueueServices:
+    def _settle_reconciled_queue(self, db, attempt):
+        """Same transaction as success; preserve running and historical dispatches."""
+        from .managed_identity import RELATED
+        return db.execute(RELATED+"UPDATE dispatch_queue SET state='finished',outcome='already_applied',detail=?,ended_at=? WHERE state='queued' AND identity_id=? AND job_id IN (SELECT id FROM related)",
+            (attempt['job_id'],'Successful reconciliation of attempt '+str(attempt['id']),self.now(),attempt['identity_id'])).rowcount
+
     def queue_reconcile(self, *, identity_id, resume_asset_id):
         """Pick up active intake and schedule recovery; the serial worker executes it."""
         added = []

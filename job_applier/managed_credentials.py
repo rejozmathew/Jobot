@@ -30,7 +30,12 @@ def credential_progress(call,ownership,params,*,result=None,action_id=None):
 
 MASK_CREDENTIALS = r"""(() => {
  window.__maskedCredentialNodes = [];
- const els = Array.from(document.querySelectorAll('input,textarea,[data-credential]')).filter(el=>
+ const roots=[document],nodes=[];
+ for(let i=0;i<roots.length;i++){
+   nodes.push(...roots[i].querySelectorAll('input,textarea,[data-credential]'));
+   for(const el of roots[i].querySelectorAll('*'))if(el.shadowRoot)roots.push(el.shadowRoot);
+ }
+ const els = nodes.filter(el=>
    el.type==='password'||el.hasAttribute('data-credential')||el.maxLength===1||
    /password|one.?time|otp|(?:security|verification|authentication)[\s_-]*code/i.test(
     [el.name,el.id,el.autocomplete,el.getAttribute('aria-label'),...[...(el.labels||[])].map(e=>e.textContent)].join(' '))||

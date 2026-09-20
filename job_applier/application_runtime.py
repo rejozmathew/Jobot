@@ -352,9 +352,9 @@ def browser_action(config,client,ownership,package,target_id,params):
     from .browser_controls import FORM, observe, inventory, form_action, inspect_control, click_control, upload_file, next_operation
     from .managed_shared import uid
     method=params.get('method')
-    if method not in ('snapshot','screenshot','evaluate','click','fill','press','select','check','repair','apply_policy','request_answers','apply_answers','submit','navigate','reload','upload','simplify'):
+    if method not in ('audit','snapshot','screenshot','evaluate','click','fill','press','select','check','repair','apply_policy','request_answers','apply_answers','submit','navigate','reload','upload','simplify'):
         raise ProtocolError('unsupported_browser_method','Use snapshot for current controls; upload takes ref and selected asset_id; repair takes fields with method fill/select/check, ref and approved value.')
-    reads=method in ('snapshot','screenshot')
+    reads=method in ('audit','snapshot','screenshot')
     async def execute():
         nonlocal method,params
         aid=None;started=time.monotonic();succeeded=False;task_context={};result={}
@@ -380,7 +380,7 @@ def browser_action(config,client,ownership,package,target_id,params):
             pending=package['attempt'].get('submission_pending',bool(package['attempt'].get('submit_intent_at')))
             identity=application_match(package['job']['url'],url)
             owned_gate=None
-            if identity['status']!='same_job' or method=='snapshot':
+            if identity['status']!='same_job' or method in ('snapshot','audit'):
                 # A correlated external Apply target is attempt-owned even before
                 # an operator elects to make that route the job's future URL.
                 owned_gate=await asyncio.to_thread(client.call,'browser_observe',**ownership,
@@ -468,6 +468,16 @@ def browser_action(config,client,ownership,package,target_id,params):
                     'instruction':'Inspect this owned-page image; snapshot supplies observed selectors.'}
             if method=='screenshot':
                 evidence=await screenshot_evidence();succeeded=True;return evidence
+            if method=='audit':
+                from .form_audit import audit
+                result=(owned_gate or {}).get('audit')
+                if result is None:
+                    result=audit(await observe(page,browser_package),writer={
+                        'ui_status':(owned_gate or {}).get('status','unknown'),
+                        'state':(owned_gate or {}).get('writer_state','unverified'),
+                        'native_takeover_authorized':bool((owned_gate or {}).get('native_takeover_authorized'))})
+                succeeded=True
+                return dict(result,identity=identity)
             if method=='snapshot':
                 visual_reason=None
                 try:
@@ -554,7 +564,7 @@ def browser_action(config,client,ownership,package,target_id,params):
                     if await page.evaluate('location.href')!=initial_url or await page.evaluate('performance.timeOrigin')!=initial_document:
                         raise ValueError('application_document_changed')
                     writer=await observe_writers(page,browser_package)
-                    if writer.get('status') in ('active','unknown'):
+                    if writer.get('status')=='active' or writer.get('writer_pending') or writer.get('status')=='unknown' and not writer.get('settled_evidence'):
                         raise ValueError('writer_settlement_required')
                 result=await repair_fields(page,params.get('fields'),checkpoint=checkpoint)
                 result['screen']=inventory(await observe(page,browser_package),package)

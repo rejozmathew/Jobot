@@ -54,8 +54,13 @@ the shared submission service. Continue on a call slice/handoff. Return all
 unresolved semantic choices in one answers plan (current ref, exact question_key,
 answer and approved basis); code operates and verifies the controls. After a
 missing-email reload, resume greenhouse_advance with fresh refs and any new code.
-iCIMS: {root/'job-apply'/'references'/'icims.md'}; inspect embedded frames and
-observed Apply / Email / Next controls. A login route is not a different job.
+iCIMS: {root/'job-apply'/'references'/'icims.md'}; call icims_advance with
+{{"seconds":60}}. It uses shared browser audit, private credentials and grouped
+required repairs, then the observed stage action. Submit Profile is intermediate
+when candidate-profile cues establish it. Return unresolved screening choices
+together as answers with ref, question_key, answer and approved basis. Use browser
+{{"method":"audit"}} for compact recovery evidence; do not chase optional blanks.
+A login route is not a different job.
 Other portals: shared browser tools and approved profile facts; the actual page
 is authoritative. Re-detect the platform after an employer redirect. A known
 hostname or a passing fixture is not a guarantee that the current form works.
@@ -76,8 +81,11 @@ next action. An unchanged snapshot adds no progress; choose a different recovery
 or use the screenshot and current controls to resolve the outstanding issue.
 
 ## Simplify and recovery
-Use enabled Simplify Autofill promptly for bulk filling, then inspect residuals.
-Do not hesitate to use Simplify or audit every populated field repeatedly.
+Use the ATS runner for bulk filling and its shared audit for required residuals.
+An explicit user stop or manual completion means issue structured stop immediately;
+do no more browser recovery/screenshots. Reconcile user completion only through
+the existing user_reported path after stop acknowledgement.
+Use Simplify promptly, then one compact audit to target actual residual work.
 A helper miss is a handoff, not a terminal application failure. On a stuck page,
 take an owned-page screenshot and actually inspect the returned image with the
 harness image/vision tool (for example vision_analyze). Capturing without viewing

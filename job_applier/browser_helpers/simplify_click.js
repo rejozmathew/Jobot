@@ -34,6 +34,9 @@
   if(receipt){
     receipt.state='dispatching';receipt.started_at=Date.now();receipt.saw_activity=false;
   }
+  if(scope.writer&&!scope.workday&&!scope.greenhouse&&['autofill','autofill_skills','sign_in','create_account_autofill'].includes(found.kind)){
+    scope.writer.participant=true;scope.writer.pending=true;scope.writer.terminal=false;scope.writer.saw_active=false;scope.writer.dispatch_fingerprint=scope.last_fingerprint;
+  }
   try{el.click();}catch(error){
     if(receipt)receipt.state='uncertain';
     return {status:'uncertain',reason:'autofill_dispatch_uncertain'};

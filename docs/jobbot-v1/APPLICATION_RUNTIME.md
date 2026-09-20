@@ -679,11 +679,14 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | managed_identity.py | Workday host/site/full-requisition and iCIMS host/job-id comparison, history equivalence, application scope and diagnostic match states; existing frame router, runtime, credentials and binding callers share scope matching |
 | managed_shared.submission_state / submission_pending and managed_events._submission_state / _submission_pending | One per-attempt evidence projection from existing ordered events; evidence reporting only; accepted alone suppresses a new requested attempt |
 | greenhouse_fast.py | Session-owned `greenhouse_advance` residual batches; next_operation/startup guidance, local workspace host and nonlocal plugin dispatch call the same advance entry. Simplify remains the bulk filler. Legacy platform_handlers/greenhouse.py stays available to its existing agent/registry callers. |
+| icims_fast.py | Thin `icims_advance` runner called by native plugin, portable CLI and workspace host; reuses shared writer/identity checks, audit, private credentials, approved answers/policy, grouped repair and final submission. Slices/unknown controls return to the same executor. |
+| form_audit.py | Pure compact projection of the shared inventory; `browser(method="audit")`, post-Simplify handoffs, snapshots and iCIMS use the same required/invalid/private/optional classification. No independent scanner, writer permission or outcome authority. |
 | workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
 | cdp_client.py | Exact-target connection, verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
 | browser_controls.py / browser_helpers/form_controls.js | Shared form reader including Apply, committed-selection verification, posting metadata, private code groups and remaining_submission_work; iCIMS entry guidance; used by submission, browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
+| managed_queue._settle_reconciled_queue | Called inside successful manual reconciliation; atomically settles only queued rows for the related job and same identity. Existing stopped-session/newer-attempt checks and dispatched/history rows remain intact. |
 | managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
 | application_answers.py | Shared label_has, match_answer_to_option, approved_answer, answer_action and saved_answer (re-exported by LinkedIn); approved Greenhouse plan journal restoration; interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | One activation per explicit call, current incomplete-form continuation, retained dispatch evidence and native/Simplify confirmation; local browser and Workday callers |
@@ -1127,3 +1130,57 @@ private journal. Existing salary/privacy policy, selected Resume/CV error recove
 credentials/mail flow and submission.submit retain their ownership of those tasks.
 Missing-email reload recovery remains in the same attempt, followed immediately
 by this runner with fresh refs. No external handler or dependency is imported.
+
+## iCIMS and shared post-autofill audit
+
+`browser(method="audit")` projects the existing shared form inventory into missing
+required fields, invalid values, private credential tasks, optional-blank counts,
+advisory Simplify review matches, document coverage and the observed stage action.
+It reads live properties without focusing or validating controls. Passwords and
+verification codes expose presence only. It does not grant writer permission.
+Native radio groups are scoped to their document/root/form; required native
+checkboxes remain independent. Open shadow controls use exact-node action refs;
+opaque widgets and unresolved frames are explicit recovery handoffs.
+
+The iCIMS native operation, portable `application_runtime call <session-id>
+icims_advance --parameters '{"seconds":60}'`, workspace host and startup brief
+all reach `icims_fast.advance`. That thin runner uses the existing private filler,
+selected assets, answer policy, grouped repair and submission service. It ignores
+empty optional fields and treats Simplify's review list as advisory. A profile
+heading plus Submit Profile identifies an intermediate action; acceptance of the
+profile does not create final submission intent or mark an application applied.
+Unknown screening answers are returned together, never defaulted to No.
+
+Generic Simplify receipts retain pending writer provenance across SPA changes.
+Completion evidence can settle a writer; an unrelated unknown panel fragment
+cannot override it. Active/pending writers still prevent concurrent writes.
+Actual document replacement invalidates its old receipt; a changed heading or URL
+alone does not. Ambiguity returns audit plus scoped screenshot/Stop recovery, not
+an indefinite sequence of bare observations. Existing Workday and Greenhouse
+receipt/runner paths remain specialized; LinkedIn keeps its modal runner.
+
+Synthetic regression/dispatch evidence lives in `test_form_audit.py`,
+`test_icims_fast.py` and `test_icims_reconciliation.py`. The Cotiviti-shaped
+fixture contains 13 optional blanks and two missing passwords. The actual native
+and CLI dispatch chain reaches screening with one private credential call, one
+profile click, zero ordinary field repairs and zero repeat autofill. Two explicit
+synthetic screening answers then reach the existing review/submit service.
+Manual completion retains user-reported evidence, requires the existing stop
+lifecycle, and settles only matching queued duplicates inside that transaction.
+Concurrent queue take, newer attempts and dispatched rows have regressions.
+
+Timing tests compare the real reader with baseline `8c569656` using three runs at
+100/500/1000 controls. The first passing run measured median DOM time of
+23.7/545.9/3120.0 ms before and 2.1/8.2/25.3 ms after. Selector calls fell from
+107/507/1007 to 5 at each size (one full-root collection). Timings vary by machine;
+they are evidence, not execution limits. Sanitized traces, JUnit, later timing
+runs and deployment source-hash manifests stay in the ignored private artifacts
+area. The standard full managed suite also exercises the specialized portals.
+
+These tests use disposable local state and do not submit to an employer. The
+reader cannot prove the contents of arbitrary closed shadow roots, canvas widgets
+or unaccepted frames, nor infer requirements enforced only by a future server
+response. Those cases return specific evidence for executor recovery in the same
+session. An old in-memory native schema can use the portable call above without
+restarting unrelated conversations. No new service, dependency installation,
+application-failure condition or retry limit is introduced.
