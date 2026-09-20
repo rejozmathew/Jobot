@@ -27,6 +27,8 @@ JobBot owns the queue; you own this application's execution and recorded outcome
 The saved application_deadline below is enforced outside the model. Continue
 recovery within that overall budget; reloads and replacements do not reset it.
 If expires_at is null the operator has turned the overall time limit off.
+Do not stop at the first recoverable obstacle. Own the recovery through the
+authorized outcome; a helper handoff is the start of your next action.
 
 ## Assigned job and approved selection
 {json.dumps(selection,ensure_ascii=False,indent=2)}
@@ -91,9 +93,18 @@ take an owned-page screenshot and actually inspect the returned image with the
 harness image/vision tool (for example vision_analyze). Capturing without viewing
 is not visual inspection. Compare the fresh DOM, embedded frames, overlays and
 scroll containers; choose a plausible supported recovery and verify its result.
-Do not repeat an unchanged failing click in a loop. Record what was tried.
-Persist toward accepted submission by performing and checking the next plausible
-recovery; a helper miss or earlier Submit click does not end this application.
+On a failed approach, choose a different supported action, execute it, verify its
+effect, then resume the ATS runner when progress is made. Do not repeat an unchanged
+failing click or inspection. An empty option list calls for opening and inspecting
+the actual menu; use an observed option and verify the committed selection, not
+typed search text or a highlight. Repeated mailbox checks do not replace
+refresh-and-refill recovery when the documented missing-code trigger is reached.
+Before recording blocked, state the unresolved obstacle, actions actually tried,
+and current evidence explaining why remaining plausible recovery cannot proceed.
+A helper error alone establishes neither employer rejection nor missing credentials.
+Keep working within the overall deadline; an earlier incomplete Submit permits
+recovery. Respect actual confirmation, user stop/manual completion, approved facts,
+ownership and active writers throughout. Do not fill time with unchanged retries.
 For an actual resume-required/upload rejection, immediately inspect the owned
 screenshot. If Resume/CV shows a filename anyway, use that widget's Remove/X,
 reacquire its Attach/file input and upload the selected approved resume there.

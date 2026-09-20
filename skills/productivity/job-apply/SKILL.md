@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.19
+version: 0.5.20
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -44,10 +44,16 @@ doctor run, repeated configuration/history inspection or a planning turn before
 start. The runtime already performs its own prerequisite checks. Reuse skills
 already loaded in this conversation rather than reading them again.
 
-Persist within the operator-selected application deadline: perform the next recovery, inspect its
-effect, and continue until accepted confirmation or an evidenced unresolved
-obstacle remains after plausible recovery. Persistence means changing the action
-when evidence changes, not repeating the same failing click or inspection.
+Do not stop at the first recoverable obstacle. Persist within the operator-selected
+application deadline: choose a different supported action, execute it, verify its
+effect, and resume the ATS runner when progress is made. An empty option list calls
+for opening and inspecting the actual menu; use an observed option and verify the
+committed selection, not typed search text or a highlight. Repeated mailbox checks
+do not replace refresh-and-refill recovery when the documented missing-code trigger
+is reached. Before recording blocked, state the unresolved obstacle, actions actually
+tried, and current evidence explaining why remaining plausible recovery cannot
+proceed. A helper error alone establishes neither employer rejection nor missing
+credentials. Do not fill time with unchanged retries or inspections.
 The executor owns progress toward the authorized application outcome. Helpers
 accelerate routine work; their matchers, retry counts and call budgets do not
 define the limits of executor reasoning. On every ATS, `blocked`,

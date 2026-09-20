@@ -115,7 +115,8 @@ class SimplifyBoundary:
             'observation':observed,'execution':getattr(self,'execution','not_executed'),
             'instruction':('While a writer is active, observe it or use its enabled Stop/Cancel control and verify settlement. '
                 'For a broken page or missing Simplify panel on any portal, inspect loading and use browser reload when appropriate; '
-                'if that fails, use session restart and continue. These operations cancel old activity even when its settlement is unknown, before submission only. '
+                'if that fails, use session restart and continue. These operations cancel old activity even when its settlement is unknown. '
+                'Recovery remains available after an incomplete Submit; follow current validation or verification and preserve accepted confirmation. '
                 'Once settled, a missing control, unsupported field or failed helper is a handoff to the executor. '
                 'Inspect the actual screen/options, recover with scoped browser tools and resume filling or advancement. '
                 'A helper limit is not a terminal application outcome; keep working on the open session.')}
