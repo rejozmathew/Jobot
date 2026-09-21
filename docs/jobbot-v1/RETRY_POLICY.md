@@ -137,7 +137,9 @@ claim on a posting; historical uncertainty is not ownership evidence.
 
 | Component | Responsibility |
 | --- | --- |
-| `managed_identity.py` and `Service.intake` | Match URL aliases/requisitions to the existing durable job. |
+| `managed_identity.ats_posting_key` and `Service.intake` | Match provider-scoped posting identities across discovery sources; retain existing labels and requisitions when rediscovery supplies conflicting metadata. |
+| `managed_identity.retain_posting_aliases` and migration 23 | Add posting keys to retained jobs and source URLs without deleting historical records or rewriting outcomes. |
+| `managed_queue.queue_reconcile` | Settle pending aliases with recorded success or explicit cancellation; preserve active dispatches and historical attempts. |
 | `managed_events._submission_state` | Read the existing per-attempt evidence projection. |
 | `Service._assert_not_suppressed` | Suppress recorded success, including retained accepted evidence, and explicit operator cancellation. |
 | `Service._eligible`, `retry`, `_complete` | Apply configured eligibility and recorded success, allow concurrent attempts, and aggregate posting status. The job-owner veto was removed. |

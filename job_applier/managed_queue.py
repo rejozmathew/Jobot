@@ -49,6 +49,16 @@ class QueueServices:
             if asset['identity_id'] != identity_id or asset['kind'] != 'resume' or asset['status'] != 'available':
                 raise ProtocolError('asset_identity_mismatch')
             rows = [dict(r) for r in db.execute('SELECT * FROM dispatch_queue WHERE identity_id=? ORDER BY rowid', (identity_id,))]
+            # Newly linked history can make an already queued alias a duplicate.
+            # Settle pending work now, without touching active/historical dispatches.
+            for row in rows:
+                if row['state']!='queued':continue
+                try:self._assert_not_suppressed(db,row['job_id'])
+                except ProtocolError as exc:
+                    if exc.code not in ('already_applied','job_canceled'):raise
+                    row.update(state='finished',outcome='already_applied' if exc.code=='already_applied' else 'canceled')
+                    db.execute("UPDATE dispatch_queue SET state='finished',outcome=?,detail=?,ended_at=? WHERE id=? AND state='queued'",
+                        (row['outcome'],exc.code,self.now(),row['id']))
             latest = {r['job_id']: r for r in rows}
             schedule = attempt_schedule(rows)
             settings = self._settings_record(db)['values']

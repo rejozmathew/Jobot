@@ -27,6 +27,60 @@ def job_key(url, namespace=None, requisition_id=None):
     return hashlib.sha256(dumps(data).encode()).hexdigest()
 
 
+def ats_posting_identity(url, *, namespace=None, source_id=None):
+    """Intake identity, separate from browser scope and employer requisition labels.
+
+    Hosted Greenhouse URLs supply the board. Custom-domain URLs need both an
+    explicit gh_jid and a retained/verified namespace or corroborating source
+    reference. Company names, titles and bare numbers never identify a board.
+    """
+    try:
+        p=urlsplit(canonical_url(url))
+        for identify in (linkedin_identity, workday_identity, icims_identity):
+            identity=identify(url)
+            if identity:return identity
+        board=None;posting=None
+        if p.hostname=='job-boards.greenhouse.io':
+            match=re.fullmatch(r'/([A-Za-z0-9_-]+)/jobs/([0-9]{1,20})(?:/(?:apply|confirmation))?',p.path)
+            if not match:return None
+            board,posting=match.groups()
+            if any(k=='gh_jid' for k,v in parse_qsl(p.query,keep_blank_values=True)) and query_requisition(url)!=posting:
+                return None
+        else:
+            posting=query_requisition(url)
+            if not posting:return None
+            parts=p.path.strip('/').split('/')
+            if parts[-1] in ('apply','confirmation') and len(parts)>1 and parts[-2].isdigit() and parts[-2]!=posting:
+                return None
+            reference=re.fullmatch(r'greenhouse:([A-Za-z0-9_-]+):([0-9]{1,20})',str(source_id or ''))
+            supplied=str(namespace or '').removeprefix('greenhouse:')
+            if reference:
+                if reference[2]!=posting or supplied and supplied.casefold()!=reference[1].casefold():return None
+                board=reference[1]
+            elif re.fullmatch(r'[A-Za-z0-9_-]+',supplied):board=supplied
+            if not board:return None
+        opaque=tuple((k,v) for k,v in parse_qsl(p.query,keep_blank_values=True) if k!='gh_jid')
+        return ('greenhouse',board.casefold(),posting,opaque)
+    except (ValueError,ProtocolError):return None
+
+
+def ats_posting_key(url, *, namespace=None, source_id=None):
+    identity=ats_posting_identity(url,namespace=namespace,source_id=source_id)
+    return hashlib.sha256(dumps(['ats_posting',identity]).encode()).hexdigest() if identity else None
+
+
+def retain_posting_aliases(db):
+    """Add identities to old records; never merge/delete jobs or rewrite outcomes."""
+    for row in db.execute('SELECT id,url,namespace,requisition_id FROM jobs').fetchall():
+        references=[(row['url'],None)]
+        references.extend((r['original_url'],r['source_id']) for r in db.execute(
+            'SELECT original_url,source_id FROM job_sources WHERE job_id=?',(row['id'],)))
+        for url,source_id in references:
+            key=ats_posting_key(url,namespace=row['namespace'] if row['requisition_id'] else None,source_id=source_id)
+            if key:db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',
+                (key,row['id'],'retained_ats_posting_identity'))
+
+
 def query_requisition(url):
     """A consistent explicit Greenhouse query id, not a guessed path number."""
     values=[value for key,value in parse_qsl(urlsplit(url).query,keep_blank_values=True) if key=='gh_jid']

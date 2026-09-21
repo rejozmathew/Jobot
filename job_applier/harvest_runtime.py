@@ -94,7 +94,12 @@ alerts, source_id identifies the message and the particular job link, not the
 whole mailbox or just the sender. Keep source references stable across reruns.
 Use verdicts Strong apply / Apply / Apply with caveats / Skip. Optionally include validated
 namespace, requisition_id and identity_evidence; no fabricated fit percentages.
-For a verified Greenhouse boards API job, use namespace equal to its board_slug,
+For a verified Greenhouse boards API job, copy the title, location and publication
+date from that exact job response; do not pair another role's labels with its URL.
+The API id is the posting identity in the URL and source reference; it is distinct
+from the employer's requisition_id. Shared intake derives posting identity from
+the URL and verified board, regardless of which discovery source supplied it.
+Use namespace equal to its board_slug,
 requisition_id from the API's requisition_id (or its id when unavailable), and identity_evidence identifying the
 boards API URL and its absolute_url. Carry the same identity when the employer
 absolute_url and the board URL refer to that API job; this prevents duplicate

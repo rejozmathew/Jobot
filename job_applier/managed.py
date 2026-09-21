@@ -38,7 +38,7 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity, linkedin_identity
+from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity, linkedin_identity, ats_posting_key
 
 
 class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices, QueueServices, DiscoveryServices):
@@ -122,16 +122,32 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         else:
             reject_secrets(source_id)
         if namespace and requisition_id and not identity_evidence: raise ProtocolError('identity_evidence_required')
-        key=job_key(canonical,namespace,requisition_id)
+        supplied_key=job_key(canonical,namespace,requisition_id)
+        posting_key=ats_posting_key(canonical,namespace=namespace if identity_evidence else None,source_id=source_id)
+        key=posting_key or supplied_key
         url_key=job_key(canonical)
         compare_identity=linkedin_identity if linkedin_identity(canonical) else workday_identity if workday_identity(canonical) else greenhouse_query_identity
         query_identity=compare_identity(canonical)
         query_key=hashlib.sha256(dumps(['requisition_query',query_identity]).encode()).hexdigest() if query_identity else None
         now=self.now()
         with self.tx() as db:
+            if posting_key:
+                # Legacy importers can add URL-only rows after migration. Link
+                # every matching posting before choosing a row, so an exact URL
+                # match cannot hide another alias's recorded submission.
+                for historical in db.execute('SELECT id,url,namespace,requisition_id FROM jobs').fetchall():
+                    historical_key=ats_posting_key(historical['url'],namespace=historical['namespace'] if historical['requisition_id'] else None)
+                    if historical_key==posting_key:
+                        db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',
+                            (posting_key,historical['id'],'consistent_ats_posting_identity'))
             row=db.execute('SELECT j.* FROM jobs j JOIN job_identity_keys k ON k.job_id=j.id WHERE k.identity_key IN (?,?) ORDER BY (j.url=?) DESC,j.created_at,j.id LIMIT 1',(key,url_key,canonical)).fetchone()
+            if not row and posting_key and supplied_key!=key:
+                # Keep older verified aliases, but a stale requisition label must
+                # not combine two explicitly different ATS postings.
+                candidates=db.execute('SELECT j.* FROM jobs j JOIN job_identity_keys k ON k.job_id=j.id WHERE k.identity_key=? ORDER BY j.created_at,j.id',(supplied_key,)).fetchall()
+                row=next((r for r in candidates if ats_posting_key(r['url'],namespace=r['namespace']) in (None,posting_key)),None)
             query_matches=[]
-            if query_identity:
+            if query_identity and not posting_key:
                 query_matches=[r for r in db.execute('SELECT * FROM jobs ORDER BY created_at,id')
                                  if compare_identity(r['url'])==query_identity]
                 if not row and query_matches:row=query_matches[0]
@@ -150,8 +166,13 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                     if (urlsplit(canonical).hostname or '').endswith('.myworkdayjobs.com'):
                         old_identity=tuple(str(v).casefold() for v in old_identity)
                         new_identity=tuple(str(v).casefold() for v in new_identity)
-                    if row['namespace'] and old_identity!=new_identity:raise ProtocolError('identity_conflict')
-                    db.execute('UPDATE jobs SET namespace=?,requisition_id=? WHERE id=?',(namespace,str(requisition_id),job_id))
+                    same_posting=posting_key and (ats_posting_key(row['url'],namespace=row['namespace'])==posting_key or
+                        db.execute('SELECT 1 FROM job_identity_keys WHERE job_id=? AND identity_key=?',(job_id,posting_key)).fetchone())
+                    if row['namespace'] and old_identity!=new_identity and not same_posting:raise ProtocolError('identity_conflict')
+                    # The URL's posting identity outranks rediscovered labels.
+                    # Preserve retained requisitions, including older numeric IDs.
+                    if not row['namespace'] or not same_posting:
+                        db.execute('UPDATE jobs SET namespace=?,requisition_id=? WHERE id=?',(namespace,str(requisition_id),job_id))
             for alias_key in {key,url_key}:
                 db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(alias_key,job_id,safe_text(identity_evidence or 'normalized_url')))
             if row and (company is not None or title is not None):
@@ -164,7 +185,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                     saved=json.loads(self._get(db,'jobs',job_id)['metadata_json'] or '{}')
                     saved.update(facts)
                     db.execute('UPDATE jobs SET metadata_json=? WHERE id=?',(dumps(saved),job_id))
-            if query_key:
+            if query_key and not posting_key:
                 # Retain every historical job row and link existing duplicates so
                 # an older applied/uncertain attempt cannot be bypassed by a form URL.
                 for related_id in {job_id}|{r['id'] for r in query_matches}:
@@ -193,6 +214,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             job=self._get(db,'jobs',job_id)
             if job['url']!=expected_url:raise ProtocolError('job_url_changed','This URL changed since you opened the editor. Reopen it to edit the latest URL.')
             if job['url']==canonical:return dict(job)
+            posting_key=ats_posting_key(canonical,namespace=job['namespace'])
+            if posting_key:keys.add(posting_key)
             # Reuse intake identity rules; never silently combine two saved jobs.
             conflict=any(db.execute('SELECT 1 FROM job_identity_keys WHERE identity_key=? AND job_id<>?',(key,job_id)).fetchone() for key in keys)
             if conflict or any(same_job_url(row['url'],canonical) for row in db.execute('SELECT url FROM jobs WHERE id<>?',(job_id,))):
