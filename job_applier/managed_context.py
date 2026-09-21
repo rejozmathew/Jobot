@@ -32,6 +32,12 @@ class ContextServices:
             semantic=self._field_context(db,attempt)
             attempt['company']=job['company']
             attempt['platform']=selected_platform
+            from .email_routing import email_route, routed_profile
+            sources=json.loads(session['metadata_json']).get('credential_sources',{}) if session else {}
+            route=email_route(sources,selected_platform)
+            if route:
+                profile=routed_profile(json.loads(attempt['profile_json']),route)
+                attempt['profile_json']=json.dumps(profile)
             import hashlib
             attempt['profile_hash']=hashlib.sha256((attempt.get('profile_json') or '').encode()).hexdigest()
         account=self.account_strategy(namespace=verified_namespace,identity_id=attempt['identity_id']) if verified_namespace else None
@@ -40,6 +46,7 @@ class ContextServices:
         from .managed_questions import human_input_capabilities
         human_input=human_input_capabilities(json.loads(session['metadata_json']) if session else json.loads(attempt.get('versions_json') or '{}'))
         return {'attempt':attempt,'job':job,'documents':documents,'answer_policy':answer_policy,
+            **({'email_route':route} if route else {}),
             'human_input':human_input,'saved_questions':self.questions_for_attempt(attempt_id)['questions'],
             'helpers':self.helpers_for_context(selected_platform,verified_namespace),
             'lessons':self.lessons_for_context(selected_platform,verified_namespace),

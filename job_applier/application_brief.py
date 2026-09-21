@@ -4,18 +4,22 @@ import sys
 
 from .application_runtime import REPOSITORY
 from .hermes_gmail import mailbox_handoff
+from .email_routing import email_route
 from .managed_context import platform_for_url
 
 
 def application_brief(config, service, item):
     job=service.job(item['job_id'])
     settings=service.settings_view()['values']
-    mailbox=mailbox_handoff(config)
+    platform=platform_for_url(job['url'])
+    mailbox=mailbox_handoff(config,platform=platform)
+    route=email_route(config,platform)
     root=REPOSITORY/'skills'/'productivity'
     selection={k:job.get(k) for k in ('id','url','company','title')}
     selection.update(identity_id=item['identity_id'],resume_asset_id=item['resume_asset_id'],
                      platform_hint=platform_for_url(job['url']),submission_mode=settings['submission_mode'],
-                     application_email=service.candidate(item['identity_id'])['email'])
+                     application_email=route.get('application_email') or service.candidate(item['identity_id'])['email'])
+    if route:selection['email_route']=route
     selection['application_deadline']=config.get('application_deadline',{})
     start=[sys.executable,'-m','job_applier.application_runtime','start','--job-id',job['id'],
            '--config',config['config_path'],'--request-id','queue:'+item['id'],'--wait-seconds','0']
@@ -113,7 +117,10 @@ Follow the resulting employer feedback instead of repeatedly inspecting the same
 contradiction or submitting it unchanged. See the canonical skill for details.
 
 ## Email, phone choices and genuine CAPTCHA
-The application_email above comes directly from the selected candidate record.
+The application_email above is the approved ATS route when configured, otherwise
+the selected candidate email. A routed form address does not change mailbox credentials.
+For employer-hosted or LinkedIn handoffs, apply the configured Greenhouse route
+once the owned form is recognized as Greenhouse. Preserve it after Simplify and reloads.
 When checking delivery, compare it with the actual form field and verification
 recipient; copy the observed address exactly into your report. Your earlier
 commentary is not evidence of what the form contains. If the values differ,

@@ -25,8 +25,15 @@ Use a fresh conversation for each dispatched job, with its exact selected config
 identity, resume and request ID. Fetch the prepared session's context rather than
 depending on another job's conversation. The mailbox handoff can describe the
 existing Himalaya account or Gmail wrapper: check and use that actual integration
-before declaring email unavailable. Email OTPs, verification links and email-vs-
-phone choices are not CAPTCHA. Prefer an offered accessible email route; SMS-only
+before declaring email unavailable. Use the configured `email_route` when present: `application_email`
+is the form recipient and `verification_mailbox` is the inbox to read through
+the existing connection. For forwarded Greenhouse codes those addresses
+intentionally differ; personal mailbox access is not required. Search the jobs
+inbox for the forwarded message, correlate the original recipient, employer and
+request time, and continue verification. The address difference alone is not
+an unavailable capability. Preserve the approved form address after Simplify
+and reload/refill, before Submit or requesting a code. Email OTPs, verification
+links and email-vs-phone choices are not CAPTCHA. Prefer an offered accessible email route; SMS-only
 requires a real SMS channel or human input. An actual image CAPTCHA may be recorded
 as blocked, but a protection logo alone is not a challenge. Do not expose codes or
 mail bodies in progress/history. Use enabled Simplify for bulk fill. When stuck,

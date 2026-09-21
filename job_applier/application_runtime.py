@@ -151,7 +151,7 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
           'config_path':config['config_path'],'canonical_skill_hash':evidence.get('canonical_skill_hash'),
           'source_revision':evidence.get('code_version'),'source_fingerprint':evidence.get('source_fingerprint'),'resume_asset_id':resume}
     meta['credential_sources']={k:config.get(k) for k in ('credential_profile_path','mailbox_token_path','gmail_script',
-        'mailbox_provider','himalaya_executable','himalaya_account','himalaya_config_path')}
+        'mailbox_provider','himalaya_executable','himalaya_account','himalaya_config_path','email_routes')}
     for configured,observed in (('application_model','model'),('application_provider','provider')):
         if config.get(configured) and meta.get(observed) and config[configured]!=meta[observed]:
             raise ProtocolError('application_runtime_model_mismatch')
@@ -206,7 +206,8 @@ def handle(service, session_id, *, include_context=True):
     result['application_kind']=state['metadata'].get('application_kind',
         'reattempt' if state['metadata'].get('fresh_employer_storage') else 'first_attempt')
     from .hermes_gmail import mailbox_handoff
-    result['mailbox']=mailbox_handoff(state['metadata'].get('credential_sources',{}))
+    result['mailbox']=mailbox_handoff(state['metadata'].get('credential_sources',{}),
+        platform=result.get('context',{}).get('platform'))
     from .browser_controls import next_operation
     from .managed_context import platform_for_url
     job=result.get('context',{}).get('job') or service.job(state['job_id'])
@@ -497,7 +498,8 @@ def browser_action(config,client,ownership,package,target_id,params):
                         visual_reason='embedded_form_inspection_incomplete'
                     if result.get('verification'):
                         from .hermes_gmail import mailbox_handoff
-                        result['verification']['mailbox']=mailbox_handoff(config)
+                        result['verification']['mailbox']=mailbox_handoff(config,
+                            platform='greenhouse' if observed.get('greenhouse') else package.get('platform'))
                         result['verification']['next_operation']={'operation':'credentials',
                             'parameters':{'mode':'verification','action':'inspect','refs':result['verification']['groups'][0]['refs']}}
                 except Exception as exc:

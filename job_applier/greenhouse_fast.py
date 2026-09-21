@@ -12,6 +12,8 @@ from .browser_frames import resolve_control, FramePage, FrameUnavailable
 from .managed_questions import question_data, question_key, PRIVATE
 from .managed_shared import ProtocolError, uid
 from .simplify_boundary import SimplifyBoundary, OBSERVE
+from .hermes_gmail import mailbox_handoff
+from .email_routing import email_route, routed_profile, routed_email_answer
 
 STATES = dict(part.strip().split(' ', 1) for part in '''AL Alabama; AK Alaska; AZ Arizona; AR Arkansas; CA California; CO Colorado;
 CT Connecticut; DE Delaware; DC District of Columbia; FL Florida; GA Georgia; HI Hawaii; ID Idaho; IL Illinois; IN Indiana;
@@ -76,6 +78,8 @@ class GreenhouseRunner:
         self.profile=package['attempt'].get('profile_json') or {}
         self.settings=package['attempt'].get('settings_json') or {}
         if isinstance(self.profile,str):self.profile=json.loads(self.profile)
+        self.email_route=package.get('email_route') or email_route(config,'greenhouse')
+        self.profile=routed_profile(self.profile,self.email_route)
         if isinstance(self.settings,str):self.settings=json.loads(self.settings)
         self.document=None;self.document_id=None;self.aid=None;self.deadline=None
         self.started=time.monotonic();self.batch_count=0;self.completed=0;self.field_actions=0
@@ -185,6 +189,8 @@ class GreenhouseRunner:
             elapsed_seconds=round(time.monotonic()-self.started,3),questions=self.questions,control_failures=self.failures,
             next_operation={'operation':'greenhouse_advance','parameters':{'seconds':60}},
             instruction='Continue this owned application. Return one answers plan with each current ref, exact question_key, answer and approved basis; recover control failures through the scoped browser and resume greenhouse_advance. Helper handoffs do not finish the application.')
+        if self.email_route:
+            result.update(email_route=self.email_route,mailbox=mailbox_handoff(self.config,platform='greenhouse'))
         return dict(result,**extra)
 
     async def ready(self):
@@ -325,7 +331,11 @@ class GreenhouseRunner:
                 if PRIVATE.search(q['field']+' '+q['question']):continue
                 plan=next((p for p in plans if p.get('ref')==q['ref'] and p.get('question_key')==q['question_key']),None)
                 basis='approved_profile_or_exact_saved_answer'
-                if plan:
+                routed_answer=routed_email_answer(q,self.email_route)
+                if routed_answer is not None:
+                    answer=routed_answer;basis='approved_greenhouse_email_route'
+                    if plan:self.seen_plans.add((plan['ref'],plan['question_key']))
+                elif plan:
                     self.seen_plans.add((plan['ref'],plan['question_key']));answer=plan['answer'];basis=plan['basis']
                     valid=isinstance(answer,str) if q['kind']=='text' else type(answer) is bool if q['kind']=='check' else isinstance(answer,dict)
                     if not valid:

@@ -213,7 +213,7 @@ async def fill_page_verification(config,package,page,params):
         groups=[dict(g,refs=[document.wrap(ref) for ref in g['refs']],
             **({'resend_ref':document.wrap(g['resend_ref'])} if g.get('resend_ref') else {})) if isinstance(document,FramePage) else g
             for g in observed['groups']]
-        return {'values_committed':False,'groups':groups,'mailbox':mailbox_handoff(config),
+        return {'values_committed':False,'groups':groups,'mailbox':mailbox_handoff(config,platform=package.get('platform')),
             'instruction':'Read the email with Hermes Gmail, choose the relevant code closest to the request timestamp, and enter it with browser fill or pass value and the selected refs here. Groups are suggestions; no matching group or challenge token is needed. Recheck delayed mail and continue in this application.'}
     if action=='inspect':return await handoff()
     if action=='resend':

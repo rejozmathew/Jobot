@@ -6,4 +6,12 @@ Confirmed accounts take the sign-in path. Unknown/reconciliation states require 
 
 Use Hermes Gmail to read the relevant verification email. The LLM selects the code closest to the actual request timestamp and rechecks if mail is delayed. JobBot does not apply a second sender, template, timestamp or ambiguity veto. Enter the selected code with browser fill or the code-field helper, keeping it out of summaries and reusable answer history.
 
+An approved `email_route` separates the application recipient from the connected
+verification inbox. For forwarded Greenhouse verification, personal mailbox
+access is not required. Use the existing connection to `verification_mailbox`
+and find the forwarded email for `application_email`, the employer and current
+request time. A different inbox address is not evidence of missing credentials.
+Preserve the form address through Simplify, reload and refill. Delivery still
+requires actual mail evidence; follow the normal delayed-mail recovery if absent.
+
 Use the connected Gmail capability for ordinary account verification links/codes and genuinely needed recovery. This is normal autonomous execution. Only an unavoidable CAPTCHA/MFA or a demonstrated unavailable capability is a blocker. Preserve that owned target and record the outcome, then continue to the next queued job. Do not repeat password resets, assume account creation, or permanently cache verification codes.

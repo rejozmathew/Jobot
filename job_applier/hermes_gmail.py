@@ -5,7 +5,12 @@ from pathlib import Path
 import sys
 
 
-def mailbox_handoff(config):
+def mailbox_handoff(config, platform=None):
+    from .email_routing import routed_mailbox
+    return routed_mailbox(config,platform,_mailbox_handoff(config))
+
+
+def _mailbox_handoff(config):
     """Expose the configured invocation, never credential content or mail bodies."""
     if config.get('mailbox_provider')=='himalaya':
         import shutil

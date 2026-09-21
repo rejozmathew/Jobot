@@ -1,5 +1,35 @@
 # Application runtime: ownership, helper map, and rationale
 
+## September 21: Greenhouse forwarded verification
+
+Private runtime configuration may set `email_routes.greenhouse` with
+`application_email` and `verification_mailbox`. The former overrides only the
+Greenhouse form contact email; the latter describes where the existing mailbox
+integration reads forwarded verification. No personal-inbox credentials are
+requested, changed or inferred from the form address. Forwarding must be set up
+at the mail provider; this configuration does not claim delivery is verified.
+
+This is an optional workaround isolated in `email_routing.py`. To disable it,
+set `email_routes.greenhouse.enabled` to `false` or remove that entry from the
+selected private runtime configuration, then reload the affected runtime services
+at an idle boundary. New attempts use their ordinary candidate email and mailbox
+handoff. Existing attempts keep their frozen route. No migration or candidate,
+account, credential or history rewrite is involved. For source rollback, revert
+the dedicated email-routing commit as a unit; the unused private config key may
+then be removed independently. A new connected inbox can use the normal candidate
+and mailbox configuration after this workaround is disabled.
+
+`application_runtime.start` freezes the route in session credential metadata.
+`managed_context` exposes the effective Greenhouse email in a copied context
+profile while retaining the original candidate and attempt records.
+`application_brief`, runtime handles/snapshots and `managed_credentials` expose
+the route through `hermes_gmail.mailbox_handoff`; it supplies routing guidance,
+not another mailbox verifier. `greenhouse_fast` handles recognized employer-hosted
+forms as well, restores the approved email after Simplify/refill ahead of saved
+answers, and returns the existing jobs-inbox handoff on verification. Other ATS
+profiles and integrations are unchanged. The canonical skills explain forwarded
+recipient correlation and that different addresses do not establish a blocker.
+
 ## September 20: Greenhouse missing-email continuation
 
 `greenhouse_advance` accepts `recovery:"missing_verification_email"` after the
@@ -685,6 +715,7 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 
 | Component | Scope and consumer |
 |---|---|
+| email_routing.py | Optional private Greenhouse route resolution, copied profile/contact-email answers and mailbox guidance; application_brief, managed_context, greenhouse_fast and hermes_gmail call it. No mailbox access or persistent writes; absent/disabled configuration preserves default behavior. |
 | managed.py / migration 21 / managed_redaction.provenance_text / managed_views.py | Optional per-source process/run observations and per-queue-entry origin; numeric run identifiers remain intact, secret-bearing labels are redacted, and missing attribution does not affect eligibility. Dashboard/manual CLI/application startup and discovery supply process identities at their own boundary; rediscovery retains prior observations. See SOURCE_PROCESS_ATTRIBUTION.md. |
 | managed_queue.py / queue_runtime.py / migration 22 | Automatic active-intake pickup from worker and Run next; serial execution and six-attempt retry lineage. Dashboard queue_enqueue(start_now=True) atomically promotes the chosen job and wakes the worker, bypassing its retry delay; durable immediate requests run in request order even with automatic scheduling paused, without interrupting active applications or rewriting attempt history. |
 | hermes_desktop.py / application_brief.py | Optional application dispatcher transport creates a native session in the existing Hermes desktop backend; desktop resume and correction use that same owner. A private receipt reconnects the monitor without replaying the prompt; queue recovery checks the native turn after a monitor crash. The brief exposes the exact selected candidate email for comparison with observed form values. |
