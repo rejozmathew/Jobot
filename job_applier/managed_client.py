@@ -25,3 +25,34 @@ class Client:
     def close(self):self.http.close()
     def __enter__(self):return self
     def __exit__(self,*args):self.close()
+
+
+class LocalClient:
+    """In-process transport to the same Service methods; no HTTP or API token.
+
+    A session host supplies its authority for owned application operations.
+    Ordinary local reads/intake use the current OS user's configured database.
+    """
+    def __init__(self, config, *, service=None, authority=None):
+        from .managed import Service
+        self.instance_id=config['instance_id']
+        self.service=service or Service(config['db_path'],instance_id=self.instance_id)
+        if authority:self.service.session_authority=authority
+
+    def call(self, operation, **kwargs):
+        from .managed_api import OPERATOR, WORKER
+        if operation=='health':return dict(self.service.health(),transport='local')
+        if operation not in OPERATOR|WORKER:raise ProtocolError('unknown_operation')
+        return getattr(self.service,operation)(**kwargs)
+
+    def close(self):pass
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()
+
+
+def configured_client(config, *, token_name=None, transport=None):
+    route=transport or config.get('transport','http')
+    if route=='local':return LocalClient(config)
+    if route!='http':raise ProtocolError('unsupported_transport')
+    from .managed_cli import credential
+    return Client(config['base_url'],config['instance_id'],credential(token_name or config['operator_token_env'],config))

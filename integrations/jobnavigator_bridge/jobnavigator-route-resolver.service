@@ -1,0 +1,10 @@
+[Unit]
+Description=Resolve stored JobNavigator application routes using the existing signed-in browser
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/jobnavigator-bridge
+EnvironmentFile=/etc/jobnavigator-bridge/bridge.env
+ExecStart=/home/rejo/apps/auto-job-applier-runtime/.venv/bin/python /opt/jobnavigator-bridge/resolve_routes.py --config /etc/jobnavigator-bridge/config.json --limit 10
+ExecStartPost=/opt/jobnavigator-bridge/.venv/bin/python -m jobnavigator_bridge --config /etc/jobnavigator-bridge/config.json --once
+UMask=0077

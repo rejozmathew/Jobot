@@ -7,7 +7,7 @@ from .managed_shared import ProtocolError
 
 def platform_for_url(url):
     host=urlsplit(url).hostname or ''
-    for suffix,name in (('greenhouse.io','greenhouse'),('myworkdayjobs.com','workday'),('workday.com','workday'),('icims.com','icims'),('lever.co','lever'),('ashbyhq.com','ashby')):
+    for suffix,name in (('linkedin.com','linkedin'),('greenhouse.io','greenhouse'),('myworkdayjobs.com','workday'),('workday.com','workday'),('icims.com','icims'),('lever.co','lever'),('ashbyhq.com','ashby')):
         if host==suffix or host.endswith('.'+suffix):return name
     return 'unknown'
 
@@ -16,7 +16,13 @@ class ContextServices:
     def application_context(self,attempt_id,worker_id=None,platform=None,namespace=None):
         with self.tx() as db:
             attempt=dict(self._get(db,'application_attempts',attempt_id))
+            attempt['submission_pending']=self._submission_pending(db,attempt)
             if worker_id is not None and attempt['worker_id']!=worker_id:raise ProtocolError('attempt_forbidden')
+            from .managed_sessions import local_session
+            session=local_session(db,attempt_id)
+            if session:
+                attempt['local_session_id']=session['id']
+                attempt['application_deadline']=json.loads(session['metadata_json']).get('application_deadline')
             job=dict(self._get(db,'jobs',attempt['job_id']))
             metadata=json.loads(job['metadata_json'] or '{}')
             selected_platform=platform or metadata.get('platform') or (attempt['platform'] if attempt['platform']!='unknown' else platform_for_url(job['url']))
@@ -26,10 +32,22 @@ class ContextServices:
             semantic=self._field_context(db,attempt)
             attempt['company']=job['company']
             attempt['platform']=selected_platform
+            from .email_routing import email_route, routed_profile
+            sources=json.loads(session['metadata_json']).get('credential_sources',{}) if session else {}
+            route=email_route(sources,selected_platform)
+            if route:
+                profile=routed_profile(json.loads(attempt['profile_json']),route)
+                attempt['profile_json']=json.dumps(profile)
             import hashlib
             attempt['profile_hash']=hashlib.sha256((attempt.get('profile_json') or '').encode()).hexdigest()
         account=self.account_strategy(namespace=verified_namespace,identity_id=attempt['identity_id']) if verified_namespace else None
-        return {'attempt':attempt,'job':job,'documents':documents,
+        from .application_answers import approved_policy
+        answer_policy=approved_policy(json.loads(attempt['profile_json']).get('application_answer_policy'))
+        from .managed_questions import human_input_capabilities
+        human_input=human_input_capabilities(json.loads(session['metadata_json']) if session else json.loads(attempt.get('versions_json') or '{}'))
+        return {'attempt':attempt,'job':job,'documents':documents,'answer_policy':answer_policy,
+            **({'email_route':route} if route else {}),
+            'human_input':human_input,'saved_questions':self.questions_for_attempt(attempt_id)['questions'],
             'helpers':self.helpers_for_context(selected_platform,verified_namespace),
             'lessons':self.lessons_for_context(selected_platform,verified_namespace),
             'account':account,'platform':selected_platform,'namespace':verified_namespace,

@@ -40,10 +40,105 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import ipaddress
 import os
 import re
+import time
 import urllib.request
+from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Any, Optional
+
+
+def _loopback_endpoint(cdp_url: str):
+    endpoint=urlsplit(cdp_url.rstrip('/'))
+    if (endpoint.scheme!='http' or endpoint.hostname not in ('127.0.0.1','localhost','::1')
+            or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment or endpoint.path):
+        raise ValueError('owned_target_requires_loopback_cdp')
+    return endpoint
+
+
+def _public_destination(url: str) -> str:
+    parsed=urlsplit(str(url or '').strip())
+    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
+        return ''
+    host=parsed.hostname.rstrip('.').casefold()
+    if host in ('localhost','localhost.localdomain') or host.endswith('.localhost'):
+        return ''
+    try:
+        address=ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        if not address.is_global:return ''
+    query=parse_qsl(parsed.query,keep_blank_values=True)
+    if any(key.casefold() in ('access_token','refresh_token','otp','password','reset_token','authorization_code')
+           for key,_ in query):return ''
+    tracking={'utm_source','utm_medium','utm_campaign','utm_term','utm_content'}
+    query=sorted((key,value) for key,value in query if key.casefold() not in tracking)
+    return urlunsplit((parsed.scheme.lower(),parsed.netloc.lower(),parsed.path.rstrip('/'),urlencode(query),''))
+
+
+def _target_rows(cdp_url: str) -> list[dict]:
+    _loopback_endpoint(cdp_url)
+    with urllib.request.urlopen(cdp_url.rstrip('/')+'/json/list',timeout=5) as response:
+        rows=json.load(response)
+    return [dict(row,targetId=row.get('targetId') or row.get('id')) for row in rows if row.get('type')=='page']
+
+
+@dataclass(frozen=True)
+class ApplyTargetObservation:
+    cdp_url: str
+    current_target_id: str
+    expected_public_url: str
+    baseline_target_ids: frozenset[str]
+    browser_context_id: Optional[str]
+    armed_at: float
+
+
+def arm_target_observation(cdp_url: str, current_target_id: str, expected_url: Optional[str], *, targets=None):
+    """Snapshot targets before an external Apply activation.
+
+    An in-page/Easy Apply button has no public external destination and therefore
+    does not create a popup requirement.
+    """
+    expected=_public_destination(expected_url)
+    if not expected:return None
+    _loopback_endpoint(cdp_url)
+    rows=[dict(row,targetId=row.get('targetId') or row.get('id')) for row in (targets if targets is not None else _target_rows(cdp_url))]
+    current=next((row for row in rows if row.get('targetId')==current_target_id and row.get('type')=='page'),None)
+    if current is None:raise ValueError('owned_target_not_found')
+    return ApplyTargetObservation(cdp_url.rstrip('/'),current_target_id,expected,
+        frozenset(row.get('targetId') for row in rows if row.get('type')=='page' and row.get('targetId')),
+        current.get('browserContextId'),time.monotonic())
+
+
+async def wait_for_apply_target(observation, *, inventory=None, current_url=None, timeout=2.0, poll_interval=.05):
+    """Resolve only one correlated same-tab or popup destination after Apply."""
+    if observation is None:return None
+    inventory=inventory or (lambda: asyncio.to_thread(_target_rows,observation.cdp_url))
+    deadline=asyncio.get_running_loop().time()+max(0,timeout)
+    while True:
+        live_url=await current_url() if current_url else ''
+        if _public_destination(live_url)==observation.expected_public_url:
+            return {'target_id':observation.current_target_id,'url':live_url,'kind':'same_tab'}
+        rows=await inventory()
+        candidates=[]
+        for raw in rows:
+            row=dict(raw,targetId=raw.get('targetId') or raw.get('id'))
+            target_id=row.get('targetId')
+            if row.get('type')!='page' or not target_id or target_id in observation.baseline_target_ids:continue
+            if observation.browser_context_id is not None and row.get('browserContextId')!=observation.browser_context_id:continue
+            opener=row.get('openerId')
+            if opener is not None and opener!=observation.current_target_id:continue
+            if _public_destination(row.get('url'))==observation.expected_public_url:candidates.append(row)
+        if len(candidates)==1:
+            row=candidates[0]
+            return {'target_id':row['targetId'],'url':row['url'],'kind':'popup'}
+        # Never choose among ambiguous matching tabs, even if one is newer.
+        if len(candidates)>1:return None
+        if asyncio.get_running_loop().time()>=deadline:return None
+        await asyncio.sleep(poll_interval)
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +241,16 @@ class _CDPSession:
         self._pending: dict[int, asyncio.Future] = {}
         self._id = 0
         self._reader_task: Optional[asyncio.Task] = None
+        self._listeners: dict[str, list] = {}
+
+    def subscribe(self, method: str, callback, *, session_id=None):
+        """Listen on this exact target connection; callbacks must not block."""
+        key = (session_id, method)
+        self._listeners.setdefault(key, []).append(callback)
+        def remove():
+            callbacks=self._listeners.get(key, [])
+            if callback in callbacks:callbacks.remove(callback)
+        return remove
 
     async def start(self) -> None:
         self._reader_task = asyncio.create_task(self._read_loop())
@@ -167,20 +272,29 @@ class _CDPSession:
                                 fut.set_exception(RuntimeError(msg["error"].get("message", "CDP error")))
                             else:
                                 fut.set_result(msg.get("result", {}))
+                    elif mid is None:
+                        for callback in tuple(self._listeners.get((msg.get('sessionId'), msg.get('method')), [])):
+                            try:callback(msg.get('params', {}))
+                            except Exception:pass
                 # opcode 0x2 = ping, 0x3 = close; ignore for our purposes
         except asyncio.IncompleteReadError:
             pass
         except Exception:
             pass
 
-    async def call(self, method: str, params: Optional[dict] = None, timeout: float = 30.0) -> dict:
+    async def call(self, method: str, params: Optional[dict] = None, timeout: float = 30.0, *, session_id=None) -> dict:
         self._id += 1
         mid = self._id
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending[mid] = fut
         async with self._lock:
-            await self.ws.send_text(json.dumps({"id": mid, "method": method, "params": params or {}}))
+            message = {"id": mid, "method": method, "params": params or {}}
+            if session_id is not None:message['sessionId'] = session_id
+            await self.ws.send_text(json.dumps(message))
         return await asyncio.wait_for(fut, timeout)
+
+    def channel(self, session_id):
+        return _CDPChannel(self, session_id)
 
     async def close(self) -> None:
         # IMPORTANT: we ATTACHED to an existing browser (the user's Brave).
@@ -198,6 +312,21 @@ class _CDPSession:
 # ---------------------------------------------------------------------------
 # Page element handle (for query_selector_all / set_input_files)
 # ---------------------------------------------------------------------------
+class _CDPChannel:
+    """Flattened child target, multiplexed on the already owned page connection."""
+    def __init__(self, connection, session_id):
+        self.connection, self.session_id = connection, session_id
+
+    async def call(self, method, params=None, timeout=30.0):
+        return await self.connection.call(method, params, timeout, session_id=self.session_id)
+
+    def subscribe(self, method, callback):
+        return self.connection.subscribe(method, callback, session_id=self.session_id)
+
+    def channel(self, session_id):
+        return self.connection.channel(session_id)
+
+
 class CDPElement:
     def __init__(self, session: _CDPSession, object_id: str):
         self._session = session
@@ -221,6 +350,25 @@ class CDPElement:
 # ---------------------------------------------------------------------------
 # Page (the thing handlers get from get_current_page)
 # ---------------------------------------------------------------------------
+async def _press_key(session, key: str, vk: int = 0) -> None:
+    """Dispatch form keys on the attached target, including simple modifier chords."""
+    if not isinstance(key,str) or not key:raise ValueError('key_required')
+    parts=key.split('+'); modifiers=0
+    for modifier in parts[:-1]:
+        bit={'Alt':1,'Control':2,'Ctrl':2,'Meta':4,'Shift':8}.get(modifier)
+        if bit is None:raise ValueError('unsupported_key_modifier')
+        modifiers|=bit
+    name={'Space':' ','Spacebar':' ','Esc':'Escape','Return':'Enter'}.get(parts[-1],parts[-1])
+    codes={'Tab':9,'Enter':13,'Escape':27,' ':32,'ArrowLeft':37,'ArrowUp':38,
+           'ArrowRight':39,'ArrowDown':40,'Home':36,'End':35,'PageUp':33,'PageDown':34,'Backspace':8,'Delete':46}
+    code=vk or codes.get(name) or (ord(name.upper()) if len(name)==1 else 0)
+    if not code:raise ValueError('unsupported_form_key')
+    params={'key':name,'windowsVirtualKeyCode':code,'modifiers':modifiers}
+    text='\r' if name=='Enter' else name if len(name)==1 and not modifiers&7 else ''
+    await session.call('Input.dispatchKeyEvent',dict(params,type='keyDown',**({'text':text} if text else {})))
+    await session.call('Input.dispatchKeyEvent',dict(params,type='keyUp'))
+
+
 class CDPPage:
     def __init__(self, session: _CDPSession, target_id: str, url: str):
         self._session = session
@@ -248,6 +396,7 @@ class CDPPage:
             "returnByValue": True,
             "awaitPromise": True,
         }
+        if getattr(self, 'context_id', None) is not None:params['contextId'] = self.context_id
         res = await self._session.call("Runtime.evaluate", params, timeout=timeout)
         if "exceptionDetails" in res:
             det = res["exceptionDetails"]
@@ -257,7 +406,9 @@ class CDPPage:
 
     async def evaluate_function(self, function_declaration: str, arg: Any = None, timeout: float = 30.0) -> Any:
         # Bind to the current document's global object, not a guessed context ID.
-        root = await self._session.call("Runtime.evaluate", {"expression": "globalThis", "returnByValue": False}, timeout=timeout)
+        root_params = {"expression": "globalThis", "returnByValue": False}
+        if getattr(self, 'context_id', None) is not None:root_params['contextId'] = self.context_id
+        root = await self._session.call("Runtime.evaluate", root_params, timeout=timeout)
         object_id = root.get("result", {}).get("objectId")
         if not object_id:
             raise RuntimeError("evaluate error: execution_context_unavailable")
@@ -285,6 +436,51 @@ class CDPPage:
     async def goto(self, url: str, timeout: float = 30.0) -> None:
         await self._session.call("Page.navigate", {"url": url}, timeout=timeout)
         self.url = url
+
+    async def reload(self, timeout: float = 12.0) -> dict:
+        """Cancel the old document and verify replacement before releasing its writer."""
+        before=await self.evaluate('performance.timeOrigin')
+        await self._session.call('Page.reload', {}, timeout=timeout)
+        deadline=asyncio.get_running_loop().time()+timeout
+        while asyncio.get_running_loop().time()<deadline:
+            try:
+                current=await self.evaluate('({origin:performance.timeOrigin,ready:document.readyState})')
+                if current['origin']!=before and current['ready'] in ('interactive','complete'):
+                    return {'reload_requested':True,'document_replaced':True}
+            except Exception:
+                pass  # Execution contexts disappear during document replacement.
+            await asyncio.sleep(.2)
+        return {'reload_requested':True,'document_replaced':False,
+                'instruction':'Inspect the owned page; reload completion is unconfirmed. Use session restart if the page remains broken.'}
+
+    async def press_key(self, key: str, vk: int = 0) -> None:
+        await _press_key(self._session,key,vk)
+
+    async def insert_text(self, text: str) -> None:
+        """Trusted text insertion into the explicitly focused current input."""
+        if not isinstance(text, str):raise ValueError('text_required')
+        await self._session.call('Input.insertText', {'text': text})
+
+    async def click_observed(self, validator: str, args: dict) -> dict:
+        """Activate a validated owned-page control through browser input events."""
+        prepared = dict(args, prepare_pointer=True)
+        point = await self.evaluate_function(validator, prepared)
+        if not isinstance(point, dict) or not point.get('pointer_ready'):
+            return dict(point or {}, clicked=False, execution='not_executed')
+        await self._session.call('Input.dispatchMouseEvent', dict(type='mouseMoved', x=point['x'], y=point['y']))
+        fresh = await self.evaluate_function(validator, prepared)
+        if not isinstance(fresh, dict) or not fresh.get('pointer_ready') or any(fresh[k]!=point[k] for k in ('x','y')):
+            failed=fresh if isinstance(fresh,dict) else {}
+            return dict(failed,clicked=False,execution='not_executed',
+                reason=failed.get('reason','control_changed_before_press'))
+        params = dict(x=point['x'], y=point['y'], button='left', clickCount=1)
+        try:
+            await self._session.call('Input.dispatchMouseEvent', dict(params, type='mousePressed', buttons=1))
+            await self._session.call('Input.dispatchMouseEvent', dict(params, type='mouseReleased', buttons=0))
+        except Exception:
+            return {'clicked':False,'execution':'possibly_executed','reason':'pointer_dispatch_unconfirmed'}
+        return {'clicked':True,'execution':'clicked','activation':'browser_pointer','outcome_verified':False,
+            **{key:fresh[key] for key in ('credentials_verified_before_click','credentials_refilled_before_click') if key in fresh}}
 
     async def query_selector_all(self, selector: str) -> list[CDPElement]:
         res = await self._session.call("Runtime.evaluate", {
@@ -460,14 +656,7 @@ class CDPBrowser:
 
     async def press_key(self, key: str, vk: int = 0) -> None:
         """Send a keydown+keyup via CDP Input.dispatchKeyEvent."""
-        await self._session.call("Input.dispatchKeyEvent", {
-            "type": "keyDown", "key": key,
-            "windowsVirtualKeyCode": vk or None,
-        })
-        await self._session.call("Input.dispatchKeyEvent", {
-            "type": "keyUp", "key": key,
-            "windowsVirtualKeyCode": vk or None,
-        })
+        await _press_key(self._session,key,vk)
 
     async def screenshot(self, path: str, full_page: bool = False) -> str:
         """Capture the current page to a PNG file via CDP Page.captureScreenshot."""

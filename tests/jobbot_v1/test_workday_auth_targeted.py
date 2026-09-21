@@ -95,13 +95,13 @@ def test_workday_application_scope_rejections():
     host = "https://other.wd5.myworkdayjobs.com/en-US/huroncareers/job/Chicago-IL/Manager_JR-0016154"
     assert is_workday_application_scope(base, host) is False
 
-    # Arbitrary subpath
-    assert is_workday_application_scope(base, base + "/apply/unauthorized") is False
-    assert is_workday_application_scope(base, base + "/edit") is False
+    # Child route spelling is not a separate job identity or permission list.
+    assert is_workday_application_scope(base, base + "/apply/newStep") is True
+    assert is_workday_application_scope(base, base + "/edit") is True
 
     # User dashboard / login
     assert is_workday_application_scope(base, "https://huron.wd5.myworkdayjobs.com/en-US/huroncareers/userHome") is False
-    assert is_workday_application_scope(base, "https://huron.wd5.myworkdayjobs.com/en-US/huroncareers/login") is False
+    assert is_workday_application_scope(base, "https://huron.wd5.myworkdayjobs.com/en-US/huroncareers/login") is True
 
     # Path tricks: dot and encoded slashes
     assert is_workday_application_scope(base, base + "/..") is False
@@ -119,6 +119,40 @@ def test_workday_application_scope_rejections():
     assert is_workday_application_scope(base, http_cand) is False
 
 
+def test_workday_application_scope_ignores_path_case():
+    base = "https://tenant.wd5.myworkdayjobs.com/careers/job/usa---remote/director_r13799"
+    actual = "https://tenant.wd5.myworkdayjobs.com/en-US/Careers/job/USA---Remote/Director_R13799/apply/applyManually"
+    for candidate in (actual, actual.lower(), actual.upper()):
+        assert is_same_application_scope(base, candidate)
+    assert is_same_application_scope(base.replace("/job/usa---remote/", "/details/"), actual)
+    for candidate in (
+        actual.replace("R13799", "R13800"),
+        actual.replace("/Careers/", "/OtherCareers/"),
+        actual.replace("tenant.wd5", "other.wd5"),
+        actual + "?OTP=123456",
+    ):
+        assert not is_same_application_scope(base, candidate)
+    # Other ATS paths retain their existing semantics.
+    assert not is_same_application_scope(
+        "https://example.com/jobs/Director_R13799",
+        "https://example.com/jobs/director_r13799/apply",
+    )
+
+
+def test_workday_login_redirect_preserves_exact_job_scope():
+    from urllib.parse import urlencode
+    base = 'https://tenant.wd5.myworkdayjobs.com/careers/job/City/Director_R13799'
+    login = 'https://tenant.wd5.myworkdayjobs.com/en-US/Careers/login'
+    route = '/en-US/careers/job/City/Director_R13799/apply/applyManually'
+    assert is_same_application_scope(base, login+'?'+urlencode({'redirect': route}))
+    for redirect in (route.replace('R13799','R13800'), route.replace('/careers/','/other/'),
+                     '//evil.example'+route, 'https://evil.example'+route,
+                     route+'?redirect=https://evil.example', route.replace('/job/', '/%2fjob/')):
+        assert not is_same_application_scope(base, login+'?'+urlencode({'redirect': redirect}))
+    assert is_same_application_scope(base, login)
+    assert not is_same_application_scope(base, login+'?'+urlencode([('redirect',route),('redirect',route)]))
+
+
 def test_greenhouse_preservation():
     gh_base = "https://job-boards.greenhouse.io/acme/jobs/123456"
     assert is_same_application_scope(gh_base, gh_base) is True
@@ -126,6 +160,22 @@ def test_greenhouse_preservation():
     assert is_same_application_scope(gh_base, gh_base + "/confirmation") is True
     # Greenhouse rejects sibling job
     assert is_same_application_scope(gh_base, "https://job-boards.greenhouse.io/acme/jobs/123457") is False
+
+
+def test_workday_details_to_canonical_job_keeps_exact_requisition_scope():
+    base = "https://tenant.wd1.myworkdayjobs.com/en-US/Careers/details/Director_R12345-1?q=director"
+    canonical = "https://tenant.wd1.myworkdayjobs.com/Careers/job/GBR---Oxford/Director_R12345-1"
+    for child in ("", "/apply", "/apply/applyManually", "/apply/success"):
+        assert is_same_application_scope(base, canonical + child)
+    assert is_same_application_scope(canonical, base)
+    for candidate in (
+        canonical.replace("R12345-1", "R12346-1"),
+        canonical.replace("R12345-1", "R12345-2"),
+        canonical.replace("/Careers/", "/OtherCareers/"),
+        canonical.replace("tenant.wd1", "other.wd1"),
+        canonical + "/apply?otp=123456",
+    ):
+        assert not is_same_application_scope(base, candidate)
 import asyncio
 from unittest.mock import AsyncMock
 

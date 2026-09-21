@@ -2,14 +2,28 @@
 import hashlib
 import json
 import math
+import re
 import time
 from datetime import datetime, timezone
 from .managed_shared import ProtocolError, dumps
 from .managed_redaction import safe_payload, safe_text
+from .managed_sessions import local_session
 
 EVENT_TYPES = frozenset({'tool_started','tool_finished','model_finished','navigation_verified',
     'field_verified','field_context','phase_changed','account_verified','checkpoint','recovery','control','outcome'})
 PROGRESS_TYPES = frozenset({'navigation_verified','field_verified','account_verified'})
+
+
+def field_task_context(question,*,page='form',document=''):
+    """Question labels are semantic context; selected/candidate values are excluded."""
+    question=safe_text(question).strip().rstrip('*').strip()
+    if not question or question=='[REDACTED]':return {}
+    key=hashlib.sha256(dumps([page,document,question]).encode()).hexdigest()[:20]
+    page=re.sub(r'[^A-Za-z0-9_.:/-]','_',str(page))[:120] or 'form'
+    return {'page':page,'field':key,'category':'required_question','field_label':question,
+            'stage_id':'remaining_questions','task_id':'field:'+key,'parent_id':'remaining_questions',
+            'activity':'Review and fill “'+question+'”' if '?' in question else 'Fill '+question[:1].lower()+question[1:],
+            'task_state':'in_progress','source':'shared_form'}
 
 
 def seconds(end, start):
@@ -17,6 +31,63 @@ def seconds(end, start):
 
 
 class EventServices:
+    def progress(self,attempt_id,*,worker_id,fence,stage,activity,task_id=None,state='in_progress',
+                 evidence=None,next_step=None,source='executor',action_id=None):
+        """Convenience for executor intent; strict external event timestamps are unchanged."""
+        from .managed_reports import STAGE_TITLES
+        from .managed_shared import uid
+        if stage not in STAGE_TITLES or state not in ('in_progress','completed','recovering','awaiting_input','unsuccessful'):
+            raise ProtocolError('invalid_application_progress')
+        if not isinstance(activity,str) or not activity.strip():raise ProtocolError('progress_activity_required')
+        if state=='completed' and (not isinstance(evidence,str) or not safe_text(evidence).strip() or safe_text(evidence)=='[REDACTED]'):
+            raise ProtocolError('progress_completion_evidence_required')
+        task_id=task_id or 'activity:'+hashlib.sha256(activity.encode()).hexdigest()[:20]
+        if not isinstance(task_id,str) or not re.fullmatch(r'[A-Za-z0-9_.:/-]{1,120}',task_id):raise ProtocolError('invalid_progress_task_id')
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence)
+            return self._append_event(db,a,worker_id=worker_id,fence=fence,event_id=uid(),action_id=action_id,
+                event_type='checkpoint',observed_at=self.now(),duration_seconds=None,payload={
+                    'stage_id':stage,'parent_id':stage,'task_id':task_id,'task_state':state,'phase':stage,
+                    'activity':activity,'evidence':evidence,'next_step':next_step,'source':source})
+
+    def _submission_state(self, db, attempt):
+        from .managed_shared import submission_state
+        rows=db.execute('SELECT payload_json,stale,observed_at FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt['id'],)).fetchall()
+        return submission_state(attempt,rows)
+
+    def _submission_pending(self, db, attempt):
+        return self._submission_state(db,attempt)['state'] in ('pending','accepted')
+
+    def record_submission_rejection(self,attempt_id,*,worker_id,fence,proof):
+        """Resolve only the fresh employer response for the current captured click."""
+        from .managed_shared import submission_state
+        if not isinstance(proof,dict):raise ProtocolError('submission_rejection_unproven')
+        with self.tx() as db:
+            a=self._owner(db,attempt_id,worker_id,fence)
+            rows=db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt_id,)).fetchall()
+            current=submission_state(a,rows);dispatch=current['dispatch']
+            if current['state']=='rejected' and all(current['resolution'].get(k)==proof.get(k) for k in ('dispatch_id','document_id','frame_id')):
+                return {'state':'rejected','submission_pending':False}
+            valid=(current['state']=='pending' and dispatch and proof.get('source')=='employer' and
+                proof.get('fresh_after_dispatch') is True and proof.get('reason_code') in ('invalid_security_code','expired_security_code','required_fields') and
+                all(dispatch.get(k) and proof.get(k)==dispatch[k] for k in ('dispatch_id','document_id','frame_id')))
+            try:
+                observed=datetime.fromisoformat(proof['observed_at'].replace('Z','+00:00'))
+                sent=datetime.fromisoformat(dispatch['observed_at'].replace('Z','+00:00'))
+                valid=valid and observed.tzinfo is not None and sent<=observed<=datetime.fromisoformat(self.now())
+            except (KeyError,TypeError,ValueError):valid=False
+            action=db.execute('SELECT * FROM managed_actions WHERE id=? AND attempt_id=?',(proof.get('dispatch_id'),attempt_id)).fetchone()
+            if not valid or not action or action['tool_name']!='browser.submit' or not action['ended_at']:
+                raise ProtocolError('submission_rejection_unproven')
+            payload={k:proof[k] for k in ('dispatch_id','document_id','frame_id','source','reason_code')}
+            payload.update(operation='submission_resolution',status='rejected',phase='submission',resolution='fresh_employer_rejection',
+                stage_id='submission',task_id='submit',parent_id='submission',task_state='recovering',
+                evidence='Current employer form explicitly rejected this captured submission',
+                activity='Application needs correction before submission',next_step='Correct the rejected field or request a fresh email code, then submit once.')
+            self._append_event(db,a,worker_id=worker_id,fence=fence,event_id='submission-rejection:'+proof['dispatch_id'],
+                action_id=proof['dispatch_id'],event_type='checkpoint',observed_at=proof['observed_at'],duration_seconds=None,payload=payload)
+            return {'state':'rejected','submission_pending':False,'dispatch_id':proof['dispatch_id']}
+
     def _append_event(self, db, a, *, worker_id, fence, event_id, action_id, event_type,
                       observed_at, duration_seconds, payload):
         if event_type not in EVENT_TYPES or not event_id: raise ProtocolError('invalid_event')
@@ -38,7 +109,11 @@ class EventServices:
             return dict(old)
         lease=db.execute('SELECT * FROM browser_leases WHERE profile=?',(a['browser_profile'],)).fetchone()
         now=self.now()
-        stale=bool(a['completed_at'] or not lease or lease['attempt_id']!=a['id'] or lease['generation']!=fence or lease['state']!='active' or lease['expires_at']<=now)
+        session=local_session(db,a['id'])
+        if session:
+            stale=bool(a['completed_at'] or session['ended_at'] or session['state'] not in ('connected','waiting'))
+        else:
+            stale=bool(a['completed_at'] or not lease or lease['attempt_id']!=a['id'] or lease['generation']!=fence or lease['state']!='active' or lease['expires_at']<=now)
         db.execute('INSERT INTO managed_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
             (event_id,a['id'],a['run_id'],action_id,worker_id,event_type,observed_at,now,duration_seconds,int(stale),dumps(payload),key))
         if not stale and event_type in PROGRESS_TYPES and payload.get('evidence'):
@@ -59,14 +134,18 @@ class EventServices:
     def events(self, attempt_id):
         with self.tx() as db:
             self._get(db,'application_attempts',attempt_id)
-            return [dict(x) for x in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY recorded_at,id',(attempt_id,))]
+            return [dict(x) for x in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY rowid',(attempt_id,))]
 
     def action_start(self, attempt_id, *, worker_id, fence, action_id, tool_name, writes_browser=True):
         if type(writes_browser) is not bool:raise ProtocolError('invalid_writer_flag')
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
             if writes_browser:self._budget_check(db,a)
-            semantic=self._strategy_check(db,a,tool_name) if writes_browser else self._field_context(db,a)
+            local=bool(local_session(db,attempt_id))
+            stopping=tool_name=='local_browser.simplify_stop' and local
+            recovering=tool_name=='local_browser.reload' and local
+            cancelling=stopping or recovering
+            semantic=self._strategy_check(db,a,tool_name) if writes_browser and not cancelling else self._field_context(db,a)
             run=self._get(db,'runs',a['run_id'])
             if run['control']!='running':
                 if writes_browser or tool_name != 'browser_observe' or run['control'] not in ('pause_requested','stop_requested'):
@@ -76,7 +155,7 @@ class EventServices:
                 if old['attempt_id']!=attempt_id or old['tool_name']!=tool_name or old['writes_browser']!=int(writes_browser): raise ProtocolError('idempotency_conflict')
                 if old['ended_at']: raise ProtocolError('action_already_finished')
                 return dict(old)
-            if writes_browser and (a['writer_state']!='idle' or db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1',(attempt_id,)).fetchone()):
+            if writes_browser and ((a['writer_state']!='idle' and not cancelling) or db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1',(attempt_id,)).fetchone()):
                 raise ProtocolError('browser_writer_busy')
             db.execute('INSERT INTO managed_actions(id,attempt_id,tool_name,started_at,writes_browser,semantic_context_json) VALUES (?,?,?,?,?,?)',(action_id,attempt_id,safe_text(tool_name),self.now(),int(writes_browser),dumps(semantic)))
             if not hasattr(self,'_action_clocks'):self._action_clocks={}
@@ -119,16 +198,19 @@ class EventServices:
         if command not in ('pause','stop','resume'): raise ProtocolError('invalid_control')
         with self.tx() as db:
             run=self._get(db,'runs',run_id)
-            if run['state']=='completed' or run['control']=='stopped':raise ProtocolError('run_terminal')
-            if command=='resume':
-                if run['control']!='paused':raise ProtocolError('not_paused')
-                control='running'
-            elif command=='pause':
-                if run['control'] in ('stop_requested','stopped'):raise ProtocolError('stop_pending')
-                control='paused' if run['control']=='paused' else 'pause_requested'
-            else:control='stop_requested'
-            db.execute('UPDATE runs SET control=? WHERE id=?',(control,run_id))
-            return dict(self._get(db,'runs',run_id))
+            return self._control(db,run,command=command)
+
+    def _control(self, db, run, *, command):
+        if run['state']=='completed' or run['control']=='stopped':raise ProtocolError('run_terminal')
+        if command=='resume':
+            if run['control']!='paused':raise ProtocolError('not_paused')
+            control='running'
+        elif command=='pause':
+            if run['control'] in ('stop_requested','stopped'):raise ProtocolError('stop_pending')
+            control='paused' if run['control']=='paused' else 'pause_requested'
+        else:control='stop_requested'
+        db.execute('UPDATE runs SET control=? WHERE id=?',(control,run['id']))
+        return dict(self._get(db,'runs',run['id']))
 
     def _is_quiescent(self, db, a):
         return a['writer_state']=='idle' and not db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL',(a['id'],)).fetchone()
@@ -136,6 +218,7 @@ class EventServices:
     def ack_control(self, attempt_id, *, worker_id, fence, quiescent):
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
+            if local_session(db,attempt_id):raise ProtocolError('local_host_must_stop_browser')
             if not quiescent or not self._is_quiescent(db,a):raise ProtocolError('writers_not_quiescent')
             run=self._get(db,'runs',a['run_id'])
             if run['control'] not in ('pause_requested','stop_requested'):raise ProtocolError('no_control_request')
@@ -167,6 +250,11 @@ class EventServices:
         settings=json.loads(a['settings_json'])
         elapsed=seconds(a['completed_at'] or now,a['started_at'])
         # Explicit clock uncertainty beats a fabricated negative/exact duration.
+        if a.get('local_session_id'):
+            s=self.session_status(a['local_session_id'])
+            return {**a,'elapsed_seconds':max(0,elapsed),'alive':s['host_alive'],
+                    'host_alive':s['host_alive'],'driver_recently_active':s['driver_recently_active'],
+                    'stalled':not a['completed_at'] and seconds(now,a['progress_at'])>settings.get('no_progress_seconds',45)}
         return {**a,'elapsed_seconds':max(0,elapsed),'uncertain_duration':bool(a['uncertain_duration'] or elapsed<0),
             'stalled':not a['completed_at'] and seconds(now,a['progress_at'])>settings.get('no_progress_seconds',45),
             'alive':not a['completed_at'] and 'ownership_lost_or_expired' not in a['timing_uncertainty_reasons'] and seconds(now,a['heartbeat_at'])<settings.get('lease_seconds',60)}

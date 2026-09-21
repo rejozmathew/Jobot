@@ -1,0 +1,15 @@
+[Unit]
+Description=Discover verified jobs and hand qualifying roles to JobBot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/git/auto-job-applier
+Environment=JOBBOT_CONFIG=%h/.config/jobbot/runtime.json
+EnvironmentFile=-%h/.config/jobbot/runtime.env
+# Enabling this unit authorizes Strong apply / Apply verdicts to enter the queue.
+# Remove --enqueue to collect jobs for manual review only.
+ExecStart=%h/git/auto-job-applier/.venv/bin/python -m job_applier.harvest_runtime --enqueue --scheduled
+KillMode=control-group
+UMask=0077

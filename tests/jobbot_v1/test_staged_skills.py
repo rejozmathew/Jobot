@@ -331,9 +331,10 @@ def test_canonical_job_apply_skill_semantic_contract() -> None:
     content = skill_file.read_text(encoding="utf-8")
 
     # 1. Exact known API labels
-    assert re.search(r"\bjobbot\s+accept\b", content, re.IGNORECASE), "Must name 'jobbot accept'"
-    assert re.search(r"\bjobbot\s+next\b", content, re.IGNORECASE), "Must name 'jobbot next'"
-    assert re.search(r"\bjobbot\s+checkpoint\b", content, re.IGNORECASE), "Must name 'jobbot checkpoint'"
+    # Local startup supersedes legacy accept/claim/checkpoint choreography.
+    assert re.search(r"\bjobbot\s+start\b", content, re.IGNORECASE), "Must name 'jobbot start'"
+    assert re.search(r"\bjobbot\s+pause\b", content, re.IGNORECASE), "Must name 'jobbot pause'"
+    assert re.search(r"\bjobbot\s+stop\b", content, re.IGNORECASE), "Must name 'jobbot stop'"
     assert re.search(r"\bjobbot\s+finish\b", content, re.IGNORECASE), "Must name 'jobbot finish'"
 
     # 2. Core conceptual requirements (semantic matching)
@@ -354,7 +355,7 @@ def test_canonical_job_apply_skill_semantic_contract() -> None:
         "Must mention actual evidence"
     )
     assert re.search(
-        r"(?:no\s+redundant.*(?:final\s+audit|full\s+audit)|avoid\s+redundant.*(?:final\s+audit|full\s+audit)|without\s+redundant.*(?:final\s+audit|full\s+audit))",
+        r"(?:no\s+redundant.*(?:final\s+audit|full\s+audit)|avoid\s+redundant.*(?:final\s+audit|full\s+audit)|without\s+(?:a\s+)?redundant\s+full\s+final\s+audit)",
         content,
         re.IGNORECASE,
     ), "Must specify no redundant full final audit"

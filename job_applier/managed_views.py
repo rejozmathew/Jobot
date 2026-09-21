@@ -13,6 +13,16 @@ def attempt_timing_state(db,row,now):
     if a.get('uncertain_duration') or a['outcome'] in ('interrupted','submission_unknown'):reasons.append('recorded_uncertainty')
     if db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND (ended_at IS NULL OR uncertainty=1)',(a['id'],)).fetchone():reasons.append('unfinished_or_unmeasured_action')
     if not a['completed_at']:
+        from .managed_sessions import local_session
+        session=local_session(db,a['id'])
+        if session:
+            a['local_session_id']=session['id']
+            a['session_state']=session['state']
+            a['workspace_id']=session['workspace_id']
+            if session['state'] not in ('connected','waiting','paused'):reasons.append('session_not_connected')
+            a['uncertain_duration']=bool(reasons)
+            a['timing_uncertainty_reasons']=reasons
+            return a
         lease=db.execute('SELECT * FROM browser_leases WHERE profile=?',(a['browser_profile'],)).fetchone()
         live=bool(lease and lease['state']=='active' and lease['worker_id']==a['worker_id'] and lease['generation']==a['fence'])
         if live:
@@ -62,7 +72,7 @@ def resolve_failure_reason(db, attempt, events=None):
     # Submission unknown must override earlier pre-submit failures
     if outcome == 'submission_unknown':
         ev = (attempt.get('evidence') or '').strip()
-        return ev if ev else 'Submit clicked; employer confirmation not verified. Do not retry.'
+        return ev if ev else 'Submit clicked; employer confirmation was not recorded. A new application request starts a separate attempt.'
 
     ev_rows = events
     if ev_rows is None and db is not None:
@@ -139,9 +149,37 @@ class ViewServices:
             jobs=[dict(j,archived=j['id'] in archived) for j in jobs if include_archived or j['id'] not in archived]
             for job in jobs:
                 job['assessment']=self._assessment(db,job['id'])
-                job['source_count']=db.execute('SELECT COUNT(*) FROM job_sources WHERE job_id=?',(job['id'],)).fetchone()[0]
+                job['sources']=self._source_rows(db,job['id'])
+                job['source_count']=len(job['sources'])
+                job['queue_origins']=[dict(r) for r in db.execute('''SELECT id,request_id,created_at,
+                    enqueue_origin,producer,discovery_run_id,discovery_profile FROM dispatch_queue
+                    WHERE job_id=? ORDER BY rowid''',(job['id'],))]
+                # Metadata refreshes, heartbeats and new retries are not dispositions.
+                # Keep the last recorded outcome visible even during a newer attempt.
+                disposition=db.execute('''SELECT at,value,source FROM (
+                    SELECT disposition_at AS at,disposition AS value,'operator' AS source,3 AS precedence
+                    FROM jobs WHERE id=? AND disposition_at IS NOT NULL
+                    UNION ALL SELECT completed_at,outcome,'application',2
+                    FROM application_attempts WHERE job_id=? AND completed_at IS NOT NULL AND outcome IS NOT NULL
+                    UNION ALL SELECT ended_at,outcome,'queue',1
+                    FROM dispatch_queue WHERE job_id=? AND ended_at IS NOT NULL AND outcome IS NOT NULL
+                    ) ORDER BY julianday(at) DESC,precedence DESC LIMIT 1''', (job['id'],)*3).fetchone()
+                job['last_disposition']=dict(disposition) if disposition else None
                 latest=db.execute('SELECT * FROM application_attempts WHERE job_id=? ORDER BY started_at DESC, id DESC LIMIT 1',(job['id'],)).fetchone()
                 job['failure_reason']=resolve_failure_reason(db,dict(latest)) if latest else None
+                # Completion time belongs to the successful attempt, across all runs.
+                # An already-applied check does not measure the original application.
+                job['application_timing']=None
+                if job['status'] in ('applied','already_applied'):
+                    successful=db.execute('''SELECT * FROM application_attempts WHERE job_id=?
+                        AND outcome='applied' AND completed_at IS NOT NULL
+                        AND julianday(completed_at)>=julianday(started_at)
+                        ORDER BY julianday(completed_at) DESC,id DESC LIMIT 1''',(job['id'],)).fetchone()
+                    if successful:
+                        timing=public_attempt(attempt_timing_state(db,successful,now),now)
+                        job['application_timing']={k:timing[k] for k in
+                            ('started_at','completed_at','elapsed_seconds','uncertain_duration')}
+                        job['application_timing']['attempt_id']=timing['id']
             runs=[dict(r) for r in db.execute('SELECT * FROM runs ORDER BY requested_at DESC,id')]
             candidates=[dict(r) for r in db.execute('SELECT id,person_key,email,state,profile_hash FROM candidates ORDER BY id')]
             accounts=[dict(r) for r in db.execute('SELECT * FROM company_portal_accounts ORDER BY id')]
@@ -188,22 +226,27 @@ class ViewServices:
                 current['focused_context']=None
                 if focus:
                     job=self._get(db,'jobs',focus['job_id'])
-                    events=db.execute('SELECT payload_json FROM managed_events WHERE attempt_id=? ORDER BY observed_at DESC,recorded_at DESC,id DESC',(focus['id'],)).fetchall()
-                    payloads=[json.loads(e[0]) for e in events]
+                    events=[dict(e) for e in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY observed_at DESC,recorded_at DESC,id DESC',(focus['id'],))]
+                    payloads=[json.loads(e['payload_json']) for e in events]
                     latest=next((p for p in payloads if any(p.get(k) for k in ('phase','activity','page','url','tool_name'))),{})
                     issue=next((p.get('error_type') or p.get('reason_code') or p.get('category') for p in payloads if p.get('status') in ('failed','error','blocked','aborted')),None)
                     versions=json.loads(focus['versions_json'] or '{}')
                     from .managed_context import platform_for_url
                     current['focused_context']={'is_active':not bool(focus['completed_at']),'state':'active' if not focus['completed_at'] else 'last_completed',
-                        'attempt_id':focus['id'],'job':{k:job[k] for k in ('id','company','title','url')},
+                        'attempt_id':focus['id'],'job':{k:job[k] for k in ('id','company','title','url','metadata_json')},
                         'platform':focus.get('platform') or platform_for_url(job['url']),
                         'page':latest.get('page') or latest.get('url') or job['url'],'activity':latest.get('activity') or latest.get('phase') or latest.get('tool_name') or focus.get('activity'),
                         'worker_metadata':{k:versions.get(k) for k in ('skill_version','provider','model','protocol','reasoning_effort')},
                         'actual_reasoning_effort':versions.get('reasoning_effort'),
                         'latest_unresolved_issue':focus.get('failure_reason') or issue or (focus.get('evidence') if focus.get('outcome') not in ('applied','already_applied') else None),
                         'settings_hash':focus['settings_hash'],'uncertain_duration':focus['uncertain_duration']}
+                    from .managed_reports import application_progress
+                    current['focused_context']['progress']=application_progress(events,now=self.now(),ended_at=focus['completed_at'],
+                        actions=[dict(a) for a in db.execute('SELECT * FROM managed_actions WHERE attempt_id=?',(focus['id'],))])
             schema=db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
         return {'health':dict(self.health(),schema_version=schema),'settings':self.settings_view(),
             'jobs':jobs,'runs':runs,'accounts':accounts,'candidates':candidates,'current_run':current,
             'lessons':lessons,'helpers':helpers,'assets':assets,'assessments':assessments,
-            'document_selections':selections,'document_uploads':uploads}
+            'document_selections':selections,'document_uploads':uploads,
+            'local_runtime':self.sessions_view(),'answer_queue':self.answer_queue(),'dispatch_queue':self.queue_status(),
+            'discovery':self.discovery_status()}

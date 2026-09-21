@@ -1,0 +1,13 @@
+# Merge into a dedicated Hermes discovery profile, preserving its provider,
+# credentials and tools. Do not replace its entire config.yaml with this file.
+# An absolute cap is needed: Hermes raises the percentage threshold to 75%
+# for small-context models. This was too late for the VM's local Qwen server.
+compression:
+  enabled: true
+  threshold_tokens: 35000
+  protect_first_n: 0
+  protect_last_n: 4
+  target_ratio: 0.2
+  proactive_prune_tokens: 28000
+  proactive_prune_min_result_chars: 8000
+  proactive_prune_min_reclaim_tokens: 1024

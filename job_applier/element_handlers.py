@@ -1399,14 +1399,14 @@ class JobApplierTools(Tools):
                 "handler_state": legacy_outcome.state,
                 "blocker_code": legacy_outcome.blocker_code or "",
             }
-            if legacy_outcome.result == HandlerResult.BLOCKED:
+            if legacy_outcome.result in (HandlerResult.BLOCKED, HandlerResult.FAILED):
                 return ActionResult(
-                    error=f"workday_create_account (legacy wrapper blocked): {legacy_outcome.message}",
-                    metadata=metadata,
-                )
-            if legacy_outcome.result == HandlerResult.FAILED:
-                return ActionResult(
-                    error=f"workday_create_account (legacy wrapper failed): {legacy_outcome.message}",
+                    extracted_content=(
+                        f"Workday account helper needs executor recovery: {legacy_outcome.message}\n"
+                        f"Observed context: {legacy_outcome.handoff_context}\n"
+                        "Inspect the current page and continue with available sign-in, account creation, "
+                        "password recovery or browser recovery controls. The helper result does not end the application."
+                    ),
                     metadata=metadata,
                 )
             if legacy_outcome.result == HandlerResult.SUBMITTED:
@@ -1688,9 +1688,9 @@ class JobApplierTools(Tools):
             host = payload.get("current_host") or "unknown"
             job_host = payload.get("job_host") or "unknown"
             return ActionResult(
-                error=(
-                    f"EXTERNAL SSO REDIRECT to {host} (job host: {job_host}). "
-                    "This likely requires corporate credentials. Call done(success=false) immediately."
+                extracted_content=(
+                    f"Sign-in redirect to {host} (job host: {job_host}). "
+                    "Inspect this page and its candidate sign-in, account creation or return-to-application options, then continue. The hostname difference alone does not establish a blocker."
                 )
                 )
 
@@ -1701,9 +1701,9 @@ class JobApplierTools(Tools):
                 host = payload.get("current_host") or "unknown"
                 job_host = payload.get("job_host") or "unknown"
                 return ActionResult(
-                    error=(
-                        f"EXTERNAL SSO REDIRECT to {host} (job host: {job_host}). "
-                        "This likely requires corporate credentials. Call done(success=false) immediately."
+                    extracted_content=(
+                        f"Sign-in redirect to {host} (job host: {job_host}). "
+                        "Inspect this page and its candidate sign-in, account creation or return-to-application options, then continue. The hostname difference alone does not establish a blocker."
                     )
                 )
 
@@ -1714,9 +1714,9 @@ class JobApplierTools(Tools):
                 host = payload.get("current_host") or "unknown"
                 job_host = payload.get("job_host") or "unknown"
                 return ActionResult(
-                    error=(
-                        f"EXTERNAL SSO REDIRECT to {host} (job host: {job_host}). "
-                        "This likely requires corporate credentials. Call done(success=false) immediately."
+                    extracted_content=(
+                        f"Sign-in redirect to {host} (job host: {job_host}). "
+                        "Inspect this page and its candidate sign-in, account creation or return-to-application options, then continue. The hostname difference alone does not establish a blocker."
                     )
                 )
 
@@ -1740,10 +1740,9 @@ class JobApplierTools(Tools):
                     return { exists: false };
                 }""")
                 if exists_check and exists_check.get("exists"):
-                    return ActionResult(error=(
+                    return ActionResult(extracted_content=(
                         f"ACCOUNT ALREADY EXISTS (detected: '{exists_check['pattern']}'). "
-                        "DO NOT call workday_create_account again. "
-                        "Switch to SIGN IN with the same email/password."
+                        "Inspect SIGN IN with the retained email/password, or the available password recovery controls, and continue."
                     ))
             except Exception:
                 pass

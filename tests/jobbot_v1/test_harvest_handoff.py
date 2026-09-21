@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -65,6 +66,8 @@ ALLOWED_RECORD_FIELDS = frozenset({
     "namespace",
     "requisition_id",
     "identity_evidence",
+    "country",
+    "posted_at",
 })
 
 
@@ -273,6 +276,19 @@ def test_intake_results_module_and_publish_signature() -> None:
     assert params[1].name == "records", f"Second param must be 'records', got {params[1].name}"
     assert "dry_run" in sig.parameters, "publish must accept 'dry_run' keyword argument"
     assert sig.parameters["dry_run"].default is False, "dry_run must default to False"
+
+
+def test_discovery_retains_country_and_posting_date(managed_env):
+    service, spy = managed_env
+    mod = get_intake_results_module()
+    record = {'url': 'https://employer.example.test/dates/1', 'source_type': 'harvest',
+              'source_id': 'dates-1', 'country': 'US', 'posted_at': '2026-09-10'}
+    initial = mod.publish(spy, [{k:v for k,v in record.items() if k not in ('country','posted_at')}])
+    result = mod.publish(spy, [record])
+    assert result['results'][0]['job_id'] == initial['results'][0]['job_id']
+    job = service.job(result['results'][0]['job_id'])
+    metadata = json.loads(job['metadata_json'])
+    assert metadata['country'] == 'US' and metadata['posted_at'] == '2026-09-10'
 
 
 def test_publish_happy_path_all_allowed_fields_and_preserved_ids(managed_env) -> None:

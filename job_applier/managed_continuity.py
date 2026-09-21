@@ -10,6 +10,8 @@ class ContinuityServices:
         data={**data,'summary':safe_text(data.get('summary',''))}
         with self.tx() as db:
             run=self._get(db,'runs',run_id)
+            if self._has_local_schema(db) and db.execute('SELECT 1 FROM application_sessions WHERE run_id=?',(run_id,)).fetchone():
+                raise ProtocolError('use_local_session_handle')
             if run['worker_id']!=worker_id or run['session_id']!=session_id:raise ProtocolError('stale_session')
             existing=db.execute('SELECT * FROM run_checkpoints WHERE id=?',(checkpoint_id,)).fetchone()
             if existing:
@@ -26,6 +28,8 @@ class ContinuityServices:
         reject_secrets(capabilities)
         with self.tx() as db:
             run=self._get(db,'runs',run_id)
+            if self._has_local_schema(db) and db.execute('SELECT 1 FROM application_sessions WHERE run_id=?',(run_id,)).fetchone():
+                raise ProtocolError('use_local_session_attach')
             self._reasoning_matches(run,capabilities)
             if run['worker_id']!=worker_id:raise ProtocolError('owned_elsewhere')
             if run['state'] not in ('accepted','active') or run['control'] in ('stopped','stop_requested'):raise ProtocolError('run_not_resumable')

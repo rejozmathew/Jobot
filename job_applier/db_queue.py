@@ -140,7 +140,7 @@ class JobQueueDB:
         """Add a new job to the queue."""
         if self.db_manager.is_managed:
             from .managed import Service
-            row = Service(self.db_manager.db_path.resolve()).intake(url=request.url, source_type='legacy_cli', source_id=request.url, company=request.company, title=request.title)
+            row = Service(self.db_manager.db_path.resolve()).intake(url=request.url, source_type='legacy_cli', source_id=request.url, company=request.company, title=request.title, producer='legacy_cli')
             return self.get(row['id'])
         session = self.db_manager.get_session()
         try:

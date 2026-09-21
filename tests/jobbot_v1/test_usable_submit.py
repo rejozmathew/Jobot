@@ -207,9 +207,9 @@ const host1 = new FakeElement({{ children: [] }});
 shadow1.host = host1;
 host1.shadowRoot = shadow1;
 
-// Host 2 has active busy indicator
+// Host 2 has an explicit writer, not only a cosmetic spinner beside an input.
 const busyEl = new FakeElement({{ tagName: 'DIV', attributes: {{ 'aria-busy': 'true' }} }});
-const shadow2 = new FakeElement({{ children: [busyEl] }});
+const shadow2 = new FakeElement({{ children: [busyEl], textContent: 'Filling your application' }});
 const host2 = new FakeElement({{ children: [] }});
 shadow2.host = host2;
 host2.shadowRoot = shadow2;

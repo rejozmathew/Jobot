@@ -31,6 +31,7 @@
 <main id="console" hidden>
   <nav aria-label="Workspace">
     <button data-tab="queue" class="active">Applications</button>
+    <button data-tab="answers">Needs your answer <span id="answer-count"></span></button>
     <button data-tab="run">Activity</button>
     <button data-tab="profile">Profile</button>
     <button data-tab="settings">Settings</button>
@@ -44,15 +45,23 @@
 
   <!-- TAB: APPLICATIONS (QUEUE & START) -->
   <section id="tab-queue" class="tab">
+    <section class="card" id="local-sessions-card" hidden>
+      <div class="section-title"><h2>Application activity</h2><span id="activity-count" class="muted"></span></div>
+      <div id="local-sessions"></div>
+    </section>
     <section class="card">
-      <h2>Apply with your profile</h2>
-      <p>Select a job below. Your chosen model fills the application using this profile and resume.</p>
+      <h2>Application queue</h2>
+      <p id="dispatcher-status" role="status">Checking queue worker…</p>
+      <p id="application-schedule" role="status"></p>
+      <p id="discovery-status" role="status">Checking discovery schedule…</p>
+      <details class="queue-options"><summary>Candidate, resume and application options</summary>
       <div class="operate-grid">
         <label>Candidate
           <select id="candidate"></select>
         </label>
         <div>
           <label>Active Resume</label>
+          <select id="queue-resume" aria-label="Resume for queued applications"></select>
           <div style="margin-top: 6px;">
             <span id="main-resume-filename" class="badge">None registered</span>
           </div>
@@ -87,10 +96,13 @@
           </select>
         </label>
       </div>
+      </details>
       <div class="main-action-bar">
-        <button id="start-application-btn" class="primary large" type="button">Start application</button>
-        <span id="selection">No jobs selected</span>
+        <button id="start-application-btn" class="primary" type="button">Queue selected</button>
+        <button id="queue-run-next" type="button" aria-describedby="queue-run-help">Wake existing queue</button>
+        <button id="queue-toggle" type="button">Enable automatic queue</button>
       </div>
+      <p id="queue-run-help">Select jobs below, sort them into the order you want, then choose Queue selected. This adds or prioritizes those jobs and runs them without waiting for the automatic schedule. Wake existing queue only wakes the worker: it takes earlier manual requests first, then the oldest ready job. An application already running finishes first.</p>
       <!-- Legacy controls preserved for compatibility -->
       <div hidden>
         <button id="mark-ready">Mark selected ready</button>
@@ -100,26 +112,66 @@
 
     <section class="card">
       <div class="section-title">
-        <h2>Applications Queue</h2>
+        <h2>Jobs</h2>
         <span id="queue-count"></span>
       </div>
+      <div class="job-filters">
+        <label>Search jobs<input id="job-search" type="search" placeholder="#, company, role, URL or source reference"></label>
+        <label>Show<select id="job-filter">
+          <option value="active">Unfinished</option>
+          <option value="attention">Needs attention</option>
+          <option value="submitted">Submitted</option>
+          <option value="canceled">Canceled</option>
+          <option value="all">All jobs</option>
+        </select></label>
+      </div>
+      <div class="job-filter-details">
+        <label>Source<select id="job-source-filter"><option value="">All sources</option></select></label>
+        <label>Country<select id="job-country-filter"><option value="">All countries</option></select></label>
+        <label>Assessment<select id="job-assessment-filter"><option value="">All assessments</option></select></label>
+        <label>Added from<input id="job-added-from" type="date"></label>
+        <label>Added through<input id="job-added-to" type="date"></label>
+        <button id="job-reset-filters" type="button">Clear filters</button>
+      </div>
+      <div class="bulk-actions">
+        <button id="queue-selected-jobs" type="button" class="primary">Queue selected</button>
+        <button id="select-unfinished" type="button">Select unfinished</button>
+        <button id="select-visible" type="button" hidden>Select visible canceled jobs</button>
+        <button id="clear-selection" type="button">Clear selection</button>
+        <span id="selection" role="status">No jobs selected</span>
+        <label class="cancel-reason">Reason<select id="cancel-reason" aria-label="Cancellation reason">
+          <option>Test job</option><option>Posting closed</option><option>Unable to complete</option><option>No longer interested</option><option>Manually applied</option>
+        </select></label>
+        <button id="cancel-selected" type="button">Cancel selected</button>
+        <button id="restore-selected" type="button" hidden>Restore selected</button>
+      </div>
+      <p id="queue-selection-order" class="cleanup-note"></p>
+      <p class="cleanup-note">Cancel keeps job history and portal accounts. Restore makes a job available to queue again.</p>
       <div class="table-wrap">
-        <table>
+        <table class="jobs-table">
+          <colgroup>
+            <col><col><col><col><col><col><col><col><col><col><col>
+          </colgroup>
           <thead>
             <tr>
-              <th style="width: 40px;">Select</th>
-              <th>Company &amp; Role</th>
-              <th>Status</th>
-              <th>Assessment</th>
+              <th title="Permanent job sequence number, assigned when first added"><button type="button" data-job-sort="sequence">#</button></th>
+              <th><button type="button" data-job-sort="company">Company &amp; Role</button></th>
+              <th><button type="button" data-job-sort="status">Status</button></th>
+              <th><button type="button" data-job-sort="assessment">Assessment</button></th>
+              <th><button type="button" data-job-sort="country">Country</button></th>
+              <th><button type="button" data-job-sort="posted">Posted date</button></th>
+              <th><button type="button" data-job-sort="source">Source</button></th>
+              <th><button type="button" data-job-sort="reference">Source reference</button></th>
+              <th title="First added to JobBot; rediscovery does not reset this date"><button type="button" data-job-sort="added">Added</button></th>
+              <th title="Latest recorded operator disposition, application outcome, or queue outcome"><button type="button" data-job-sort="disposition">Last disposition</button></th>
+              <th title="Successful attempt start to recorded completion, including waits during that attempt; excludes earlier attempts and time queued"><button type="button" data-job-sort="duration">Time to apply</button></th>
             </tr>
           </thead>
           <tbody id="queue-rows"></tbody>
         </table>
       </div>
-      <details style="margin-top: 16px;">
-        <summary>Add a Posting &amp; Technical Details</summary>
-        <div style="margin-top: 12px; padding: 12px; background: var(--bg-subtle); border-radius: 4px;">
-          <h3>Add Posting Manually</h3>
+      <section class="manual-intake">
+          <h3>Add a job</h3>
           <form id="intake-form">
             <label>Official URL
               <input id="job-url" type="url" required>
@@ -132,10 +184,21 @@
                 <input id="job-title" type="text">
               </label>
             </div>
-            <button type="submit">Add to intake</button>
+            <button type="submit">Add job</button>
+            <span>Add first, then select it and choose Queue selected.</span>
           </form>
-        </div>
-      </details>
+      </section>
+    </section>
+  </section>
+
+  <section id="tab-answers" class="tab" hidden>
+    <section class="card">
+      <div class="section-title">
+        <h2>Application questions</h2>
+        <button id="queue-answered-batch" type="button">Queue all answered applications</button>
+      </div>
+      <p>Answer the required questions that held up an application. Save for later, or queue it for the next application batch.</p>
+      <div id="answer-groups"></div>
     </section>
   </section>
 
@@ -154,7 +217,7 @@
       </div>
       <p id="run-state"></p>
       <div id="run-counts" class="stats"></div>
-      <p id="run-owner" class="mono"></p>
+      <details class="debug-details"><summary>Debug runtime details</summary><p id="run-owner" class="mono"></p></details>
       <div id="focused-context"></div>
       <details>
         <summary>Owned targets and bounded extensions</summary>
@@ -247,6 +310,28 @@
       </div>
       <p>Operational settings apply to new requests. Existing attempts retain their immutable snapshots.</p>
       <form id="settings-form">
+        <h3>Application model</h3>
+        <p id="model-executor-note">Choose the provider, then the model for new applications.</p>
+        <div id="model-setting-fields" class="settings-grid">
+          <label id="settings-worker-label">Worker<select id="settings-worker" data-setting="worker" data-kind="string"></select></label>
+          <label>Provider<select id="settings-provider" aria-describedby="model-catalog-status"></select></label>
+          <label id="settings-model-label">Model<select id="settings-model"></select></label>
+          <label id="settings-custom-provider-label" hidden>Custom provider<input id="settings-custom-provider" type="text" placeholder="Provider ID configured in your worker"></label>
+          <label id="settings-custom-model-label" hidden>Model ID<input id="settings-custom-model" type="text" placeholder="Exact model ID"></label>
+          <label id="settings-effort-label">Reasoning effort<select id="settings-effort"></select></label>
+        </div>
+        <p id="model-catalog-status" role="status"></p>
+        <button id="refresh-models" type="button">Refresh models</button>
+        <p>Save settings to use this selection for the next application. Running applications keep their model. Discovery uses its own executor configuration.</p>
+          <h3>Application time limit</h3>
+          <div class="settings-grid">
+            <label><input id="settings-time-limit-enabled" type="checkbox"> Stop applications at the time limit (uncheck for Off)</label>
+            <label>Time limit in minutes<input id="settings-time-limit-minutes" type="number" min="1" max="1440" step="1" value="30"></label>
+          </div>
+          <p>Default: 30 minutes per application. Includes model calls and recovery; excludes time queued. At the limit, JobBot stops the application and moves on after cleanup. Saved changes apply to new applications.</p>
+          <h3>Job discovery</h3>
+        <p>Find the strongest matches, up to the job limit. These settings apply to the next discovery run. Application pickup is separate.</p>
+        <div id="discovery-setting-fields" class="settings-grid"></div>
         <details open style="margin-bottom: 16px;">
           <summary>All Operational Settings</summary>
           <div id="setting-fields" class="settings-grid" style="margin-top: 12px;"></div>
@@ -355,6 +440,17 @@
     </section>
   </section>
 </main>
+
+<dialog id="job-url-dialog" aria-labelledby="job-url-title">
+  <form id="job-url-form">
+    <h2 id="job-url-title">Edit job URL</h2>
+    <p id="job-url-label"></p>
+    <p>Correct the link for this job. Its number, added date, history and source references are kept. Saving does not navigate an open application.</p>
+    <label>Job URL<input id="job-edit-url" type="url" required></label>
+    <p id="job-url-error" class="error" role="alert"></p>
+    <div class="toolbar"><button id="job-url-save" type="submit" class="primary">Save URL</button><button id="job-url-cancel" type="button">Cancel</button></div>
+  </form>
+</dialog>
 
 <footer>
   Evidence-led operations · Review-only development defaults · No automatic letter generation

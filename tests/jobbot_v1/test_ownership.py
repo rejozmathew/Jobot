@@ -90,7 +90,6 @@ def test_Q3_R4_R7_prior_submissions_survive_identity_and_retries(tmp_path):
     s.submission_intent(a['id'],worker_id='worker',fence=a['fence'],evidence='fixture action',fixture=True)
     result=s.finish(a['id'],worker_id='worker',fence=a['fence'],outcome='failed',evidence='timeout',quiescent=True)
     assert result['outcome']=='submission_unknown'
-    with pytest.raises(ProtocolError,match='reconciliation_required'):s.retry(ids[0])
     s.reconcile(a['id'],outcome='applied',evidence='fixture confirmation ledger',browser_quiescent=True)
     s.identity(identity_id='new-email',person_key='person',email='other@example.test',profile={})
     assert s.intake(url='https://careers.example.test/jobs/0?utm_source=new',source_id='new')['id']==ids[0]

@@ -20,3 +20,22 @@ def test_fast_forward_is_available_and_invokes_shared_runner(monkeypatch):
     result=json.loads(controller.handle({'operation':'fast_forward','parameters':{'target_id':'tab','seconds':60}},session_id='s'))
     assert result['status']=='waiting'
     assert calls==[({'shared':'config'},client,owner,{'target_id':'tab','seconds':60})]
+
+
+def test_local_plugin_uses_session_metadata_and_scoped_transport(monkeypatch):
+    from job_applier import application_runtime
+    controller=hermes_plugin.PluginController('unused')
+    monkeypatch.setattr(controller,'_config',lambda:{'transport':'local'})
+    controller.runtime['ordinary-thread']={'model':'observed-model','provider':'observed-provider','reasoning_effort':'low'}
+    calls=[]
+    def start(cfg,**params):
+        calls.append(params);return {'session_id':'local-session','state':'connected'}
+    monkeypatch.setattr(application_runtime,'start',start)
+    result=json.loads(controller.handle({'operation':'start','parameters':{'url':'https://example.test/job'}},session_id='ordinary-thread'))
+    assert result['session_id']=='local-session'
+    assert calls[0]['driver_id']=='ordinary-thread' and calls[0]['metadata']['model']=='observed-model'
+    monkeypatch.setattr(application_runtime,'session_call',lambda cfg,sid,op,params,driver:dict(session_id=sid,operation=op,driver=driver))
+    result=json.loads(controller.handle({'operation':'fast_forward'},session_id='ordinary-thread'))
+    assert result=={'session_id':'local-session','operation':'fast_forward','driver':'ordinary-thread'}
+    assert controller.route('pre_tool_call',session_id='ordinary-thread',tool_name='browser_click')['action']=='block'
+    assert controller._thread is None

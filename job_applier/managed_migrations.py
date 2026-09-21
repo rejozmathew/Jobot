@@ -150,7 +150,130 @@ def migration_14(db):
     add_columns(db,'owned_targets',{'identity_key':'TEXT'})
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14)]
+def migration_15(db):
+    db.execute('''CREATE TABLE browser_workspaces (
+        id TEXT PRIMARY KEY, config_json TEXT NOT NULL, host_id TEXT,
+        host_identity_json TEXT, host_seen_at TEXT, state TEXT NOT NULL DEFAULT 'offline',
+        reason TEXT, browser_identity_json TEXT, updated_at TEXT NOT NULL)''')
+    db.execute('''CREATE TABLE application_sessions (
+        id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, request_key TEXT NOT NULL,
+        job_id TEXT NOT NULL REFERENCES jobs(id), identity_id TEXT NOT NULL REFERENCES candidates(id),
+        driver_id TEXT NOT NULL, workspace_id TEXT REFERENCES browser_workspaces(id),
+        run_id TEXT REFERENCES runs(id), attempt_id INTEGER REFERENCES application_attempts(id),
+        target_id TEXT, state TEXT NOT NULL, reason TEXT, requested_at TEXT NOT NULL,
+        preparing_at TEXT, connected_at TEXT, ended_at TEXT, driver_seen_at TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}')''')
+    db.execute('CREATE TABLE workspace_profile_aliases (profile TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES browser_workspaces(id))')
+    db.execute("CREATE UNIQUE INDEX one_workspace_session ON application_sessions(workspace_id) WHERE ended_at IS NULL AND workspace_id IS NOT NULL")
+    db.execute("CREATE UNIQUE INDEX one_local_job ON application_sessions(job_id) WHERE ended_at IS NULL")
+    # Old in-memory/API workers cannot acquire a locally reserved job or profile.
+    # These guards also cover the interval before readiness creates an attempt.
+    db.execute('''CREATE TRIGGER local_reserved_attempt BEFORE INSERT ON application_attempts
+        WHEN NEW.workflow != 'local-session-v1' AND (EXISTS (
+            SELECT 1 FROM application_sessions s WHERE s.ended_at IS NULL AND s.job_id=NEW.job_id)
+            OR EXISTS (SELECT 1 FROM workspace_profile_aliases WHERE profile=NEW.browser_profile))
+        BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
+    for action in ('INSERT', 'UPDATE'):
+        db.execute(f'''CREATE TRIGGER local_reserved_lease_{action.lower()} BEFORE {action} ON browser_leases
+            WHEN NEW.state != 'released' AND EXISTS (
+                SELECT 1 FROM application_sessions s WHERE s.workspace_id=NEW.profile
+                AND s.ended_at IS NULL AND (s.attempt_id IS NULL OR s.attempt_id!=NEW.attempt_id))
+            BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
+        db.execute(f'''CREATE TRIGGER legacy_workspace_lease_{action.lower()} BEFORE {action} ON browser_leases
+            WHEN NEW.state!='released' AND EXISTS(SELECT 1 FROM workspace_profile_aliases WHERE profile=NEW.profile)
+            BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
+    db.execute('''CREATE TABLE account_coordination (
+        person_key TEXT NOT NULL, namespace TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES application_sessions(id),
+        acquired_at TEXT NOT NULL, PRIMARY KEY(person_key,namespace))''')
+
+
+def migration_16(db):
+    db.execute('''CREATE TABLE application_questions (
+        id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES jobs(id),identity_id TEXT NOT NULL REFERENCES candidates(id),
+        first_attempt_id INTEGER NOT NULL REFERENCES application_attempts(id),last_attempt_id INTEGER NOT NULL REFERENCES application_attempts(id),
+        question_key TEXT NOT NULL,field TEXT NOT NULL,question TEXT NOT NULL,kind TEXT NOT NULL,
+        options_json TEXT NOT NULL,context_json TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,
+        answer_json TEXT,answer_source TEXT,answered_at TEXT,created_at TEXT NOT NULL,last_seen_at TEXT NOT NULL,
+        UNIQUE(job_id,identity_id,question_key))''')
+    db.execute('''CREATE TABLE application_question_answers (
+        question_id TEXT NOT NULL REFERENCES application_questions(id),revision INTEGER NOT NULL,
+        answer_json TEXT NOT NULL,source TEXT NOT NULL,evidence TEXT NOT NULL,created_at TEXT NOT NULL,
+        PRIMARY KEY(question_id,revision))''')
+    for action in ('UPDATE','DELETE'):
+        db.execute(f"CREATE TRIGGER immutable_question_answers_{action.lower()} BEFORE {action} ON application_question_answers BEGIN SELECT RAISE(ABORT,'immutable answer history'); END")
+    db.execute('''CREATE TABLE answer_retry_requests (
+        id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES jobs(id),identity_id TEXT NOT NULL REFERENCES candidates(id),
+        state TEXT NOT NULL,requested_at TEXT NOT NULL,session_id TEXT REFERENCES application_sessions(id),started_at TEXT)''')
+    db.execute("CREATE UNIQUE INDEX one_queued_answer_retry ON answer_retry_requests(job_id,identity_id) WHERE state='queued'")
+
+
+def migration_17(db):
+    # Requests may share a posting. Browser profile allocation is independent.
+    db.execute('DROP INDEX IF EXISTS uq_managed_active_job')
+    db.execute('DROP INDEX IF EXISTS one_local_job')
+    db.execute('DROP TRIGGER IF EXISTS local_reserved_attempt')
+    db.execute('''CREATE TRIGGER local_reserved_attempt BEFORE INSERT ON application_attempts
+        WHEN NEW.workflow != 'local-session-v1' AND EXISTS (
+            SELECT 1 FROM workspace_profile_aliases WHERE profile=NEW.browser_profile)
+        BEGIN SELECT RAISE(ABORT,'local_runtime_upgrade_required'); END''')
+
+
+def migration_18(db):
+    db.execute('''CREATE TABLE dispatch_queue (
+        id TEXT PRIMARY KEY,request_id TEXT NOT NULL,job_id TEXT NOT NULL REFERENCES jobs(id),
+        identity_id TEXT NOT NULL REFERENCES candidates(id),resume_asset_id TEXT NOT NULL REFERENCES document_assets(id),
+        state TEXT NOT NULL,created_at TEXT NOT NULL,started_at TEXT,ended_at TEXT,
+        executor_identity_json TEXT,session_id TEXT REFERENCES application_sessions(id),outcome TEXT,detail TEXT,
+        UNIQUE(request_id,job_id))''')
+    db.execute("CREATE UNIQUE INDEX one_queued_job_identity ON dispatch_queue(job_id,identity_id) WHERE state!='finished'")
+    db.execute('''CREATE TABLE dispatch_control (
+        id INTEGER PRIMARY KEY CHECK(id=1),enabled INTEGER NOT NULL DEFAULT 0,
+        wake_requested INTEGER NOT NULL DEFAULT 0,heartbeat_at TEXT,worker_identity_json TEXT,
+        current_item TEXT,detail TEXT,next_automatic_at TEXT)''')
+    db.execute('INSERT INTO dispatch_control(id) VALUES (1)')
+
+
+def migration_19(db):
+    # Operator disposition is independent of immutable application evidence.
+    add_columns(db, 'jobs', {'disposition': "TEXT NOT NULL DEFAULT 'active'",
+                            'disposition_reason': 'TEXT', 'disposition_at': 'TEXT'})
+
+
+def migration_20(db):
+    db.execute('''CREATE TABLE discovery_runs (
+        id TEXT PRIMARY KEY,started_at TEXT NOT NULL,ended_at TEXT,
+        process_identity_json TEXT NOT NULL,batch_size INTEGER NOT NULL,
+        enqueue_authorized INTEGER NOT NULL,executor_exit_code INTEGER,
+        record_file_exists INTEGER,error TEXT)''')
+    db.execute('CREATE TABLE discovery_control (id INTEGER PRIMARY KEY,last_checked_at TEXT)')
+    db.execute('INSERT INTO discovery_control(id) VALUES (1)')
+
+
+def migration_21(db):
+    # Optional provenance only: old sources and queue outcomes remain unchanged.
+    db.execute('''CREATE TABLE source_observations (
+        id TEXT PRIMARY KEY,source_record_id TEXT NOT NULL REFERENCES job_sources(id),
+        producer TEXT,discovery_run_id TEXT,discovery_profile TEXT,recorded_at TEXT NOT NULL)''')
+    db.execute('CREATE INDEX observations_by_source ON source_observations(source_record_id)')
+    add_columns(db, 'dispatch_queue', {'enqueue_origin':'TEXT', 'producer':'TEXT',
+                                      'discovery_run_id':'TEXT', 'discovery_profile':'TEXT'})
+
+
+def migration_22(db):
+    add_columns(db, 'dispatch_queue', {'immediate_requested_at': 'TEXT'})
+    # Remember every operator request even when it promotes an existing queue item.
+    db.execute('''CREATE TABLE dispatch_immediate_requests (
+        request_id TEXT NOT NULL,job_id TEXT NOT NULL REFERENCES jobs(id),
+        item_id TEXT NOT NULL REFERENCES dispatch_queue(id),requested_at TEXT NOT NULL,
+        PRIMARY KEY(request_id,job_id))''')
+
+
+def migration_23(db):
+    from .managed_identity import retain_posting_aliases
+    retain_posting_aliases(db)
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23)]
 
 
 def migrate(path):

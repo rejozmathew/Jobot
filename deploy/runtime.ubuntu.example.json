@@ -1,0 +1,34 @@
+{
+  "instance_id": "REPLACE_WITH_EXISTING_MANAGED_INSTANCE_ID",
+  "db_path": "/home/REPLACE/.local/share/jobbot/managed.db",
+  "transport": "local",
+  "base_url": "http://127.0.0.1:60158",
+  "operator_token_env": "JOBBOT_OPERATOR_TOKEN",
+  "worker_token_env": "JOBBOT_WORKER_TOKEN",
+  "worker_id": "local-hermes",
+  "identity_id": "REPLACE_WITH_EXISTING_CANDIDATE_ID",
+  "resume_asset_id": "REPLACE_WITH_REGISTERED_LINUX_RESUME_ASSET_ID",
+  "spool_dir": "/home/REPLACE/.local/share/jobbot/private-spool",
+  "credential_profile_path": "/home/REPLACE/.config/jobbot/existing-private-profile.json",
+  "answer_policy_profile_path": "/home/REPLACE/.config/jobbot/existing-private-profile.json",
+  "mailbox_provider": "himalaya",
+  "himalaya_executable": "/home/REPLACE/.local/bin/himalaya",
+  "himalaya_account": "REPLACE_WITH_EXISTING_APPLICATION_MAIL_ACCOUNT",
+  "himalaya_config_path": "/home/REPLACE/.config/himalaya/config.toml",
+  "hermes_command": ["/home/REPLACE/.local/bin/hermes", "chat", "--query-file", "{prompt_file}"],
+  "harvest_hermes_command": ["/home/REPLACE/.local/bin/hermes", "--profile", "jobbot-discovery", "chat", "--oneshot", "--pass-session-id", "--query-file", "{prompt_file}"],
+  "queue_interval_seconds": 10800,
+  "harvest_instructions": "Use the selected candidate's current leadership, location and work-authorization preferences. Verify each direct employer link is live. Do not requeue recorded successes.",
+  "concurrency_limit": 1,
+  "require_simplify": true,
+  "legacy_history_paths": [],
+  "workspaces": [
+    {
+      "id": "vm-browser",
+      "user_data_dir": "/home/REPLACE/.local/share/jobbot/browser-profile",
+      "browser_executable": "/usr/bin/google-chrome",
+      "cdp_url": "http://127.0.0.1:9222",
+      "mode": "headed"
+    }
+  ]
+}

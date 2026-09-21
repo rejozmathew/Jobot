@@ -6,7 +6,10 @@ PAYLOAD_FIELDS = frozenset({
     'phase', 'helper_id', 'helper_version', 'lesson_id', 'field', 'resolution',
     'reason_code', 'provider', 'model', 'response_model', 'input_tokens', 'output_tokens', 'operation',
     'source', 'fallback_reason', 'residual_fields', 'field_key', 'field_label', 'elapsed_seconds',
-    'field_attribution',
+    'field_attribution', 'activity', 'next_step',
+    'dispatch_id','document_id','frame_id',
+    'writer_documents','prior_document_cancelled',
+    'stage_id','task_id','parent_id','task_state','handler','execution','verification_result',
 })
 SECRET = re.compile(r'''(?ix)(?:\b(?:password|passwd|otp|(?:access_|refresh_|reset_)?token|api[_-]?key|cookie|authorization|secret)[\\"']*\s*[=:]|\bbearer\s+\S+)''')
 
@@ -15,9 +18,17 @@ def safe_text(value, limit=300):
     if not isinstance(value, str): return ''
     # Reject the entire secret-bearing text, including quoted/escaped JSON values.
     if SECRET.search(value): return '[REDACTED]'
+    if re.search(r'(?i)(?:security|verification|authentication)[\s_-]*code\s*(?::|=|is\b)\s*[\w-]+',value):return '[REDACTED]'
     value=re.sub(r'\b\d{4,8}\b','[NUMBER]',value)
     value=re.sub(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}','[EMAIL]',value)
     return value[:limit]
+
+
+def provenance_text(value):
+    """Optional process identifiers retain numeric/UUID segments for correlation."""
+    if not isinstance(value,str) or not value.strip():return None
+    if SECRET.search(value):return '[REDACTED]'
+    return value.strip()[:300]
 
 
 def safe_payload(payload):
@@ -27,6 +38,14 @@ def safe_payload(payload):
     result={}
     for key,value in payload.items():
         if key not in PAYLOAD_FIELDS: continue
+        if key=='writer_documents' and isinstance(value,list):
+            result[key]=[dict(document_id=d['document_id'],**{k:d.get(k) is True for k in ('pending','participant','settled')})
+                for d in value if isinstance(d,dict) and isinstance(d.get('document_id'),str) and re.fullmatch(
+                    r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}',d['document_id'])]
+            continue
+        if key=='prior_document_cancelled':
+            if type(value) is bool:result[key]=value
+            continue
         if key in ('input_tokens','output_tokens'):
             if isinstance(value,int) and not isinstance(value,bool) and value>=0: result[key]=value
             continue
@@ -38,6 +57,13 @@ def safe_payload(payload):
             continue
         if not isinstance(value,str): continue
         for secret in secrets: value=value.replace(secret,'[REDACTED]')
+        # Correlation IDs are structured identifiers, not prose or mailbox codes.
+        # Masking numeric UUID segments breaks linkage between the captured
+        # browser dispatch and its event. Other strings still use redaction.
+        if key in ('dispatch_id','document_id','frame_id') and re.fullmatch(
+                r'(?:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9a-fA-F]{16,64}|root)',value):
+            result[key]=value
+            continue
         result[key]=safe_text(value)
     return result
 

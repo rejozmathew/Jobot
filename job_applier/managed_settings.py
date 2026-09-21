@@ -10,8 +10,9 @@ from .managed_redaction import reject_secrets
 DEFAULTS={'mode':'development','submission_mode':'review','worker':'external','autofill':'simplify',
     'screenshots':False,'timezone':'UTC','trigger':'manual','allowed_fallback':'targeted',
     'field_seconds':60,'no_progress_seconds':45,'attempt_seconds':300,'lease_seconds':60,
-    'reasoning_provider':None,'reasoning_model':None,'reasoning_effort':'low','learning_activation':'manual',
-    'notifications':'none','excluded_companies':[],'market_countries':['US'],'browser_mode':'headed'}
+    'reasoning_provider':None,'reasoning_model':None,'reasoning_effort':'low','application_model_override':False,'learning_activation':'manual',
+    'notifications':'none','excluded_companies':[],'market_countries':['US'],'browser_mode':'headed',
+    'discovery_batch_size':5,'discovery_interval_hours':4,'application_time_limit_minutes':30}
 CHOICES={'mode':('development','pilot'),'submission_mode':('review','submit'),
     'worker':('external','hermes'),'autofill':('simplify','native'),'trigger':('manual',),
     'allowed_fallback':('targeted','block'),'learning_activation':('manual',),'notifications':('none',),
@@ -27,11 +28,19 @@ def validate_settings(values):
     for key,allowed in CHOICES.items():
         if out[key] not in allowed:raise ProtocolError('unsupported_'+key)
     if type(out['screenshots']) is not bool:raise ProtocolError('invalid_screenshot_policy')
+    if type(out['application_model_override']) is not bool:raise ProtocolError('invalid_model_override')
+    if type(out['application_time_limit_minutes']) is not int or not 0<=out['application_time_limit_minutes']<=1440:
+        raise ProtocolError('invalid_application_time_limit')
     if out['mode']=='development' and out['submission_mode']!='review':raise ProtocolError('development_submission_disabled')
     if out['timezone'] not in available_timezones()|{'UTC'}:raise ProtocolError('unsupported_timezone')
     for key,(low,high) in BOUNDS.items():
         value=out[key]
         if type(value) not in (int,float) or not math.isfinite(value) or not low<=value<=high:raise ProtocolError('invalid_budget')
+    if type(out['discovery_batch_size']) is not int or not 1<=out['discovery_batch_size']<=100:
+        raise ProtocolError('invalid_discovery_batch_size')
+    hours=out['discovery_interval_hours']
+    if type(hours) not in (int,float) or not math.isfinite(hours) or not 1<=hours<=168:
+        raise ProtocolError('invalid_discovery_interval_hours')
     for key in ('reasoning_provider','reasoning_model'):
         if out[key] is not None and (not isinstance(out[key],str) or not PUBLIC_ID.fullmatch(out[key])):raise ProtocolError('invalid_reasoning_selection')
     if bool(out['reasoning_provider'])!=bool(out['reasoning_model']):raise ProtocolError('incomplete_reasoning_selection')
@@ -41,6 +50,10 @@ def validate_settings(values):
 
 
 class SettingsServices:
+    def model_catalog(self, *, refresh=False):
+        from .model_settings import model_catalog
+        return model_catalog(getattr(self, 'executor_config', None), refresh=refresh)
+
     @staticmethod
     def _reasoning_matches(run,capabilities):
         snapshot=json.loads(run['settings_json'])
@@ -54,7 +67,7 @@ class SettingsServices:
 
     def _settings_record(self,db):
         row=db.execute('SELECT * FROM settings_revisions ORDER BY version DESC LIMIT 1').fetchone()
-        if row:return {'version':row['version'],'values':json.loads(row['values_json'])}
+        if row:return {'version':row['version'],'values':dict(DEFAULTS)|json.loads(row['values_json'])}
         original=json.loads(db.execute('SELECT settings_json FROM instance WHERE id=?',(self.instance_id,)).fetchone()[0])
         return {'version':1,'values':dict(DEFAULTS)|original}
 

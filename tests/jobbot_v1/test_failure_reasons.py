@@ -430,6 +430,7 @@ class FakeElement {{
     this.attributes = {{}};
     this.dataset = {{}};
     this.hidden = false;
+    this.value = '';
     const classes = new Set();
     this.classList = {{
       classes,
@@ -457,11 +458,15 @@ class FakeElement {{
   }}
   setAttribute(attr, val) {{ this.attributes[attr] = String(val); }}
   getAttribute(attr) {{ return this.attributes[attr] !== undefined ? this.attributes[attr] : null; }}
+  closest() {{ return this; }}
+  querySelector(sel) {{ return this.querySelectorAll(sel)[0] || null; }}
   querySelectorAll(sel) {{
     const res = [];
     function scan(el) {{
       for (const c of el.children) {{
-        if (c.tagName && sel.toUpperCase().includes(c.tagName)) res.push(c);
+        if (c.tagName && (sel.startsWith('.') ? c.className.split(' ').includes(sel.slice(1)) :
+          sel.startsWith('details[') ? c.tagName==='DETAILS' && 'progressKey' in c.dataset :
+          sel.toUpperCase()===c.tagName)) res.push(c);
         scan(c);
       }}
     }}
@@ -482,7 +487,8 @@ const context = {{
     getElementById: (id) => getEl(id),
     createElement: (tag) => new FakeElement(tag),
     createTextNode: (text) => new FakeElement('SPAN', text),
-    querySelectorAll: (sel) => []
+    querySelectorAll: (sel) => [],
+    querySelector: (sel) => sel.startsWith('[data-job-sort=') ? {{dataset: {{label: 'Created'}}}} : null
   }},
   Intl: globalThis.Intl,
   Date: globalThis.Date,

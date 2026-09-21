@@ -5,7 +5,7 @@ import re
 from urllib.parse import urlsplit,urlunsplit
 from .managed_shared import ProtocolError,uid
 from .managed_redaction import safe_text
-from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope,is_workday_candidate_home
+from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope,is_workday_candidate_home,is_workday_application_scope,same_job_url,application_match
 
 
 class RuntimeServices:
@@ -16,7 +16,11 @@ class RuntimeServices:
             payload=json.loads(row['payload_json'])
             if row['event_type'] in ('navigation_verified','field_verified'):return {}
             if row['event_type']=='field_context':
-                return {k:payload[k] for k in ('page','field','category')} if payload.get('field') else {}
+                return {k:payload[k] for k in ('page','field','category','field_label','stage_id','task_id','parent_id','activity','source')
+                        if k in payload} if payload.get('field') or payload.get('task_id') else {}
+            if payload.get('stage_id') and payload.get('task_id') and row['event_type'] in ('checkpoint','phase_changed'):
+                if payload.get('task_state') in ('completed','unsuccessful'):return {}
+                return {k:payload[k] for k in ('page','field','category','field_label','stage_id','task_id','parent_id','activity','source') if k in payload}
             # Completion describes action-start attribution, never current scope.
             # Keep legacy manual event support only when no semantic marker exists.
             if legacy is None and row['event_type']=='tool_finished' and payload.get('field'):
@@ -24,12 +28,15 @@ class RuntimeServices:
         return legacy or {}
 
     def _strategy_check(self,db,a,tool_name):
+        from .managed_sessions import local_session
         cfg=json.loads(a['settings_json'])
         events=db.execute('SELECT * FROM managed_events WHERE attempt_id=? AND stale=0 ORDER BY julianday(observed_at) DESC,rowid DESC',(a['id'],)).fetchall()
         payloads=[(row,json.loads(row['payload_json'])) for row in events]
         phase=next((p.get('phase') for row,p in payloads if row['event_type']=='phase_changed' and p.get('phase')),None)
         if cfg.get('allowed_fallback')=='block' and phase in ('residual_fields','native_fallback'):
             raise ProtocolError('fallback_not_allowed')
+        if local_session(db,a['id']):
+            return self._field_context(db,a)
         extra=db.execute('SELECT COALESCE(SUM(seconds),0) FROM budget_extensions WHERE attempt_id=?',(a['id'],)).fetchone()[0]
         context=self._field_context(db,a)
         if context:
@@ -40,6 +47,11 @@ class RuntimeServices:
         return context
 
     def _budget_check(self,db,a):
+        from .managed_sessions import local_session
+        if local_session(db,a['id']):
+            # Reasoning gaps are visible telemetry. An optional hard maximum is
+            # enforced by the host terminating its owned browser before release.
+            return
         cfg=json.loads(a['settings_json']);now=datetime.fromisoformat(self.now())
         extra=db.execute('SELECT COALESCE(SUM(seconds),0) FROM budget_extensions WHERE attempt_id=?',(a['id'],)).fetchone()[0]
         if (now-datetime.fromisoformat(a['started_at'])).total_seconds()>cfg.get('attempt_seconds',300)+extra:raise ProtocolError('attempt_budget_exceeded')
@@ -60,16 +72,21 @@ class RuntimeServices:
         identity=job_key(canonical)
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence);job=self._get(db,'jobs',a['job_id']);expected=urlsplit(canonical_url(job['url']))
+            from .managed_sessions import local_session
+            session=local_session(db,attempt_id)
+            if session and session['target_id']!=target_id:raise ProtocolError('target_not_owned')
             verified=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone()
             # An account alias proves credential scope, NOT requisition/tab ownership.
-            # Alternate URLs need a verified job identity; only the conventional
-            # same-origin /apply child preserves the posting identity implicitly.
+            # Alternate URLs need the same verified job identity. Known ATS
+            # requisitions retain identity across their normal application steps.
             apply_child=(bool(expected.path) and parsed.scheme==expected.scheme and parsed.netloc==expected.netloc
                 and parsed.path==expected.path+'/apply' and parsed.query==expected.query)
+            if (expected.hostname or '').endswith(('.myworkdayjobs.com','.icims.com')):
+                apply_child=is_same_application_scope(job['url'],canonical)
             if not verified and not apply_child:raise ProtocolError('target_job_mismatch')
             old=db.execute('SELECT * FROM owned_targets WHERE profile=? AND target_id=? AND state!=?',(a['browser_profile'],target_id,'closed')).fetchone()
             if old:
-                if old['attempt_id']!=attempt_id or old['identity_key']!=identity:raise ProtocolError('target_owned_elsewhere')
+                if old['attempt_id']!=attempt_id or (old['identity_key']!=identity and not same_job_url(old['url'],canonical)):raise ProtocolError('target_owned_elsewhere')
                 return dict(old)
             prior=db.execute('SELECT * FROM owned_targets WHERE attempt_id=? AND target_id=?',(attempt_id,target_id)).fetchone()
             if prior:raise ProtocolError('closed_target_cannot_rebind')
@@ -94,6 +111,15 @@ class RuntimeServices:
             return dict(self._get(db,'owned_targets',target['id']))
 
     def browser_observe(self,attempt_id,*,worker_id,fence,target_id=None,cdp_url=None,expected_url=None):
+        from .managed_sessions import local_session
+        with self.tx() as db:
+            session=local_session(db,attempt_id)
+            if session:
+                workspace=json.loads(self._get(db,'browser_workspaces',session['workspace_id'])['config_json'])
+                if cdp_url and cdp_url!=workspace['cdp_url']:raise ProtocolError('workspace_endpoint_mismatch')
+                cdp_url=workspace['cdp_url']
+                if target_id and target_id!=session['target_id']:raise ProtocolError('target_not_owned')
+                target_id=session['target_id']
         endpoint_url=cdp_url or "http://127.0.0.1:9222"
         endpoint=urlsplit(endpoint_url)
         if (endpoint.scheme!="http" or endpoint.hostname not in ("127.0.0.1","localhost","::1")
@@ -111,9 +137,10 @@ class RuntimeServices:
             if target is None:raise ProtocolError('target_not_owned')
             if expected_url is not None:
                 expected_canonical=canonical_url(expected_url)
-                if expected_canonical!=canonical_url(target['url']) and expected_canonical!=canonical_url(job['url']):
+                if not same_job_url(expected_canonical,target['url']) and not same_job_url(expected_canonical,job['url']):
                     raise ProtocolError('target_job_mismatch')
         settings=json.loads(a['settings_json'])
+        anchor=(json.loads(session['metadata_json']).get('application_identity_url') if session else None) or job['url']
         def verify_url(url):
             try:
                 identity=job_key(canonical_url(url))
@@ -123,18 +150,21 @@ class RuntimeServices:
                 self._owner(db,attempt_id,worker_id,fence)
                 related=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone() if identity else None
                 if identity!=target['identity_key'] and not related:
-                    if not is_same_application_scope(job['url'], url) and not is_same_application_scope(target['url'], url) and not is_workday_candidate_home(job['url'], url):
-                        raise ProtocolError('target_job_mismatch')
+                    if urlsplit(anchor)[:2]==urlsplit(url)[:2] and application_match(anchor,url)['status']=='different_job':return False
+                    if not is_same_application_scope(job['url'], url) and not is_same_application_scope(anchor,url) and not is_same_application_scope(target['url'], url) and not is_workday_candidate_home(job['url'], url):
+                        return False
+                return True
         async def read_bound_browser():
             import asyncio
             from .cdp_client import CDPBrowser
-            from .simplify_boundary import SimplifyBoundary
             browser=await CDPBrowser.connect(endpoint_url,target_id=target['target_id'],expected_mode=settings.get('browser_mode','headed'))
             try:
                 page=await browser.get_current_page()
-                verify_url(await page.evaluate('location.href'))
-                boundary=SimplifyBoundary(page,budget_seconds=5)
-                before=await boundary.observe()
+                before_url=await page.evaluate('location.href')
+                before_scope=verify_url(before_url)
+                from .browser_controls import observe_writers
+                async def read_writers():return await observe_writers(page,{'job':dict(job,url=before_url) if before_scope else dict(job),'attempt':dict(a)})
+                before=await read_writers()
                 # Only a native exact-requisition confirmation can settle a submit
                 # after the extension disappears. This is read-only and server-owned.
                 from .workday_fast import WORKDAY_OBSERVE
@@ -142,24 +172,42 @@ class RuntimeServices:
                     live_url=await page.evaluate('location.href')
                     if not a['submit_intent_at'] or not is_workday_candidate_home(job['url'],live_url):
                         return False
-                    result=await page.evaluate_function(WORKDAY_OBSERVE,{'requisition':job['requisition_id'] or job['url'].rstrip('/').rsplit('_',1)[-1]})
+                    from .managed_identity import job_requisition
+                    result=await page.evaluate_function(WORKDAY_OBSERVE,{'requisition':job_requisition(dict(job))})
                     return isinstance(result,dict) and result.get('submitted') is True
                 confirmed_before=await native_confirmation() if not before.get('panel') else False
                 await asyncio.sleep(0.15)
-                after=await boundary.observe()
-                verify_url(after['url'])
-                verify_url(await page.evaluate('location.href'))
+                after=await read_writers()
+                # The observer deliberately omits query parameters from its public
+                # URL. Workday login ownership depends on the full job redirect.
+                after_url=await page.evaluate('location.href')
+                after_scope=verify_url(after_url)
+                # Read-only audit remains available even when a writer prevents repair.
+                audit_observation=None
+                if not after.get('workday') and not after.get('greenhouse') and after.get('status') in ('complete','needs_review','unknown','missing','unsupported'):
+                    try:
+                        from .browser_controls import observe
+                        audit_observation=await observe(page,{'job':dict(job,url=after_url) if after_scope else dict(job),'attempt':dict(a)})
+                    except Exception:pass
+                if after_scope and before_url==after_url:
+                    try:
+                        from .browser_controls import FORM
+                        metadata=await page.evaluate_function(FORM,{'method':'metadata'})
+                        self.observe_job_metadata(attempt_id,worker_id=worker_id,fence=fence,metadata=metadata)
+                    except Exception:pass  # Discovery does not affect writer/ownership evidence.
                 if settings.get('mode')=='pilot' and after.get('source')=='fixture':
                     raise ProtocolError('official_extension_observation_required')
-                stable=all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
+                stable=before_url==after_url and all(before.get(k)==after.get(k) for k in ('url','fingerprint','page_ref','page_signature','status'))
+                stable=stable and before.get('application_frames')==after.get('application_frames')
                 confirmed=confirmed_before and not after.get('panel') and await native_confirmation()
-                return after,stable,browser.observed_mode,confirmed
+                match={'status':'same_job'} if before_scope and after_scope else application_match(job['url'],after_url)
+                return after,stable,browser.observed_mode,confirmed,match,after_url,audit_observation
             finally:
                 await browser.close()
         self.action_start(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,tool_name='browser_observe',writes_browser=False)
         try:
             import asyncio
-            obs,stable,observed_mode,native_confirmed=asyncio.run(read_bound_browser())
+            obs,stable,observed_mode,native_confirmed,match,live_url,audit_observation=asyncio.run(read_bound_browser())
             from .managed_context import platform_for_url
             obs_url=obs.get('url') or target['url']
             detected_platform=platform_for_url(obs_url)
@@ -169,9 +217,20 @@ class RuntimeServices:
                 other_actions=db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND id!=?',(attempt_id,action_id)).fetchone()
                 unended_writer=db.execute('SELECT 1 FROM managed_actions WHERE attempt_id=? AND ended_at IS NULL AND writes_browser=1 AND id!=?',(attempt_id,action_id)).fetchone()
                 prior_writer=a['writer_state']
-                has_active_autofill=(prior_writer=='active' or bool(unended_writer))
+                has_active_autofill=(prior_writer in ('active','unknown') or bool(unended_writer))
+                documents=obs.get('writer_documents') or ([{'document_id':obs['writer_document_id'],
+                    'pending':bool(obs.get('writer_pending'))}] if obs.get('writer_document_id') else [])
+                previous=db.execute("SELECT payload_json FROM managed_events WHERE attempt_id=? AND json_extract(payload_json,'$.operation')='writer_documents' ORDER BY rowid DESC LIMIT 1",(attempt_id,)).fetchone()
+                prior_documents=json.loads(previous[0]).get('writer_documents',[]) if previous else []
+                old_ids={d.get('document_id') for d in prior_documents if d.get('pending')} or {d.get('document_id') for d in prior_documents}
+                new_ids={d.get('document_id') for d in documents}
+                document_cancelled=bool(old_ids and new_ids and None not in old_ids|new_ids and not old_ids&new_ids and
+                    not obs.get('frame_diagnostics') and not obs.get('writer_pending'))
 
-                if status=='active':
+                if unended_writer:
+                    new_writer='active'
+                    quiescent=False
+                elif status=='active' or obs.get('writer_pending'):
                     new_writer='active'
                     quiescent=False
                 elif stable and native_confirmed and a['submit_intent_at'] and not other_actions:
@@ -181,11 +240,13 @@ class RuntimeServices:
                     known_account_ready=(status=='login_required' and any(
                         (obs.get('controls') or {}).get(k,{}).get('enabled')
                         for k in ('create_account_autofill','create_account','sign_in')))
-                    if stable and obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready):
+                    explicit_settlement=status=='unsupported' and obs.get('writer_safe') and not any(
+                        obs.get('activity',{}).get(k) for k in ('busy_indicator','explicit_writer'))
+                    if stable and (document_cancelled or obs.get('settled_evidence') or obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready or explicit_settlement)):
                         new_writer='idle'
                         quiescent=True
                     else:
-                        new_writer='active'
+                        new_writer='unknown'
                         quiescent=False
                 else:
                     if stable:
@@ -203,18 +264,45 @@ class RuntimeServices:
                 if detected_platform != 'unknown':
                     db.execute('UPDATE application_attempts SET platform=? WHERE id=?',(detected_platform,attempt_id))
             self.action_end(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,status='success')
+            if documents and documents!=prior_documents:
+                self.event(attempt_id,worker_id=worker_id,fence=fence,event_id=uid(),event_type='checkpoint',observed_at=self.now(),
+                    payload={'operation':'writer_documents','writer_documents':documents,'prior_document_cancelled':document_cancelled})
+            if quiescent and match['status']=='same_job' and obs.get('status') in ('complete','needs_review'):
+                with self.tx() as db:semantic=self._field_context(db,self._get(db,'application_attempts',attempt_id))
+                if semantic.get('stage_id')=='fill_application':
+                    self.event(attempt_id,worker_id=worker_id,fence=fence,event_id=uid(),event_type='checkpoint',observed_at=self.now(),
+                        payload=dict(semantic,task_state='completed',evidence='Simplify settled on the current page; remaining questions can be reviewed'))
+            from .browser_controls import next_operation
+            permitted=quiescent and match['status']=='same_job' and not (
+                obs.get('activity',{}).get('busy_indicator') and obs.get('activity',{}).get('waiting_for_input'))
+            guidance=next_operation(detected_platform,obs,identity=match,quiescent=permitted)
+            compact={}
+            if audit_observation is not None:
+                from .form_audit import audit
+                compact['audit']=audit(audit_observation,writer={'ui_status':status,'state':new_writer,
+                    'native_takeover_authorized':permitted,'terminal_evidence':obs.get('settled_evidence',False)})
+            from .managed_identity import public_url,form_route_identity
+            requisition=form_route_identity(live_url)
             return {
                 'operation':'browser_observe',
+                **compact,
                 'status':status,
                 'writer_state':new_writer,
                 'quiescent':quiescent,
+                'identity':match,
+                'native_takeover_authorized':permitted,
                 'observed_browser_mode':observed_mode,
                 'platform':detected_platform,
-                'company':job['company'],
+                'company':self.job(job['id'])['company'],
+                'next_operation':guidance,
                 'target_id':target['target_id'],
-                'url':target['url'],
+                'url':public_url(live_url),
+                'assigned_url':public_url(job['url']),
+                'application_url':public_url(anchor),
+                'identity_evidence':{'observed_requisition':requisition[3] if requisition else None},
                 'observation':obs,
                 'action_id':action_id,
+                'instruction':'Observe ongoing work or use its enabled Stop/Cancel. Before submission, a broken page or missing Simplify panel can be recovered with browser reload or session restart even when writer settlement is unknown. Inspect the new page and continue; this observation is not an application outcome.',
             }
         except Exception:
             self.action_end(attempt_id,worker_id=worker_id,fence=fence,action_id=action_id,status='failed')

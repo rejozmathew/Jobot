@@ -1,6 +1,7 @@
 """Read-only startup version evidence; never invokes a provider or changes Git."""
 from functools import lru_cache
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 
@@ -10,10 +11,11 @@ ROOT=Path(__file__).resolve().parents[1]
 @lru_cache(maxsize=1)
 def code_evidence():
     version='unknown';dirty=None
+    options={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
     try:
-        result=subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,capture_output=True,text=True,timeout=3)
+        result=subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,capture_output=True,text=True,timeout=3,**options)
         if result.returncode==0:version=result.stdout.strip()
-        result=subprocess.run(['git','status','--porcelain','--untracked-files=no'],cwd=ROOT,capture_output=True,text=True,timeout=3)
+        result=subprocess.run(['git','status','--porcelain','--untracked-files=no'],cwd=ROOT,capture_output=True,text=True,timeout=3,**options)
         if result.returncode==0:dirty=bool(result.stdout.strip())
     except (OSError,subprocess.TimeoutExpired):pass
     skill=ROOT/'skills/productivity/job-apply/SKILL.md'

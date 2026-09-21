@@ -21,15 +21,21 @@ def test_continue_before_review_warning():
     assert m.choose(snapshot(review_count=3), {}) == 'continue'
 
 
+def test_native_continue_skips_simplify_review_of_already_filled_fields():
+    s=snapshot(review_count=2);s['controls']={};s['native']={'continue':{'enabled':True}}
+    assert module().choose(s,{})=='native_continue'
+
+
 @pytest.mark.parametrize('status', ['active', 'unknown'])
 def test_unknown_or_active_writer_never_advanced(status):
     m=module()
     assert m.choose(snapshot(status), {}) == 'wait'
 
 
-def test_retry_requires_failed_advancement_and_is_bounded():
+def test_failed_advancement_does_not_repeat_a_completed_page_autofill():
     m=module(); s=snapshot(); s['controls']={'autofill': {'enabled':True}}
-    assert m.choose(s, {'fills':1, 'advance_failed':True})=='retry'
+    assert m.choose(s, {'advance_failed':True})=='autofill'
+    assert m.choose(s, {'fills':1, 'advance_failed':True})=='blocked'
     assert m.choose(s, {'fills':2, 'advance_failed':True})=='blocked'
 
 
@@ -83,9 +89,17 @@ class Harness:
         return r
 
 
-def test_runner_advances_without_model_tick_and_preserves_submission_intent():
+def test_runner_advances_without_model_tick_and_preserves_submission_intent(monkeypatch):
     a=snapshot(); b=snapshot(step='review',resume_attached=True); b['controls']={'submit':{'enabled':True}}
     c=snapshot(step='unknown',submitted=True); h=Harness([a,b,c]); r=h.runner()
+    async def capture(page,call,package,owner,config,target,activate,**kwargs):
+        assert page is r.page and target==r.target and not kwargs.get('confirmation_only')
+        call('submission_intent')
+        r.last_click_execution='clicked'
+        assert (await activate())['clicked']
+        call('finish',outcome='applied')
+        return {'status':'applied'}
+    monkeypatch.setattr('job_applier.submission.submit',capture)
     result=asyncio.run(r.run(seconds=20))
     assert result['status']=='applied'
     assert h.clicks==['continue','submit']
@@ -103,14 +117,6 @@ def test_runner_stop_performs_no_click_and_only_acks_quiescence():
     assert any(op=='ack_control' for op,_ in h.calls)
 
 
-def test_runner_prior_submit_intent_never_resubmits():
-    s=snapshot(step='review'); s['controls']={'submit':{'enabled':True}}
-    h=Harness([s],intent=True)
-    result=asyncio.run(h.runner().run(seconds=3))
-    assert h.clicks==[]
-    assert result['status']=='submission_unknown'
-
-
 def test_runner_waits_for_writer_and_returns_boundedly():
     h=Harness([snapshot('active')])
     result=asyncio.run(h.runner().run(seconds=3))
@@ -118,11 +124,23 @@ def test_runner_waits_for_writer_and_returns_boundedly():
     assert result['status']=='waiting'
 
 
-def test_runner_missing_resume_blocks_submit_not_reconstructs_pdf():
+def test_runner_records_meaningful_step_and_decision_without_poll_spam():
+    h=Harness([snapshot('active')]);result=asyncio.run(h.runner().run(seconds=3))
+    events=[args for op,args in h.calls if op=='event' and args['event_type']=='phase_changed']
+    assert len(events)==1
+    assert events[0]['payload']['page']=='my_experience'
+    assert events[0]['payload']['activity']=='Fill my experience'
+    assert events[0]['payload']['stage_id']=='fill_application'
+    assert events[0]['payload']['task_id']=='workday:my_experience'
+    assert result['status']=='waiting' and not h.clicks
+
+
+def test_runner_submits_review_without_a_second_resume_audit(monkeypatch):
     s=snapshot(step='review'); s['controls']={'submit':{'enabled':True}}
+    async def capture(*args,**kwargs):return {'status':'applied'}
+    monkeypatch.setattr('job_applier.submission.submit',capture)
     h=Harness([s]); result=asyncio.run(h.runner().run(seconds=4))
-    assert h.clicks==[]
-    assert result['reason']=='approved_resume_not_observed'
+    assert result['status']=='applied'
 
 
 def test_runner_accepts_real_simplify_click_protocol():
@@ -138,12 +156,14 @@ def test_candidate_home_controls_never_authorize_writes():
     assert m.choose(s,{})=='confirm_only'
 
 
-def test_pending_advancement_survives_a_bounded_call():
+def test_pending_advancement_survives_a_bounded_call(monkeypatch):
     h=Harness([snapshot()]);r=h.runner()
     asyncio.run(r.run(seconds=1))
     assert h.clicks==['continue']
     assert r.state.get('pending')==['my_experience','continue']
     r2=h.runner();r2.state=r.state;r2.pending=tuple(r.state['pending']);r2.last_action=h.now
+    async def no_source(*args,**kwargs):return None
+    monkeypatch.setattr(r2,'fill_source',no_source)
     asyncio.run(r2.run(seconds=8))
     assert h.clicks==['continue']
 

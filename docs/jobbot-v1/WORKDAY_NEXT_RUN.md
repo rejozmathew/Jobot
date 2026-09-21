@@ -1,5 +1,43 @@
 # Clean-thread Workday benchmark
 
+Current procedure: use the repository's canonical job-apply and appropriate ATS
+skills with a short user-authorized application request. The Wiley attempt 14
+review pause was historical and has been superseded by subsequent checkpoints.
+This document does not itself authorize an application; the user's request does.
+
+Use the [standard application request](APPLICATION_RUNTIME.md#standard-application-request)
+for the next job, changing only its URL. It applies across ATS platforms; existing
+skills choose the available procedure. The copy-ready block under the historical
+section below is retained as evidence of the old workflow, not today's prompt.
+
+Gather distinct application outcomes before expanding the authentication
+recovery policy. Repeated retries of one job are not an independent reliability
+sample. Record detailed diagnoses with their database attempts and keep this
+benchmark focused on measurement. This document does not queue, retry or abandon
+an application. See the current design entries in
+[RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md).
+
+## Current local-session benchmark
+
+The checklist below this section is historical HTTP/claimed-worker evidence.
+For current acceptance, start a separate ordinary Hermes conversation using the
+configured application model, existing capabilities and canonical repository
+job-apply/workday-simplify skills. Give it one eligible, unsubmitted URL and the
+selected config. It calls application_runtime start, then workday_fast session,
+with scoped browser/credential/mail exceptions. Start includes history checks;
+there is no manual accept/claim/lease/token or dashboard prerequisite.
+
+Time from the original request, including startup/waiting. The executor applies
+and submits under standing approval, verifies submission once using the profile's
+accepted evidence sources and labels the actual source,
+records the outcome, and reports actual model/effort and specific blockers. It
+must not edit shared helpers/skills. Do not use GAIG R9045, Tebra or the repeatedly
+debugged Huron case. A second empty profile does not prove Simplify concurrency.
+See APPLICATION_RUNTIME and RUNTIME_SIMPLIFICATION_LOG for current procedures
+and actual evidence. Keep the historical failures below unchanged.
+
+## Historical benchmark procedure
+
 ## Before timing
 
 - Open a fresh conversation in the JobBot project using the configured application model (not the engineering model by accident).
@@ -8,7 +46,7 @@
 - Run `workday_fast doctor` with the proposed URL. Check old submission history, exact new database, configured browser and any unresolved ownership. If reconciliation is needed, resolve it explicitly before the timed application—not by changing the old outcome.
 - Establish the authorized managed run and exact claimed attempt. If intake/startup needs work, report that separately from browser execution; do not quietly exclude it from the total user-visible time.
 
-## Copy-ready prompt (fill placeholders)
+## Historical copy-ready prompt (superseded)
 
 > Apply to this Workday role: **<WORKDAY_URL>**. I authorize submission of this application using my approved profile/resume and configured portal credentials.
 >

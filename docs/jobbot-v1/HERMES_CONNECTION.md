@@ -1,4 +1,48 @@
-# Hermes-to-JobBot connection: interim implementation and refactor record
+# Hermes-to-JobBot connection
+
+## Current local session route — September 2026
+
+Ordinary Hermes uses the canonical repository skill and the selected ignored
+runtime-config pointer. From the actual checkout, its terminal executes:
+
+```text
+.venv/Scripts/python.exe -m job_applier.application_runtime start <job-url>
+.venv/Scripts/python.exe -m job_applier.workday_fast session <returned-session-id> --seconds 60
+```
+
+The CLI reads HERMES_SESSION_ID; if the installed harness does not export it,
+pass --driver-id with that conversation's actual ID. No JobBot API token or
+dashboard is required. This does not spawn another application model.
+The selected configuration supplies candidate, resume, browser pool and private
+credential/mail references. Read [APPLICATION_RUNTIME.md](APPLICATION_RUNTIME.md)
+for the authoritative lifecycle, call sequence, configuration and helper map.
+
+Native jobbot convenience is optional. Existing integrations/hermes_jobbot loads
+PluginController using plugin settings app_repo and app_config. With local config,
+start/browser/fast_forward/pause/stop/attach/retry call the same shared runtime and
+record model/provider/effort observed through native hooks. Missing model evidence
+stays unknown. The portable CLI works without installing this plugin globally.
+Never change the ordinary conversation's configured model or billing route merely
+to satisfy a runtime check. Canonical job-apply is v0.4.8, Workday v0.3.6.
+
+Required-answer capture and the dashboard queue are harness-neutral. Context
+`human_input` advertises optional messaging from the harness's actual platform
+or tool inventory; absence of Discord still permits capture, parking, dashboard
+answers and retry pickup. Native Hermes `answer` attaches observed user-turn
+provenance. The portable CLI requires explicit reply evidence. `answer_retries`
+lists durable requests; an ordinary harness executes an authorized batch with
+fresh sessions and observed refs. Neither the queue nor local start launches an
+additional model. See the shared runtime and canonical skill for the exact calls.
+
+The portable CLI loads repository code on each invocation. A long-running native
+Hermes process must reload its JobBot plugin or restart before using newly added
+native operations. Loading files from disk does not replace its existing Python
+modules. The dashboard likewise needs a service restart after Python API changes.
+
+## Historical HTTP credential repair (superseded for local startup)
+
+Everything below describes the earlier HTTP compatibility path and its historical
+verification. It is retained as evidence, not an ordinary local startup checklist.
 
 **Later status:** Authentication succeeded after this fix, but resumed execution subsequently failed on browser connectivity and ownership/lease recovery. The configured managed service was also unreachable during the later diagnosis. See [REVIEW_HANDOFF.md](REVIEW_HANDOFF.md) for evidence and unknowns. The historical health checks below do not imply that either process is currently running.
 

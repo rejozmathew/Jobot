@@ -4,6 +4,45 @@ import uuid
 from functools import wraps
 
 
+def submission_pending(attempt, events=()):
+    """Unconfirmed dispatch state for observation and reporting, never a write lock."""
+    return submission_state(attempt,events)['state'] in ('pending','accepted')
+
+
+def submission_state(attempt,events=()):
+    """Project dispatch and observation history for reporting, never permission.
+
+    Uncertainty remains in history. A fresh view of unfinished work may describe
+    progress without erasing a click or requiring a special rejection operation.
+    """
+    attempt=dict(attempt);state='pending' if attempt.get('submit_intent_at') else 'none'
+    dispatch=None;resolved=None;accepted=attempt.get('outcome') in ('applied','already_applied')
+    for raw in events:
+        row=dict(raw)
+        if row.get('stale'):continue
+        payload=json.loads(row.get('payload_json','{}'));operation=payload.get('operation')
+        if operation=='submission_confirmed' and payload.get('status') in ('applied','already_applied'):accepted=True
+        if operation=='submission_reconciled' and payload.get('status') in ('applied','already_applied'):accepted=True
+        if operation=='submission_intent':state='pending';dispatch=None;resolved=None
+        elif operation=='submission_observation' and payload.get('status')=='incomplete':
+            state='incomplete';resolved=payload
+        elif operation=='submission_observation' and payload.get('status')=='pending' and attempt.get('submit_intent_at'):
+            state='pending';resolved=None
+        elif operation=='submission_click':
+            dispatch=dict(payload,observed_at=row.get('observed_at'));resolved=None
+            state='not_executed' if payload.get('status')=='not_executed' else 'pending'
+        elif operation=='submission_resolution' and payload.get('status')=='rejected' and dispatch:
+            if (payload.get('source')=='employer' and payload.get('resolution')=='fresh_employer_rejection' and
+                payload.get('reason_code') in ('invalid_security_code','expired_security_code','required_fields') and
+                all(dispatch.get(k) and payload.get(k)==dispatch[k] for k in ('dispatch_id','document_id','frame_id'))):
+                from datetime import datetime
+                try:
+                    if datetime.fromisoformat(row['observed_at'].replace('Z','+00:00'))<datetime.fromisoformat(dispatch['observed_at'].replace('Z','+00:00')):continue
+                except (KeyError,TypeError,ValueError):continue
+                state='rejected';resolved=payload
+    return {'state':'accepted' if accepted else state,'dispatch':dispatch,'resolution':resolved}
+
+
 class ProtocolError(ValueError):
     def __init__(self, code, detail=''):
         self.code = code
@@ -52,6 +91,12 @@ def sanitize_legacy_profile(data):
     skipped = []
 
     for key, value in data.items():
+        if key=='application_answer_policy':
+            from .application_answers import approved_policy
+            policy=approved_policy(value)
+            if policy:sanitized[key]=policy
+            else:skipped.append(key)
+            continue
         if key in LEGACY_EXCLUDED_SECTIONS:
             skipped.append(key)
             continue

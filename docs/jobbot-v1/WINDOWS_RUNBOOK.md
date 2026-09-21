@@ -1,4 +1,48 @@
-# Windows operator runbook — reviewed activation required
+# Windows operator runbook
+
+## Current local startup — September 2026
+
+Use the existing checkout and .venv/Scripts/python.exe. The ignored
+artifacts/jobbot-v1-private/runtime-config.json selects the absolute native-app.json
+for windows-supervised-pilot-rejo. Application authorization for this engineering
+acceptance is explicit; no further per-edit/activation gate is introduced here.
+
+```text
+.venv/Scripts/python.exe -m job_applier.application_runtime doctor
+.venv/Scripts/python.exe -m job_applier.application_runtime start <job-url> --driver-id <actual-conversation-id>
+.venv/Scripts/python.exe -m job_applier.application_runtime status <returned-session-id>
+```
+
+Doctor is optional; start automatically validates history and launches/verifies
+the assigned headed browser. Ordinary Hermes follows the repository skills in
+its own conversation with the selected application model. No API token export or
+running dashboard is required. Do not run native_hermes_session as a workaround.
+The existing dashboard is http://127.0.0.1:60158; its private restart script is
+artifacts/jobbot-v1-private/runtime_dashboard.py. It reads the address from
+native-app.json and uses the same managed DB. Start it from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m artifacts.jobbot-v1-private.runtime_dashboard
+```
+
+Use this private launcher for the configured dashboard. The historical
+`run_applier.py serve` command opens the legacy interface on port 8000 against
+another database. The generic `managed serve` command requires an HTTP worker
+token map; the private launcher resolves the selected local worker credential
+directly. Do not replace credentials or initialize a database to fix a wrong
+launcher.
+
+Migration makes a SQLite backup before additive schema 15. Keep active files on
+the local machine. Prepare separate Simplify-authenticated profiles/endpoints;
+never copy live profile/cookie state. Current provisioning and acceptance limits
+are in [RUNTIME_SIMPLIFICATION_LOG.md](RUNTIME_SIMPLIFICATION_LOG.md).
+The authoritative configuration/ownership/helper explanation is
+[APPLICATION_RUNTIME.md](APPLICATION_RUNTIME.md).
+
+## Historical explicit HTTP worker activation
+
+The older instructions below concern isolated preview/HTTP worker deployment.
+They do not require local sessions to use HTTP auth or shared-profile leases.
 
 This source tree is a Windows engineering candidate. Do not point it at the original runtime history, enable it in an active Hermes profile, or start real applications merely because these commands exist. Real-browser/mail/portal checks have their own authorization gates.
 
