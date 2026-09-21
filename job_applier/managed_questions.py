@@ -28,7 +28,9 @@ def question_data(*,field,question,kind,options=None,required=True,context=None)
     if not isinstance(field,str) or not 1<=len(field)<=500 or not isinstance(question,str) or not 1<=len(question.strip())<=4000:
         raise ProtocolError('invalid_question')
     if PRIVATE.search(field+' '+question):raise ProtocolError('private_question_prohibited')
-    if not isinstance(options or [],list) or len(options or [])>200:raise ProtocolError('invalid_question_options')
+    # Native country lists routinely contain more than 200 genuine choices.
+    # Preserve the complete offered set for exact answer matching.
+    if not isinstance(options or [],list):raise ProtocolError('invalid_question_options')
     clean=[]
     for option in options or []:
         if not isinstance(option,dict) or any(not isinstance(option.get(k),str) or len(option[k])>1000 for k in ('value','label')):

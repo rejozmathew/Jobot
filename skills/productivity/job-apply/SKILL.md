@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.20
+version: 0.5.21
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -356,7 +356,7 @@ from their approved facts.
    an empty `files` list alone is not a reason to upload again. Resolve the
    visible resume error through the widget instead of repeating Submit or
    rediscovering why the filename and validation disagree. If the widget stays
-   stuck, use the shared refresh-and-refill recovery below. Keep validation
+   stuck, use the broken-page recovery below. Keep validation
    messages intact so the next observation reflects the actual employer state.
    Report only uploads performed through that helper; do not manufacture an
    upload event for an attachment Simplify supplied. At Review with no employer
@@ -448,8 +448,9 @@ evidence-based recovery. Inspect actual submission evidence as part of choosing
 the next operation; historical click uncertainty never locks the browser. New
 user application requests follow the shared retry policy.
 
-Refresh-and-refill is also a shared recovery for a stuck form or an email-code
-step that makes no progress, even if the page still renders. For missing mail,
+The missing-email refresh-and-refill trigger applies **only to Greenhouse**,
+only when its requested email verification code is absent from the configured
+mailbox. For this Greenhouse recovery,
 compare the approved address with the actual form/verification recipient, check
 the configured mailbox including spam/junk and delayed delivery, and use an
 observed resend when available. If no matching code arrives within about **1–2
@@ -458,6 +459,13 @@ minutes of the employer's code request**, refresh the owned application tab with
 request across polls and conversation compaction; repeated mailbox reads or a
 resend do not restart this recovery window. This is a prompt to change recovery,
 not an application time limit or a reason to finish blocked.
+For Greenhouse, use `greenhouse_advance` with
+`{"seconds":60,"recovery":"missing_verification_email"}`. This calls the shared
+owned reload and immediately resumes Simplify, approved residuals and submission.
+Continue from its current result; if the call slice ends, resume ordinary
+`greenhouse_advance` without repeating the recovery parameter. A reload replaces
+the old verification screen: its screenshot and blocker no longer describe the
+current page. Finish the new fill/submit cycle and inspect the employer response.
 That is an ordinary page recovery; an earlier Submit click or email prompt does
 not prohibit it. A mail-request ledger entry records a request and does not send
 or resend employer mail. Follow actual page controls for delivery.
@@ -539,9 +547,10 @@ Read the verification email using the configured mailbox handoff (Himalaya or
 the existing Hermes Gmail integration). The LLM
 identifies the relevant message and extracts the code. With multiple relevant
 messages, choose the one closest to the observed request timestamp. If the email
-has not arrived, check delayed delivery within the approximately 1–2 minute
-window from the employer's request, then use the shared refresh-and-refill
-recovery above. Continue this same application. A helper miss does not
+has not arrived on Greenhouse, check delayed delivery within the approximately
+1–2 minute window from the employer's request, then use the Greenhouse-only
+refresh-and-refill recovery above. On other ATSs, follow their actual verification
+controls; absent mail alone does not trigger a reload. Continue this same application. A helper miss does not
 mean the user must retrieve or enter the code, and does not end the application.
 
 Enter the selected code with ordinary `browser fill` on the observed input refs,

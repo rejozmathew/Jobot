@@ -59,9 +59,14 @@ recorded. These are common application rules, not a Greenhouse exception.
 
 If the expected email code remains undelivered for about 1–2 minutes from the
 employer's request, after checking the exact recipient, configured mailbox,
-delayed mail and any offered resend, use the shared
-refresh-and-refill recovery in the same owned tab/attempt. Let Simplify fill the
-new form through `greenhouse_advance`, which restores approved profile/saved
+delayed mail and any offered resend, use the Greenhouse-only missing-email
+refresh-and-refill recovery in the same owned tab/attempt. Call
+`greenhouse_advance` with `{"seconds":60,"recovery":"missing_verification_email"}`;
+it calls the existing owned reload and immediately resumes filling and submission.
+If the slice ends, continue ordinary `greenhouse_advance` without the recovery
+parameter. Do not finish using the old verification screenshot after replacement;
+follow the returned current form through refill and the next Submit response.
+The runner restores approved profile/saved
 answers and previously verified plans with fresh refs, then submits through the
 existing service. Do not replay arbitrary historical captured answers or old codes. A refreshed
 Greenhouse form may submit directly or request verification again; inspect its

@@ -22,6 +22,17 @@ SC South Carolina; SD South Dakota; TN Tennessee; TX Texas; UT Utah; VT Vermont;
 WV West Virginia; WI Wisconsin; WY Wyoming'''.replace('\n', ' ').split(';'))
 
 
+def email_recovery_handoff():
+    return {
+        'email_recovery':{'operation':'greenhouse_advance','parameters':{'seconds':60,'recovery':'missing_verification_email'}},
+        'instruction':('Read the configured mailbox for the current email request. If no matching code arrives after about 1–2 minutes, '
+            'having checked the exact recipient, delayed mail and spam/junk, execute email_recovery in this owned session. '
+            'It reloads and immediately resumes filling and submission with fresh controls. Mail polls do not restart that window. '
+            'Follow renewed verification if the employer requests it again; refresh does not guarantee it disappears. '
+            'A replaced document invalidates the old code screen and screenshot. Continue from the returned current form, '
+            'not an earlier blocker. This helper handoff does not finish the application.')}
+
+
 def greenhouse_answer(question, profile):
     """Exact identity mappings and offered residence aliases, never guessed facts."""
     label=question['question'].strip().rstrip('*').strip()
@@ -162,17 +173,19 @@ class GreenhouseRunner:
             self.event('checkpoint',{'operation':'verification_observed','first_seen_at':timestamp['first_seen_at'],
                 'request_time_known':any(g.get('requested_at') for g in groups)})
         return self.report('verification_required','use_existing_credentials_mail_flow',
-            verification={'first_seen_at':timestamp['first_seen_at'],'groups':[dict(g,refs=[self.wrap(r) for r in g['refs']]) for g in groups]})
+            verification={'first_seen_at':timestamp['first_seen_at'],'groups':[dict(g,refs=[self.wrap(r) for r in g['refs']]) for g in groups]},
+            **email_recovery_handoff())
 
     def report(self,status,reason,**extra):
         work=remaining_submission_work(self.last)
-        return dict(handler='greenhouse_fast',status=status,phase=self.phase,reason=reason,
+        result=dict(handler='greenhouse_fast',status=status,phase=self.phase,reason=reason,
             document={'id':self.document_id,'target_id':self.target,'url':getattr(self,'document_url',self.package['job']['url'])},
             autofill_dispatch_count=self.receipt.get('dispatch_count',0),batch_count=self.batch_count,
             field_action_count=self.field_actions,completed_count=self.completed,residual_count=len(work['required_fields']),
             elapsed_seconds=round(time.monotonic()-self.started,3),questions=self.questions,control_failures=self.failures,
             next_operation={'operation':'greenhouse_advance','parameters':{'seconds':60}},
-            instruction='Continue this owned application. Return one answers plan with each current ref, exact question_key, answer and approved basis; recover control failures through the scoped browser and resume greenhouse_advance. Helper handoffs do not finish the application.',**extra)
+            instruction='Continue this owned application. Return one answers plan with each current ref, exact question_key, answer and approved basis; recover control failures through the scoped browser and resume greenhouse_advance. Helper handoffs do not finish the application.')
+        return dict(result,**extra)
 
     async def ready(self):
         previous=None;stable=0
@@ -402,7 +415,10 @@ class GreenhouseRunner:
                 return await click_control(self.page,{'ref':control['ref']})
             result=await submit(self.page,self.call,self.browser_package,self.owner,self.config,self.target,activate,
                 application_control={'ref':control['ref']},seconds=max(1,min(15,self.deadline-time.monotonic())))
-            return dict(self.report(result.get('status','inspection_required'),result.get('reason','submission_service_result')),**result)
+            report=dict(self.report(result.get('status','inspection_required'),result.get('reason','submission_service_result')),**result)
+            if result.get('remaining_work',{}).get('verification_groups'):
+                report.update(email_recovery_handoff(),phase='verification')
+            return report
         except TimeoutError:return self.report('continue','call_slice_complete')
         except (FrameUnavailable,ProtocolError) as exc:return self.report('inspection_required',str(exc))
 
@@ -410,14 +426,39 @@ class GreenhouseRunner:
 def advance(config,client,ownership,params):
     """Use the resolved owned target and context; close only our CDP connection."""
     from .cdp_client import CDPBrowser
-    if set(params)-{'target_id','seconds','answers'} or not params.get('target_id'):raise ProtocolError('invalid_greenhouse_parameters')
+    if set(params)-{'target_id','seconds','answers','recovery'} or not params.get('target_id'):raise ProtocolError('invalid_greenhouse_parameters')
     seconds=params.get('seconds',60)
     if type(seconds) not in (int,float) or not 0<seconds<=120:raise ValueError('bounded_seconds_required')
+    recovery=params.get('recovery')
+    if recovery not in (None,'missing_verification_email'):raise ProtocolError('invalid_greenhouse_parameters')
+    started=time.monotonic();reloaded=None
     package=client.call('application_context',attempt_id=ownership['attempt_id'],worker_id=ownership['worker_id'])
     observed=client.call('browser_observe',**ownership,target_id=params['target_id'],cdp_url=config['cdp_url'])
+    if recovery:
+        from .application_runtime import browser_action
+        if observed.get('platform')!='greenhouse':
+            return dict(observed,status='continue',reason='missing_email_recovery_is_greenhouse_only')
+        screen=browser_action(config,client,ownership,package,params['target_id'],{'method':'snapshot'})
+        # The explicit flag is the executor's missing-mail finding. A stale
+        # request after a replacement must not reload an ordinary form again.
+        if any(g.get('complete') is False for g in screen.get('verification',{}).get('groups',[])):
+            reloaded=browser_action(config,client,ownership,package,params['target_id'],
+                {'method':'reload','recovery_reason':recovery})
+            if not reloaded.get('document_replaced'):
+                return dict(reloaded,handler='greenhouse_fast',status='inspection_required',
+                    reason='reload_requires_inspection',next_operation={'operation':'browser','parameters':{'method':'snapshot'}})
+            observed=client.call('browser_observe',**ownership,target_id=params['target_id'],cdp_url=config['cdp_url'])
     async def execute():
         browser=await CDPBrowser.connect(config['cdp_url'],target_id=params['target_id'],expected_mode=config.get('browser_mode','headed'))
         try:
-            return await GreenhouseRunner(await browser.get_current_page(),client.call,package,ownership,config,params['target_id'],observed).run(seconds,params.get('answers'))
+            runner=GreenhouseRunner(await browser.get_current_page(),client.call,package,ownership,config,params['target_id'],observed)
+            # Reload and refill share the caller's slice. The durable application
+            # deadline remains owned by the runtime, including across this call.
+            result=await runner.run(max(.05,seconds-(time.monotonic()-started)),None if reloaded else params.get('answers'))
+            if reloaded:
+                result['email_recovery_result']={'document_replaced':True,
+                    'reload_status':reloaded.get('recovery',{}).get('status'),
+                    'elapsed_seconds':round(time.monotonic()-started,3)}
+            return result
         finally:await browser.close()
     return asyncio.run(execute())

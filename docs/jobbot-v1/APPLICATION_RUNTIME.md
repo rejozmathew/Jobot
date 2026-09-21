@@ -1,5 +1,27 @@
 # Application runtime: ownership, helper map, and rationale
 
+## September 20: Greenhouse missing-email continuation
+
+`greenhouse_advance` accepts `recovery:"missing_verification_email"` after the
+executor's documented recipient/mailbox and 1–2 minute delivery checks. The
+trigger is Greenhouse-only and requires a current incomplete verification group;
+the flag reports the executor's observation that the requested email is absent.
+Other ATS email flows do not acquire a timed reload policy. The
+existing native/portable caller and workspace host still resolve the owned target.
+`greenhouse_fast.advance` calls shared `application_runtime.browser_action` reload,
+then reconnects to the fresh document and runs its normal Simplify/residual/submit
+path within the remaining call slice. The existing runtime keeps the overall
+application deadline. A later ordinary advance resumes without another reload.
+Verification handoffs include that concrete recovery operation; a renewed employer
+verification requirement remains incomplete, never inferred success. Approved
+journal answers are rebound with fresh refs; supplied old-ref plans are discarded
+on explicit reload. No new retry limit, finish gate or automatic challenge bypass
+is introduced. The question schema retains actual country menus exceeding 200
+choices instead of rejecting the entire residual batch on the old size cap.
+
+Synthetic coverage in `test_greenhouse_email_recovery.py` exercises owned reload,
+refill, actual confirmation versus renewed verification, and large choice sets.
+
 ## September 19: form continuity and application deadline
 
 `application_deadline.py` freezes the Settings `application_time_limit_minutes`
