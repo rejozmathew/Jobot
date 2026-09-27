@@ -116,9 +116,15 @@ async def fixture_browser(tmp_path, mode='cross', *, entry_url=None, submit_outc
                     raise TimeoutError('Synthetic browser did not publish a readable debugging port') from None
                 await asyncio.sleep(.05)
         endpoint = f'http://127.0.0.1:{port}'
-        with urllib.request.urlopen(endpoint + '/json/list') as response:
-            tabs = json.load(response)
-        target = next(t['id'] for t in tabs if t['type'] == 'page')
+        while True:
+            with urllib.request.urlopen(endpoint + '/json/list', timeout=2) as response:
+                tabs = json.load(response)
+            target = next((t['id'] for t in tabs if t['type'] == 'page'), None)
+            if target:
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Synthetic browser did not publish a page target')
+            await asyncio.sleep(.05)
         browser = await CDPBrowser.connect(endpoint, target_id=target, expected_mode='headless')
         page = await browser.get_current_page()
         page.fixture_endpoint = endpoint

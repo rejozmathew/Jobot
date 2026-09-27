@@ -695,13 +695,23 @@ async function loadAttempt(id){state.attempt=id;try{const report=await api('atte
  }
  for(const e of report.timeline){const row=el('details',undefined,'event');row.append(el('summary',`${stamp(e.observed_at)} · ${e.payload.activity||e.payload.evidence||e.event_type} · ${duration(e.duration_seconds)}${e.stale?' · late metadata':''}`),el('pre',JSON.stringify(e.payload,null,2)));debug.append(row);}if(!report.timeline.length)debug.append(el('p','No events recorded.'));}catch(e){notice(e.message,true);}}
 
-async function refresh(){if(!state.instance||state.busy)return;state.busy=true;try{const v=await api('view',state.run?{run_id:state.run}:{});state.view=v;$('instance').textContent=`Instance ${v.health.instance_id} · DB ${v.health.db_path}`;$('mode').textContent=v.settings.values.mode+' / '+v.settings.values.submission_mode;$('mode').dataset.state=v.settings.values.mode;
+function refresh(){
+ if(!state.instance)return Promise.resolve();
+ state.refreshRequested=true;
+ if(state.refreshPromise)return state.refreshPromise;
+ state.busy=true;
+ // A save can finish while an older view is rendering. Fetch again before
+ // resolving its refresh so callers see their mutation and current revisions.
+ state.refreshPromise=(async()=>{try{do{state.refreshRequested=false;try{const v=await api('view',state.run?{run_id:state.run}:{});state.view=v;$('instance').textContent=`Instance ${v.health.instance_id} · DB ${v.health.db_path}`;$('mode').textContent=v.settings.values.mode+' / '+v.settings.values.submission_mode;$('mode').dataset.state=v.settings.values.mode;
  choice('candidate',v.candidates.filter(c=>c.state==='active').map(c=>[c.id,c.email]),$('candidate').value||v.dispatch_queue?.selection?.identity_id);
  if($('browser-profile')&&!$('browser-profile').value.trim()){
   $('browser-profile').value=v.current_run?.browser_profile||v.runs?.[0]?.browser_profile||'operator-chrome';
  }
  renderQueue(v);renderRun(v);renderAccounts(v);renderResources(v);renderSettings(v.settings);await renderProfile(v);$('health').textContent=JSON.stringify(v.health,null,2);if(state.attempt)await loadAttempt(state.attempt);
- }catch(e){notice(e.message,true);}finally{state.busy=false;}}
+ }catch(e){notice(e.message,true);}
+ }while(state.refreshRequested&&state.instance);}finally{state.busy=false;state.refreshPromise=null;}})();
+ return state.refreshPromise;
+}
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!=='tab-'+name);document.querySelectorAll('[data-tab]').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));}
 $('reconnect').onclick=()=>location.reload();
 $('refresh').onclick=refresh;document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
@@ -852,4 +862,4 @@ $('profile-resume-form').onsubmit=async e=>{
   await refresh();
  }catch(err){notice(err.message,true);}
 };
-setInterval(()=>{if(state.instance)refresh();},1500);
+setInterval(()=>{if(state.instance&&!state.busy)refresh();},1500);

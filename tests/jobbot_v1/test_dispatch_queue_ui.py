@@ -13,8 +13,8 @@ def dashboard_check(check):
     harness = r'''
 const fs=require('fs'),{JSDOM}=require(process.argv[1]),d=JSON.parse(fs.readFileSync(0,'utf8'));
 const w=new JSDOM(d.html,{url:'http://localhost/',runScripts:'outside-only'}).window;
-w.setInterval=()=>0;w.fetch=()=>new Promise(()=>{});
-w.eval(d.script+'\nwindow.draw=v=>{state.view=v;renderQueue(v)};window.drawSettings=renderSettings;window.drawModelSelection=c=>{state.modelCatalog=c;renderModelSelection()};window.noRefresh=()=>{refresh=async()=>{}};');
+w.setInterval=callback=>{w.pollRefresh=callback;return 0;};w.fetch=()=>new Promise(()=>{});
+w.eval(d.script+'\nwindow.draw=v=>{state.view=v;renderQueue(v)};window.drawSettings=renderSettings;window.drawModelSelection=c=>{state.modelCatalog=c;renderModelSelection()};window.noRefresh=()=>{refresh=async()=>{}};window.startRefresh=()=>{state.instance="fixture";state.modelCatalog={providers:[]};return refresh()};window.refreshAPI=handler=>{window.fetch=async path=>({ok:true,status:200,json:()=>handler(path.slice(4))})};');
 const doc=w.document;
 const v={jobs:[],candidates:[],assets:[],answer_queue:{groups:[]},
  dispatch_queue:{installed:true,worker_online:true,enabled:true,counts:{},items:[]},
@@ -137,4 +137,49 @@ assert(rows[0].cells[4].textContent==='United States','Country code not readable
 assert(rows[0].cells[5].textContent.includes('2026-09-10'),'Posting date hidden or shifted');
 assert(rows[1].cells[4].textContent==='United States','Explicit country in stored location not displayed');
 assert(rows[1].cells[5].textContent==='Unavailable','Update date fabricated as posting date');
+''')
+
+
+def test_refresh_during_inflight_request_waits_for_fresh_view():
+    dashboard_check(r'''
+v.health={instance_id:'fixture',db_path:'fixture.db'};
+v.settings={version:1,values:{mode:'development',submission_mode:'review'}};
+v.runs=[];v.accounts=[];v.resources=[];
+let release;let calls=0;
+w.refreshAPI(async command=>{
+ assert(command==='view','Unexpected request');
+ calls++;
+ if(calls===1)return await new Promise(resolve=>{release=()=>resolve({...v,marker:'stale'});});
+ return {...v,marker:'fresh'};
+});
+const first=w.startRefresh();
+let completed=false;
+const afterMutation=w.startRefresh().then(()=>{completed=true;});
+await Promise.resolve();await Promise.resolve();
+assert(!completed,'Refresh returned before an in-flight request finished');
+release();
+await Promise.all([first,afterMutation]);
+assert(calls===2,'Mutation must fetch a new view after the earlier request');
+let recoveredCalls=0;
+w.refreshAPI(async()=>{recoveredCalls++;return v;});
+await w.startRefresh();
+assert(recoveredCalls===1,'Completed refresh left future requests blocked');
+''')
+
+
+def test_passive_poll_does_not_extend_a_slow_explicit_refresh():
+    dashboard_check(r'''
+v.health={instance_id:'fixture',db_path:'fixture.db'};
+v.settings={version:1,values:{mode:'development',submission_mode:'review'}};
+v.runs=[];v.accounts=[];v.resources=[];
+let calls=0;
+w.refreshAPI(async()=>{
+ calls++;
+ if(calls===1)w.pollRefresh();
+ return v;
+});
+await w.startRefresh();
+assert(calls===1,'Passive poll unnecessarily extended an active refresh');
+await w.startRefresh();
+assert(calls===2,'Explicit refresh after completion did not fetch');
 ''')

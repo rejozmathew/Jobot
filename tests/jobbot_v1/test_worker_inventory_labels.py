@@ -18,7 +18,7 @@ const context={window:{},location:{href:'https://example.test/job/1'},
 const result=vm.runInNewContext(SCRIPT,context);
 console.log(JSON.stringify(result.items.map(x=>x.label)));
 """.replace('SCRIPT', json.dumps(INVENTORY))
-    run = subprocess.run(['node.exe', '-e', harness], capture_output=True, text=True, check=True, timeout=10)
+    run = subprocess.run(['node', '-e', harness], capture_output=True, text=True, check=True, timeout=10)
     assert json.loads(run.stdout) == ['United States', 'Save and Continue']
 
 
