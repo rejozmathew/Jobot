@@ -34,6 +34,11 @@ recovery within that overall budget; reloads and replacements do not reset it.
 If expires_at is null the operator has turned the overall time limit off.
 Do not stop at the first recoverable obstacle. Own the recovery through the
 authorized outcome; a helper handoff is the start of your next action.
+Follow the selected autofill strategy. With Simplify, complete necessary
+application entry and authentication, then use available Simplify Autofill before
+residual helpers. Continue with executor-led field and visual recovery for
+remaining obstacles. Preserve native-only settings; unavailable Simplify still
+permits native recovery in the owned session.
 
 ## Assigned job and approved selection
 {json.dumps(selection,ensure_ascii=False,indent=2)}
@@ -54,6 +59,27 @@ Use your actual HERMES_SESSION_ID; if your terminal does not expose it, supply
 --request-id above. After preparation, retrieve context once for approved profile
 facts, selected resume, retained account strategy, saved answers and relevant
 lessons. Do not invent facts, choose another mailbox, or reconstruct the resume.
+
+## Missing required answers
+Use approved facts, policy and exact saved answers first. For genuinely missing
+required facts, call browser with
+{{"method":"request_answers","refs":["<fresh observed required field ref>"]}}.
+This applies known answers before capturing unresolved questions and their actual
+choices. A known answer rejected by a control needs technical recovery, not a
+new question for the user. Continue when no pending questions remain.
+
+Check context human_input.messaging.available for advertised messaging. Preserve
+an actual reply available in this conversation: record it with answer or
+answer_from_user, question_id and expected_revision; portable answer and
+answer_from_user also need reply_evidence. Then use browser apply_answers with
+fresh refs and continue.
+An interactive desktop clarify dialog can wait while retaining the only workspace.
+For this unattended queue, prefer the durable answer queue when a reply must wait.
+When pending questions require a later reply, use park_questions with empty
+parameters and follow its cleanup acknowledgement so the workspace is released.
+Ordinary pause retains the slot. The dashboard's Needs your answer view supports
+Save and queue retry; an authorized retry uses the saved answers on a fresh attempt.
+Waiting or timeout never supplies an answer or permission to guess.
 
 ## ATS reminders — read the applicable reference while the browser prepares
 LinkedIn Easy Apply: {root/'job-apply'/'references'/'linkedin.md'}; use
@@ -94,7 +120,8 @@ next action. An unchanged snapshot adds no progress; choose a different recovery
 or use the screenshot and current controls to resolve the outstanding issue.
 
 ## Simplify and recovery
-Use the ATS runner for bulk filling and its shared audit for required residuals.
+Use Simplify first under the selected strategy, then the ATS runner and shared
+audit for required residuals. The runners also honor this order internally.
 An explicit user stop or manual completion means issue structured stop immediately;
 do no more browser recovery/screenshots. Reconcile user completion only through
 the existing user_reported path after stop acknowledgement.

@@ -130,6 +130,10 @@ def test_harness_without_messaging_still_has_dashboard_path(tmp_path):
     context=service.application_context(owner['attempt_id'])
     assert context['human_input']['messaging']['available'] is False
     assert context['human_input']['fallback']=='answer_queue'
+    instruction=context['human_input']['instruction']
+    assert instruction.index('request_answers') < instruction.index('park_questions')
+    assert 'actual reply' in instruction and 'pending questions' in instruction
+    assert 'known answer' in instruction and 'control recovery' in instruction
 
 
 def test_messaging_capability_is_session_metadata_not_a_core_discord_dependency(tmp_path):
@@ -139,6 +143,8 @@ def test_messaging_capability_is_session_metadata_not_a_core_discord_dependency(
     assert context['human_input']['messaging']['available'] is True
     assert context['human_input']['messaging']['channel']=='discord'
     assert context['human_input']['fallback']=='answer_queue'
+    assert 'actual reply' in context['human_input']['instruction']
+    assert 'park_questions' in context['human_input']['instruction']
 
 
 def test_answers_are_not_reused_for_another_job(tmp_path):

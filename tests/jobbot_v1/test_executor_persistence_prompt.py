@@ -24,6 +24,33 @@ def test_dispatch_and_direct_skill_give_concrete_recovery_not_just_persistence(t
     assert brief.index('Do not stop at the first recoverable obstacle') < brief.index('## Assigned job')
 
 
+def test_queued_brief_exposes_durable_question_handoff_before_ats_details(tmp_path):
+    service, asset, jobs, _, config = runtime_fixture(tmp_path)
+    item = enqueue(service, asset, jobs)['items'][0]
+    brief = application_brief(config, service, item)
+    handoff = brief.split('## Missing required answers', 1)[1].split('## ATS reminders', 1)[0]
+    handoff = ' '.join(handoff.split())
+    assert '"method":"request_answers"' in handoff
+    assert handoff.index('request_answers') < handoff.index('park_questions')
+    for term in ('approved facts', 'saved answers', 'human_input.messaging.available',
+                 'actual reply', 'expected_revision', 'reply_evidence', 'pending questions',
+                 'empty parameters', 'Needs your answer', 'Save and queue retry'):
+        assert term in handoff
+    assert 'known answer rejected by a control' in handoff
+    assert 'clarify' in handoff and 'workspace' in handoff
+
+
+def test_queued_brief_states_shared_autofill_order_before_portal_helpers(tmp_path):
+    service, asset, jobs, _, config = runtime_fixture(tmp_path)
+    item = enqueue(service, asset, jobs)['items'][0]
+    brief = application_brief(config, service, item)
+    opening = brief.split('## ATS reminders', 1)[0]
+    assert 'selected autofill strategy' in opening
+    assert opening.index('application entry and authentication') < opening.index('Simplify Autofill')
+    assert opening.index('Simplify Autofill') < opening.index('residual helpers')
+    assert 'native-only' in opening
+
+
 @pytest.mark.parametrize('writer', ['idle', 'active', 'unknown'])
 def test_helper_handoff_allows_recovery_after_incomplete_submit_without_bypassing_writer(writer):
     boundary = SimplifyBoundary(None)

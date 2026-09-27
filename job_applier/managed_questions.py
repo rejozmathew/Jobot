@@ -14,7 +14,13 @@ def human_input_capabilities(metadata=None):
     declared=(metadata or {}).get('human_input') or {}
     messaging=declared.get('messaging') or {} if isinstance(declared,dict) else {}
     result={'messaging':{'available':False},'fallback':'answer_queue',
-            'instruction':'Use approved facts and saved exact answers first. Ask only for missing required information. Park unresolved questions before leaving the application.'}
+            'instruction':('Use approved facts, policy and saved exact answers first. For missing required facts, '
+                'call browser request_answers with fresh observed refs to capture the questions and choices. '
+                'Record an actual reply through answer or answer_from_user with its revision and provenance, '
+                'then browser apply_answers with fresh refs. When pending questions require a later reply, '
+                'call park_questions with empty parameters and observe cleanup to release the workspace. '
+                'A known answer rejected by a control needs control recovery, not another question. '
+                'Waiting or timeout never supplies an answer.')}
     if isinstance(messaging,dict) and messaging.get('available') is True:
         values={k:messaging.get(k) for k in ('channel','tool','reply_mode')}
         if all(isinstance(v,str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,100}',v) for v in values.values()):
