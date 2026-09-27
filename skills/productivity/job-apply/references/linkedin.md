@@ -13,9 +13,10 @@ jobbot(operation="linkedin_easy_apply", parameters={"seconds":60})
 ```
 
 Use `.venv/Scripts/python.exe` on Windows. This helper connects to the current
-owned page. It opens/reuses the Easy Apply dialog, batches approved answers and
-selected résumé handling, and advances Next/Review. It respects existing
-Simplify writer settlement; a missing extension is not a native-fill prerequisite.
+owned page. It opens/reuses the Easy Apply dialog, runs available Simplify
+Autofill first on each form step and waits for settlement, then batches residual
+approved answers and selected résumé handling and advances Next/Review.
+A missing extension permits supported native recovery.
 It preserves prefilled answers and does not change follow-company choices.
 
 `questions_required` returns a batch of full labels/options/current refs. Resolve

@@ -69,7 +69,7 @@ def test_cleanup_precedes_navigation_and_does_not_clear_on_attach(tmp_path, monk
     host.startup_timing = {}
     host.workspace = {'cdp_url': 'http://127.0.0.1:12345', 'user_data_dir': str(tmp_path), 'mode': 'headless'}
     host.config = {'require_simplify': False}
-    host.service = SimpleNamespace(job=lambda _: {'url': job_url}, now=lambda: '2026-09-09T00:00:00+00:00')
+    host.service = SimpleNamespace(settings_view=lambda: {'values': {}}, job=lambda _: {'url': job_url}, now=lambda: '2026-09-09T00:00:00+00:00')
     session = {'job_id': 'job', 'attempt_id': attempt_id,
         'metadata_json': json.dumps({'fresh_employer_storage': reset})}
     if fail_on:
@@ -120,7 +120,7 @@ def test_real_retry_clears_employer_data_but_preserves_another_origin(tmp_path, 
             host.startup_timing = {}
             host.workspace = {'cdp_url': page.fixture_endpoint, 'user_data_dir': str(tmp_path / 'browser-top'), 'mode': 'headless'}
             host.config = {'require_simplify': False}
-            host.service = SimpleNamespace(job=lambda _: {'url': url}, now=lambda: '2026-09-09T00:00:00+00:00')
+            host.service = SimpleNamespace(settings_view=lambda: {'values': {}}, job=lambda _: {'url': url}, now=lambda: '2026-09-09T00:00:00+00:00')
             target, readiness = await host.prepare_target({'job_id': 'job', 'attempt_id': None,
                 'metadata_json': json.dumps({'fresh_employer_storage': True})})
             browser = await CDPBrowser.connect(page.fixture_endpoint, target_id=target, expected_mode='headless')

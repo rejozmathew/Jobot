@@ -8,21 +8,28 @@ FORM=(ROOT/'form_controls.js').read_text(encoding='utf-8')
 POINTER=(ROOT/'workday_click.js').read_text(encoding='utf-8')
 
 
-def next_operation(platform, observed=None, *, identity=None, quiescent=None):
+def next_operation(platform, observed=None, *, identity=None, quiescent=None, settings=None):
     """Actionable guidance from actual readiness; all actions retain their own guards."""
     observed=observed or {};status=observed.get('status')
     if identity and identity.get('status')!='same_job':
         return {'operation':'browser','parameters':{'method':'snapshot'},
                 'instruction':'Inspect the owned page controls and identity evidence. Recover the observed application route before retrying a form action; this helper result does not end the application.'}
-    if platform=='icims':
-        return {'operation':'icims_advance','parameters':{'seconds':60},
-                'instruction':'Continue iCIMS through its owned runner: settle Simplify, audit, private credentials/grouped repair, then the observed stage action. A helper handoff is resumable.'}
     if quiescent is False:
         if status=='unknown':
             from .form_audit import recovery
             return recovery(observed)
         return {'operation':'browser_observe','parameters':{},
                 'instruction':'Observe active work or use the enabled Stop/Cancel; do not write concurrently.'}
+    from .simplify_boundary import initial_autofill
+    if isinstance(settings,str):settings=json.loads(settings)
+    first=initial_autofill(observed) if (settings or {}).get('autofill')!='native' else None
+    if first:
+        return {'operation':'browser','parameters':{'method':'simplify','action':'autofill',**({'ref':first['ref']} if first.get('ref') else {})},
+                'instruction':'Run Simplify Autofill on this form step, wait for settlement, then use the portal helper for residual work. Inspect and recover individual controls if the helper hands back.'}
+    if platform=='icims':
+        return {'operation':'icims_advance','parameters':{'seconds':60},
+                'instruction':('Continue iCIMS using the selected native strategy; audit and repair observed fields. A helper handoff is resumable.' if (settings or {}).get('autofill')=='native' else
+                    'Continue iCIMS: open the application or authenticate as needed, run initial Simplify Autofill, then audit and repair residual fields. A helper handoff is resumable.')}
     if platform=='workday':
         return {'operation':'fast_forward','parameters':{'seconds':60},
                 'instruction':'Continue the owned Workday application with its routine runner.'}
@@ -46,8 +53,7 @@ def next_operation(platform, observed=None, *, identity=None, quiescent=None):
                     'instruction':'Follow the observed external Apply through the existing correlated employer target handoff and ATS handler.'}
         return {'operation':'browser','parameters':{'method':'snapshot'},
                 'instruction':'Inspect the assigned LinkedIn job. A missing employer URL does not establish Easy Apply. Follow login or current application evidence.'}
-    for action in ('continue','autofill'):
-        if action=='autofill' and (status in ('complete','needs_review') or observed.get('settled_evidence')):continue
+    for action in ('continue',):
         if observed.get('controls',{}).get(action,{}).get('enabled'):
             return {'operation':'browser','parameters':{'method':'simplify','action':action},
                     'instruction':('Start enabled Autofill now; inspect remaining questions after filling settles.' if action=='autofill' else
@@ -65,10 +71,11 @@ async def observe(page, package):
         from .workday_fast import observe_page
         return await observe_page(page,package)
     from .simplify_boundary import OBSERVE
-    shared=await page.evaluate(OBSERVE)
     if platform_for_url(package['job']['url'])=='linkedin' and platform_for_url(await page.evaluate('location.href'))=='linkedin':
         from .linkedin_easy_apply import observe_page
-        return dict(shared,**await observe_page(page,package))
+        native=await observe_page(page,package)
+        return dict(await page.evaluate(OBSERVE),**native)
+    shared=await page.evaluate(OBSERVE)
     native=await page.evaluate_function(FORM,{'method':'observe','page_signature':shared.get('page_signature')})
     simplify_inventory=list(shared.get('inventory',[]))
     # Workday's observer above is intentionally unchanged. All other ATSs share
@@ -102,6 +109,12 @@ async def observe(page, package):
                     refs=[frame.wrap(ref) for ref in group['refs']],
                     **({'resend_ref':frame.wrap(group['resend_ref'])} if group.get('resend_ref') else {})))
         native['application_frames']={'count':len(router.frames),'diagnostics':router.diagnostics}
+        # The panel may live in the parent while the form advances inside an
+        # accepted application iframe. Bind its receipt to those logical steps.
+        hints=sorted([[w.get('writer_document_id'),w.get('autofill_page_key') or w.get('page_signature')]
+                      for _,w in writers],key=lambda item:str(item[0]))
+        await page.evaluate_function('(steps)=>{window.__jobbotApplicationSteps=steps}',hints)
+        shared=await page.evaluate(OBSERVE)
         shared=_merge_writers(shared,writers,router.diagnostics)
     result=dict(shared,**native,simplify_inventory=simplify_inventory)
     return result
@@ -132,6 +145,15 @@ async def wait_for_page_recovery(page,package,*,seconds=12):
 def _merge_writers(root, children, diagnostics):
     merged=dict(root)
     documents=[root]+[value for _,value in children]
+    merged['autofill_candidates']=[]
+    for frame,value in [(None,root)]+children:
+        control=value.get('controls',{}).get('autofill',{})
+        receipt=value.get('autofill_receipt') or {}
+        if control.get('enabled') and control.get('ref'):
+            merged['autofill_candidates'].append(dict(control,
+                ref=frame.wrap(control['ref']) if frame else control['ref'],
+                attempted=bool(value.get('autofill_attempted') or receipt.get('automatic_count',receipt.get('dispatch_count',0)) or receipt.get('repairs_started')),
+                page_key=value.get('autofill_page_key'),document_id=value.get('writer_document_id')))
     settled=any(d.get('terminal_evidence') or d.get('settled_evidence') for d in documents)
     # Unrecognized decoration is not a participant. Pending writers remain relevant.
     relevant=[d for d in documents if not (settled and d.get('status')=='unknown' and
@@ -174,11 +196,11 @@ async def observe_writers(page,package):
             if value.get('autofill_receipt',{}).get('state') in ('dispatching','dispatched','active','uncertain'):
                 value=dict(value,status='active',writer_safe=False)
         return value
-    root=await read(page)
     if platform_for_url(package['job']['url'])=='linkedin' and platform_for_url(await page.evaluate('location.href'))=='linkedin':
         from .linkedin_easy_apply import observe_page
-        root.update(await observe_page(page,package))
-        return root
+        native=await observe_page(page,package)
+        return dict(await read(page),**native)
+    root=await read(page)
     if platform_for_url(package['job']['url'])=='workday' or not isinstance(page,CDPPage):return root
     from .browser_frames import router_for
     router=await router_for(page,package)
@@ -202,9 +224,14 @@ def remaining_submission_work(observed):
 def inventory(observed, package):
     from .workday_fast import screen_inventory
     result=screen_inventory(observed,package)
-    result['next_operation']=next_operation(package.get('platform'),observed)
+    result['next_operation']=next_operation(package.get('platform'),observed,settings=package.get('attempt',{}).get('settings_json'))
     if observed.get('verification',{}).get('groups'):result['verification']=observed['verification']
-    result['instruction']=('Use observed refs with browser select, check, fill, press or click. Values come from approved facts or explicit user choices. '
+    settings=package.get('attempt',{}).get('settings_json') or {}
+    if isinstance(settings,str):settings=json.loads(settings)
+    strategy=('Use the selected native filling strategy and respect any active writer. ' if settings.get('autofill')=='native' else
+        'Open the application and handle access/login if needed; on every accessible form step run available Simplify Autofill first and wait for settlement. ')
+    result['instruction']=(strategy+'Use helpers for residual work, followed by field-by-field assessment and actual screenshot inspection/recovery. '
+        'Use observed refs with browser select, check, fill, press or click. Values come from approved facts or explicit user choices. '
         'Use browser repair with fields:[{method:fill|select|check,ref,value}] to fix routine fields together and return verified results plus a fresh screen. '
         'Upload uses method:upload,ref,asset_id from selected_documents. Complete required questions using answer_context.standard_answers, answer_context.identity, approved profile facts and saved answers before requesting human input. '
         'A helper mismatch or failed selection is a recovery handoff, not an application outcome. Inspect actual options, refresh stale controls, '

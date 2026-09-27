@@ -10,8 +10,8 @@ from test_greenhouse_recovery import form_dom
 
 
 @pytest.mark.parametrize('platform,operation,parameters', [
-    ('workday','fast_forward',{'seconds':60}),
-    ('greenhouse','greenhouse_advance',{'seconds':60}),
+    ('workday','browser',{'method':'simplify','action':'autofill'}),
+    ('greenhouse','browser',{'method':'simplify','action':'autofill'}),
     ('unknown','browser',{'method':'simplify','action':'autofill'}),
 ])
 def test_initial_filling_routes_by_platform_and_enabled_control(platform,operation,parameters):

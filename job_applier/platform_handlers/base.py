@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
@@ -104,11 +105,41 @@ class BasePlatformHandler:
         profile: dict[str, Any] | None,
         job_url: str,
         trace_hook: Optional[TraceHook] = None,
+        settings: dict[str, Any] | None = None,
     ) -> None:
         self.browser_session = browser_session
         self.profile = profile or {}
         self.job_url = str(job_url or "")
         self.trace_hook = trace_hook
+        self.settings = settings or {}
+
+    async def simplify_before_native(self, page):
+        """Use the canonical boundary on the handler's already-owned page."""
+        from ..simplify_boundary import SimplifyBoundary, initial_autofill
+        from ..browser_controls import FORM
+        class ActorPort:
+            async def evaluate(self, script, arg=None):
+                result=await page.evaluate('async () => {const value = (\n'+script+'\n); return await (typeof value === "function" ? value('+json.dumps(arg)+') : value);}')
+                if isinstance(result,str):
+                    try:return json.loads(result)
+                    except ValueError:pass
+                return result
+            evaluate_function=evaluate
+        port=page if hasattr(page,'evaluate_function') else ActorPort()
+        boundary=SimplifyBoundary(port)
+        try:
+            observed=await boundary.observe()
+            native=await port.evaluate_function(FORM,{'method':'observe'})
+            observed=dict(observed,**native)
+            if observed.get('status')=='active' or observed.get('writer_pending'):
+                return await boundary.perform('autofill',automatic=True)
+            if self.settings.get('autofill')!='native' and initial_autofill(observed):
+                return await boundary.perform('autofill',automatic=True)
+            return {'execution':'not_executed','native_takeover_authorized':bool(observed.get('writer_safe') and not (
+                        observed.get('activity',{}).get('busy_indicator') and observed.get('activity',{}).get('waiting_for_input'))),
+                    'reason':'residual_work' if observed.get('writer_safe') else 'writer_settlement_required'}
+        except (ValueError,RuntimeError,AttributeError,TimeoutError):
+            return {'execution':'not_executed','native_takeover_authorized':False,'reason':'simplify_observation_needs_executor_inspection'}
 
     @classmethod
     def can_handle(cls, url: str) -> bool:

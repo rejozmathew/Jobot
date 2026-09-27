@@ -68,6 +68,10 @@ console.log(JSON.stringify({committed,screenshot_readonly:writes===0&&masked.mas
 
 
 def offline_worker(monkeypatch, items):
+    from job_applier import browser_controls
+    monkeypatch.setattr(browser_controls, 'observe', AsyncMock(return_value={
+        'status': 'missing', 'controls': {},
+        'native_authentication_required': any(i.get('type') == 'password' for i in items)}))
     app = worker.ApplicationTool(None, 'synthetic', 'synthetic', {'worker_id': 'w'})
     url = 'https://job-boards.greenhouse.io/example/jobs/123'
     app.context = {'attempt_id': 1}
@@ -118,6 +122,22 @@ def test_extension_ref_is_not_invalidated_before_click(monkeypatch):
     monkeypatch.setattr(SimplifyBoundary, 'perform', AsyncMock(return_value={'status': 'unknown', 'writer_state': 'idle', 'changed': False}))
     asyncio.run(app.operate({'operation': 'autofill', 'ref': 'visible-ref'}))
     assert clicks == ['visible-ref']
+
+
+def test_explicit_extension_continue_uses_available_initial_autofill(monkeypatch):
+    from job_applier import browser_controls
+    from job_applier.simplify_boundary import SimplifyBoundary
+    app, clicks = offline_worker(monkeypatch, [{'ref': 'continue-ref', 'source': 'simplify', 'label': 'Continue Application', 'tag': 'BUTTON'}])
+    observed = {'status': 'ready', 'controls': {'autofill': {'ref': 'bulk', 'enabled': True}}, 'stage': {'name': 'candidate_profile'}}
+    monkeypatch.setattr(browser_controls, 'observe', AsyncMock(return_value=observed))
+    monkeypatch.setattr(browser_controls, 'simplify_document', AsyncMock(return_value=(object(), {}, {})))
+    monkeypatch.setattr(SimplifyBoundary, 'observe', AsyncMock(return_value=observed))
+    performed = AsyncMock(return_value={'status': 'complete', 'writer_state': 'idle', 'changed': True})
+    monkeypatch.setattr(SimplifyBoundary, 'perform', performed)
+    asyncio.run(app.operate({'operation': 'autofill', 'ref': 'continue-ref'}))
+    assert clicks == []
+    assert performed.call_args.args[0] == 'autofill'
+    assert performed.call_args.kwargs['automatic'] is True
 
 
 def test_generic_click_cannot_delegate_password_creation_to_simplify(monkeypatch):

@@ -196,8 +196,8 @@ def test_writer_receipts_survive_spa_but_not_document_replacement(tmp_path,monke
             assert not boundary.get('native_takeover_authorized')
             assert boundary.get('audit') and boundary.get('next_operation')
             await page.evaluate("fixture.setSimplify('complete')")
-            settled=await SimplifyBoundary(page,budget_seconds=45).perform('autofill')
-            assert settled.get('native_takeover_authorized') and settled.get('audit')
+            settled=await browser_controls.observe_writers(page,package)
+            assert settled['writer_safe'] and settled['settled_evidence']
             assert await fixture_read(page,'fixture.counters.autofillClicks')==0
             await page.reload()
             replaced=await page.evaluate(OBSERVE)

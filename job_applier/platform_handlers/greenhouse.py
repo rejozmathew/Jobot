@@ -269,12 +269,14 @@ class GreenhouseHandler(BasePlatformHandler):
         job_url: str,
         trace_hook: Optional[TraceHook] = None,
         cdp_url: Optional[str] = None,
+        settings: dict[str, Any] | None = None,
     ):
         super().__init__(
             browser_session=browser_session,
             profile=profile or {},
             job_url=str(job_url or ""),
             trace_hook=trace_hook,
+            settings=settings,
         )
         self.browser: Any = None
         self._cdp_url = cdp_url
@@ -352,6 +354,10 @@ class GreenhouseHandler(BasePlatformHandler):
                 "Open the job URL in the Brave CDP window and retry.",
             )
         self._record("form:ready", {"fields": len(inv)})
+        bulk=await self.simplify_before_native(page)
+        if not bulk.get('native_takeover_authorized'):
+            return self._outcome(HandlerResult.NEEDS_LLM,'FORM',bulk.get('reason','writer_settlement_required'))
+        inv=await self._eval(page,MAP_FIELDS_JS,None) or []
 
         # 3) Fill standard fields by id (identity block).
         select_fields: list[tuple[str, str]] = []

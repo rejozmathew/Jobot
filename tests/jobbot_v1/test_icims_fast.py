@@ -8,7 +8,8 @@ from test_form_audit import fixture_html,icims_browser
 
 
 @pytest.mark.parametrize('submission_mode',['review','submit'])
-def test_real_dispatch_password_profile_screening_and_final_service(tmp_path,monkeypatch,submission_mode,capsys):
+@pytest.mark.parametrize('initial_action',['fill','simplify_submit'])
+def test_real_dispatch_password_profile_screening_and_final_service(tmp_path,monkeypatch,submission_mode,capsys,initial_action):
     import test_embedded_forms as fixture
     from test_local_sessions import setup,connect
     from job_applier.workspace_host import WorkspaceHost
@@ -17,6 +18,7 @@ def test_real_dispatch_password_profile_screening_and_final_service(tmp_path,mon
     monkeypatch.setattr(fixture,'FORM_HTML',fixture_html())
     async def run():
         async with icims_browser(tmp_path) as (page,package,_):
+            await page.evaluate('fixture.autofillDelay=150')
             service,asset,_,ws,cfg=setup(tmp_path/'ledger')
             ws[0].update(cdp_url=page.fixture_endpoint,mode='headless');service.configure_workspaces(ws)
             service.configure({'mode':'pilot' if submission_mode=='submit' else 'development','submission_mode':submission_mode,'browser_mode':'headless'},expected_version=service.settings_view()['version'])
@@ -37,14 +39,18 @@ def test_real_dispatch_password_profile_screening_and_final_service(tmp_path,mon
             # Actual read-only public method, not a classifier-only test.
             compact=json.loads(await asyncio.to_thread(plugin.handle,{'operation':'browser','parameters':{'method':'audit'}},session_id='fixture'))
             assert compact['audit_version']==1 and compact['summary']['missing_credential_controls']==2,compact
+            initial_params=({'method':'fill','selector':'#preferred-name','value':'Synthetic optional name'} if initial_action=='fill' else {'method':'submit','source':'simplify'})
+            redirected=json.loads(await asyncio.to_thread(plugin.handle,{'operation':'browser','parameters':initial_params},session_id='fixture'))
+            assert redirected.get('redirected_from')==initial_params['method'] and not redirected['requested_action_performed'],redirected
+            assert await page.evaluate("document.querySelector('#preferred-name').value")==''
             result=json.loads(await asyncio.to_thread(plugin.handle,{'operation':'icims_advance','parameters':{'seconds':30}},session_id='fixture'))
             assert result.get('status')=='questions_required',result
             assert len(result['questions'])==2
-            assert result['actions']['credentials']==1 and result['actions']['autofill']==0
+            assert result['actions']['credentials']==1 and result['actions']['autofill']==1
             assert result['actions']['repair_fields']==0 and result['actions']['stage_advance']==1
             assert not service.attempt(session['attempt_id'])['submit_intent_at']
             counters=await page.evaluate('fixture.counters')
-            assert counters['profileSubmits']==1 and counters['autofillClicks']==0 and counters['finalSubmits']==0
+            assert counters['profileSubmits']==1 and counters['autofillClicks']==2 and counters['finalSubmits']==0
             plans=[{'ref':q['ref'],'question_key':q['question_key'],'answer':'No','basis':'explicit_synthetic_answer'} for q in result['questions']]
             # CLI parser -> session_call -> host -> real runner, old-plugin fallback.
             monkeypatch.setattr(application_runtime,'resolve_config',lambda *a:cfg)
@@ -54,7 +60,7 @@ def test_real_dispatch_password_profile_screening_and_final_service(tmp_path,mon
             assert output['actions']['repair_fields']==2
             assert await page.evaluate('fixture.counters.finalSubmits')==(1 if submission_mode=='submit' else 0)
             assert 'SYNTHETIC-secret-42!' not in json.dumps([compact,result,output])
-            assert routes==['browser','icims_advance','icims_advance']
+            assert routes==['browser','browser','icims_advance','icims_advance']
             evidence={'mode':submission_mode,'routes':routes,'profile':result,'completion':output,'counters':await page.evaluate('fixture.counters')}
             folder=__import__('pathlib').Path('artifacts/jobbot-v1-private');folder.mkdir(parents=True,exist_ok=True)
             (folder/('icims-trace-'+submission_mode+'.json')).write_text(json.dumps(evidence,indent=2))
@@ -68,6 +74,10 @@ def test_stop_during_private_fill_prevents_stage_click_and_reaudit(tmp_path,monk
     monkeypatch.setattr(fixture,'FORM_HTML',fixture_html())
     async def run():
         async with icims_browser(tmp_path) as (page,package,_):
+            from job_applier.browser_controls import observe
+            await page.evaluate("fixture.setSimplify('active')")
+            await observe(page,package)
+            await page.evaluate("fixture.setSimplify('needs_review')")
             state={'control':'running'};calls=[]
             def call(op,**params):
                 calls.append(op)

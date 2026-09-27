@@ -278,7 +278,7 @@ class RuntimeServices:
             from .browser_controls import next_operation
             permitted=quiescent and match['status']=='same_job' and not (
                 obs.get('activity',{}).get('busy_indicator') and obs.get('activity',{}).get('waiting_for_input'))
-            guidance=next_operation(detected_platform,obs,identity=match,quiescent=permitted)
+            guidance=next_operation(detected_platform,obs,identity=match,quiescent=permitted,settings=settings)
             compact={}
             if audit_observation is not None:
                 from .form_audit import audit

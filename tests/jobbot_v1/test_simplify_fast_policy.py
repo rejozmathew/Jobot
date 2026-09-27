@@ -237,6 +237,7 @@ class DOMSeamPort:
         if "jobbot:simplify:observe" in script:
             obs = dict(self.observation)
             obs.setdefault("url", self.url)
+            obs.setdefault("workday", ".myworkdayjobs.com/" in obs['url'])
             return obs
         if "jobbot:simplify:click" in script:
             self.clicks.append(arg)

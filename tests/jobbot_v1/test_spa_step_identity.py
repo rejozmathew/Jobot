@@ -474,7 +474,7 @@ def test_boundary_same_url_step_transition_allows_autofill_once():
     - Continue waits for and recognizes the new step via distinguishable page_signature.
     - On the new step (Questions), Autofill is permitted exactly once and not suppressed
       by the prior step's attempted-page key.
-    - Subsequent Autofill attempt on the new step is correctly rejected as already_attempted.
+    - Subsequent automatic Autofill attempt on the new step is correctly rejected as already_attempted.
     """
     port = NodeVMBoundaryPort()
     time_sim = FakeClockSleeper()
@@ -508,7 +508,7 @@ def test_boundary_same_url_step_transition_allows_autofill_once():
     )
 
     # Autofill on the new step must be allowed (not suppressed by Step 1's attempted key)
-    res_autofill_1 = asyncio.run(boundary.perform("autofill"))
+    res_autofill_1 = asyncio.run(boundary.perform("autofill", automatic=True))
     assert res_autofill_1["writer_state"] == "idle", (
         f"Autofill on new step must be permitted and release writer as idle, got '{res_autofill_1['writer_state']}'"
     )
@@ -516,7 +516,7 @@ def test_boundary_same_url_step_transition_allows_autofill_once():
     assert res_autofill_1["reason"] in ("observed_change", "no_observable_progress")
 
     # A second Autofill on the same new step must now be rejected as already attempted
-    res_autofill_2 = asyncio.run(boundary.perform("autofill"))
+    res_autofill_2 = asyncio.run(boundary.perform("autofill", automatic=True))
     assert res_autofill_2["reason"] == "already_attempted", (
         f"Second autofill on same step must be rejected as already_attempted, got '{res_autofill_2.get('reason')}'"
     )

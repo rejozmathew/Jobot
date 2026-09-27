@@ -183,8 +183,9 @@ selected résumé, then advances through the dialog under current submission
 settings. Resolve returned unfamiliar questions from approved facts with the
 current executor and resume the helper. Keep external Apply on its observed
 employer URL and existing ATS handler. A missing external URL is not Easy Apply
-evidence. Simplify may assist when present and settled; the native LinkedIn helper
-also works without it. See [LinkedIn](references/linkedin.md).
+evidence. On each opened form step, the helper runs available Simplify Autofill
+first, waits for settlement, then handles residuals. It also works when Simplify
+is unavailable. See [LinkedIn](references/linkedin.md).
 
 `HERMES_SESSION_ID` identifies this conversation. If the shell does not expose
 it, pass `--driver-id <this-conversation-id>` on local commands, consistently for
@@ -278,7 +279,13 @@ from their approved facts.
    one `fast_forward` call with a `recovery` mapping, as described in the Workday
    skill. It fills the selected private controls, acts and observes in one owned
    connection; do not rerun the failed matcher or take a model turn per field.
-3. Let official Simplify do bulk filling. Observe until it settles; never compete
+3. Across **every portal**, open the application and handle necessary login/access
+   first, then run available **Simplify Autofill on the current form step**.
+   Helpers handle residuals afterward; the executor then assesses remaining
+   fields and visually inspects screenshots to recover unsupported controls.
+   A Complete/needs_review label alone is not proof that this step was filled.
+   The observed dispatch/activity receipt survives reconnects and field edits.
+   Let official Simplify do bulk filling. Observe until it settles; never compete
    with active writers. For unknown state, reobserve or use an enabled, observed
    Simplify Stop/Cancel autofill control through `browser` with
    `{"method":"simplify","action":"stop"}` (and its ref if needed). This only
@@ -289,12 +296,13 @@ from their approved facts.
    Use the observed enabled action (including `autofill_skills`, any count), then
    wait again. A real unended write, disabled action or explicit ongoing fill
    still blocks. Permission for extension input does not authorize native edits.
-4. Prefer enabled Simplify Continue Application after settling over nonblocking
+4. After the current step's initial Autofill settles, prefer enabled Simplify Continue Application over nonblocking
    review warnings, source repair or optional field inspection. A populated
    dropdown stays populated even if Simplify says needs_review. Advance first;
    repair it only for an actual employer validation error or incorrect known fact.
-   On Workday, if Simplify Continue is unavailable or failed to advance, use the
-   page's available Autofill once before manual repair, then try Continue again.
+   Use portal helpers for actual residuals, then executor field-by-field and
+   screenshot recovery. A missing/unsupported Autofill control permits supported
+   native recovery; it does not end the application. Explicit recovery remains available.
    Return every new page to the normal Simplify flow after handling an exception;
    a manual questionnaire does not make later pages manual, including Self Identify.
    Handle only actual required blockers and material identity/document errors.

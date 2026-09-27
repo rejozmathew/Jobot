@@ -146,6 +146,22 @@ class EasyApplyRunner:
                 if previous==observed['page_signature']:return self.report('inspection_required',observed,'modal_not_opened')
                 result=await self.write('open',lambda:click_control(self.page,{'ref':control['ref']}))
             else:
+                from .simplify_boundary import SimplifyBoundary,initial_autofill
+                first=initial_autofill(observed) if self.settings.get('autofill')!='native' else None
+                if first:
+                    async def autofill():
+                        from .browser_controls import simplify_document
+                        from .managed_shared import ProtocolError
+                        async def checkpoint():
+                            pulse=self.owned('heartbeat')
+                            if pulse.get('control','running')!='running':raise ProtocolError(pulse['control'])
+                        document,_,_=await simplify_document(self.page,ref=first.get('ref'),operation='autofill')
+                        result=await SimplifyBoundary(document,budget_seconds=max(.05,min(45,deadline-time.monotonic())),checkpoint=checkpoint).perform('autofill',automatic=True)
+                        return dict(result,clicked=result.get('execution')=='clicked')
+                    settled=await self.write('autofill',autofill)
+                    if not settled.get('native_takeover_authorized'):
+                        return self.report('continue',await self.observe(),'writer_settlement_required')
+                    continue
                 filled=await self.write('fill',lambda:self.fill(observed))
                 if not filled.get('committed'):return self.report('inspection_required',await self.observe(),filled.get('reason','field_recovery'),fields=filled.get('failures',[]))
                 observed=await self.observe();route=observed['linkedin']

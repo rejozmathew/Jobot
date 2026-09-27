@@ -72,6 +72,8 @@
  const structure=JSON.stringify([text(modal?.querySelector('h2,h3')),route.questions.map(q=>[q.field,q.question,q.kind,q.options.map(o=>[o.value,o.label])]),
   Object.keys(result.native),route.file_inputs.map(f=>[f.name,f.accept])]);
  if(scope.linkedinStructure!==structure){scope.linkedinStructure=structure;scope.linkedinSignature='linkedin:'+crypto.randomUUID();}
+ scope.linkedinAutofillShape={headings:[modal?text(modal.querySelector('h2,h3')):'posting'],
+  fields:route.questions.map(q=>JSON.stringify([q.field,q.question,q.kind])).concat(route.file_inputs.map(f=>JSON.stringify([f.name,f.accept])))};
  result.page_signature=scope.page_signature=scope.linkedinSignature;
  route.step=modal?(result.native.submit?'review':'easy_apply'):'posting';
  // Shared pointer/manual recovery uses the generic form scope's step.

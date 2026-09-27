@@ -280,18 +280,27 @@
    inventory.push({...describe(e),present:null,hidden_validation:true});
   const headings=collected.filter(e=>visible(e)&&e.matches('h1,h2,h3,[aria-current="step"]')).map(text);
   const cues=headings.join(' ');let stage='unknown';
+  // Email/password fields also occur inside full candidate profiles. Only a
+  // small access form may bypass the initial bulk Autofill as authentication.
+  const dataControls=nodes().filter(e=>e.matches('input,select,textarea,[role="combobox"]')&&
+    !['hidden','button','submit','reset','checkbox','radio','search'].includes(e.type));
+  const accessOnly=dataControls.length>0&&dataControls.every(e=>
+    ['email','password'].includes(e.type)||/^(?:username|email)$/i.test(e.autocomplete||'')||
+    /^(?:e-?mail(?: address)?|user ?name)$/i.test(label(e).replace(/\s*(?:\*|\(required\))\s*$/i,'').trim()));
   if(/candidate profile/i.test(cues))stage='candidate_profile';
   else if(/application received|thank you.*appl/i.test(cues))stage='confirmation';
   else if(/review.*application|application.*review/i.test(cues))stage='review';
   else if(/screening|application questions/i.test(cues))stage='screening';
   else if(groups.length)stage='verification';
-  else if(nodes().some(e=>e.type==='password'))stage=nodes().filter(e=>e.type==='password').length>1?'create_account':'sign_in';
-  else if(nodes().some(e=>e.type==='email'))stage='email_entry';
+  else if(accessOnly&&nodes().some(e=>e.type==='password'))stage=nodes().filter(e=>e.type==='password').length>1?'create_account':'sign_in';
+  else if(accessOnly)stage='email_entry';
   const labels={'save and continue':'continue','continue':'continue','next':'continue','next step':'continue',
     'apply':'apply','apply now':'apply','apply for this job':'apply','apply manually':'apply','start application':'apply',
     'submit':'submit','submit application':'submit','send application':'submit'};
   for(const item of inventory){
-   const kind=item.text.toLowerCase()==='submit profile'&&stage==='candidate_profile'?'continue':labels[item.text.toLowerCase()];if(!kind)continue;
+   const element=scope.inventory.get(item.ref);
+   const formSubmit=element?.type==='submit'&&element.form&&/^apply(?: now)?$/i.test(item.text);
+   const kind=formSubmit?'submit':item.text.toLowerCase()==='submit profile'&&stage==='candidate_profile'?'continue':labels[item.text.toLowerCase()];if(!kind)continue;
    controls[kind]=controls[kind]?{enabled:false,ref:null}:{ref:item.ref,enabled:item.enabled,label:item.text};
   }
   const errors=[...document.querySelectorAll('[aria-invalid="true"],[role="alert"]')].filter(e=>visible(e)&&native(e))
@@ -385,7 +394,8 @@
  if(args.method==='inspect'){
   scope.beforeMenus=[...document.querySelectorAll('[role="listbox"],[role="menu"]')].filter(visible);
   return {...describe(el),...value(),checked:checked(el),href:el.href||'',submission_control:
-   /^(?:submit|submit application|send application)$/i.test(text(el)||el.value||label(el))&&
+   (/^(?:submit|submit application|send application)$/i.test(text(el)||el.value||label(el))||
+    el.type==='submit'&&el.form&&/^apply(?: now)?$/i.test(text(el)||el.value||label(el)))&&
    !el.closest('form')?.querySelector('input[type="password"]')};
  }
  if(args.method==='focus'){el.focus();return {committed:(el.getRootNode().activeElement||document.activeElement)===el};}

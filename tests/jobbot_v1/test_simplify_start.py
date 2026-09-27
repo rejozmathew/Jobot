@@ -511,6 +511,10 @@ def test_boundary_perform_start_disabled_and_stale_guards():
 
 
 def test_worker_autofill_chooses_start_when_no_autofill_but_start_ready(monkeypatch):
+    from job_applier import browser_controls
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(browser_controls, 'observe', AsyncMock(return_value={
+        'status': 'missing', 'controls': {}, 'native_authentication_required': False}))
     """Worker operate({'operation': 'autofill'}) selects start when only start is ready.
 
     Performs under existing scoped action/writer fencing, returns explicit simplify_start

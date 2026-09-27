@@ -330,6 +330,10 @@ def test_active_in_flight_unresolved_extension_stays_blocked(tmp_path, monkeypat
 
 
 def test_fresh_ref_extension_choice_independent_of_label_and_guarded_account_action(monkeypatch):
+    from job_applier import browser_controls
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(browser_controls, 'observe', AsyncMock(return_value={
+        'status': 'missing', 'controls': {}, 'native_authentication_required': True}))
     """6) Fresh ref choice discovers extension buttons with source='simplify',
     guarantees autofill does not hand password/account forms to Simplify,
     and supports Luna-selected extension ref."""

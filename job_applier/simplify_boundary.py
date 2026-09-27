@@ -9,6 +9,32 @@ CLICK=(ROOT/'simplify_click.js').read_text(encoding='utf-8')
 STATES={'ready','active','complete','needs_review','unsupported','login_required','missing','unknown'}
 
 
+def initial_autofill(observed):
+    """Recommend a first bulk fill, never prohibit explicit native recovery.
+
+    A terminal panel label is settlement evidence, not a receipt for this step.
+    Authentication and opening the application remain native access work.
+    """
+    if (observed.get('status') not in ('ready','complete','needs_review') or
+        observed.get('writer_pending') or observed.get('native_authentication_required') or
+        observed.get('confirmation_surface') or
+        observed.get('stage',{}).get('name') in ('email_entry','sign_in','create_account','verification','confirmation') or
+        observed.get('native',{}).get('apply',{}).get('enabled')):
+        return None
+    if observed.get('workday') and observed.get('auth'):return None
+    route=observed.get('linkedin')
+    if route and (observed.get('auth') or not route.get('modal')):return None
+    candidates=observed.get('autofill_candidates')
+    if candidates is not None:
+        eligible=[c for c in candidates if c.get('enabled') and not c.get('attempted')]
+        return eligible[0] if len(eligible)==1 else None
+    receipt=observed.get('autofill_receipt') or {}
+    attempted=observed.get('autofill_attempted') or receipt.get('automatic_count',receipt.get('dispatch_count',0)) or receipt.get('repairs_started')
+    if receipt.get('state') in ('dispatching','dispatched','active','uncertain'):return None
+    control=observed.get('controls',{}).get('autofill',{})
+    return control if control.get('enabled') and not attempted else None
+
+
 class SimplifyBoundary:
     def __init__(self,page,*,budget_seconds=45,poll_seconds=0.1,clock=None,sleeper=None,fast=False,scope=None,checkpoint=None):
         if not 0<budget_seconds<=120 or not 0<poll_seconds<=5:raise ValueError('Invalid Simplify budget')
@@ -35,7 +61,7 @@ class SimplifyBoundary:
         result.update(panel=raw.get('panel') is True,status=raw['status'],controls=controls,
             source='fixture' if raw.get('source')=='fixture' else 'observed_dom')
         result['login_kind']=raw.get('login_kind')
-        for key in ('writer_document_id','writer_participant','writer_pending','terminal_evidence','settled_evidence','review_items','review_items_unavailable'):
+        for key in ('writer_document_id','writer_participant','writer_pending','terminal_evidence','settled_evidence','review_items','review_items_unavailable','autofill_attempted','autofill_page_key'):
             if key in raw:result[key]=raw[key]
         result['native_authentication_required']=raw.get('native_authentication_required') is True
         if raw.get('workday') is True:
@@ -65,7 +91,7 @@ class SimplifyBoundary:
     @staticmethod
     def decide(observation,already_attempted=False,*,fast=False):
         status=observation.get('status','unknown');controls=observation.get('controls') or {}
-        already_attempted=already_attempted or bool(observation.get('workday') and observation.get('autofill_attempted'))
+        already_attempted=already_attempted or bool(observation.get('autofill_attempted'))
         if status=='active':return {'action':'wait','reason':'autofill_active'}
         if observation.get('native_authentication_required'):
             return {'action':'fallback','reason':'workday_native_authentication_required'}
@@ -80,6 +106,8 @@ class SimplifyBoundary:
                 (count==0 or count==1 and observation.get('required_residual_count',0)>0)):
                 return {'action':'autofill','reason':'greenhouse_initial_pass' if count==0 else 'greenhouse_residual_second_pass'}
             return {'action':'fallback','reason':'greenhouse_native_residual_batch'}
+        if not already_attempted and initial_autofill(observation):
+            return {'action':'autofill','reason':'initial_autofill_before_residuals'}
         if controls.get('continue',{}).get('enabled'):
             return {'action':'continue','reason':'prefer_extension_continue'}
         if controls.get('autofill_skills',{}).get('enabled'):
@@ -159,7 +187,7 @@ class SimplifyBoundary:
         page_key=before.get('autofill_page_key') or before.get('page_signature') or before['url']
         if operation=='autofill_skills':
             page_key=(page_key,operation,before['controls'][operation].get('label'))
-        already=page_key in self.attempted or operation=='autofill' and before.get('workday') and before.get('autofill_attempted',False)
+        already=page_key in self.attempted or operation=='autofill' and before.get('autofill_attempted',False)
         can_retry=(bool(retry) and self.fast and operation=='autofill' and already
             and before['status'] in ('ready','complete','needs_review')
             and bool(before.get('controls',{}).get('autofill',{}).get('enabled'))
@@ -174,6 +202,11 @@ class SimplifyBoundary:
             already=False;can_retry=False
             if not automatic and not pending and before['status'] in ('ready','complete','needs_review'):
                 decision={'action':'autofill','reason':'explicit_greenhouse_autofill'}
+        elif (operation=='autofill' and not automatic and not before.get('workday') and
+              before['status'] in ('ready','complete','needs_review') and not before.get('writer_pending')):
+            # Receipts schedule automatic work; they are not an explicit recovery veto.
+            already=False
+            decision={'action':'autofill','reason':'explicit_autofill_recovery'}
         # An explicit first Autofill can repair failed advancement even when
         # Continue remains enabled. The default recommendation still advances.
         if (operation=='autofill' and before.get('workday') and not already and
@@ -253,7 +286,7 @@ class SimplifyBoundary:
                 current=await self.observe();changed=self._changed(before,current)
                 if current['status']=='active' or changed:
                     saw_active_or_change=True
-                if greenhouse:
+                if greenhouse or (operation=='autofill' and not before.get('workday')):
                     signature=(current.get('fingerprint'),current.get('native_structure'),current.get('status'))
                     if signature!=prior_native:stable_count=0;stable_since=self.clock()
                     stable_count+=1;prior_native=signature
@@ -264,7 +297,10 @@ class SimplifyBoundary:
                         not current.get('activity',{}).get('explicit_writer') and stable_count>=3 and
                         self.clock()-stable_since>=.4 and (saw_active_or_change or elapsed>=5)):
                         state='settled' if saw_active_or_change else 'no_progress'
-                        await self.page.evaluate_function('(state)=>{const r=window.__jobbotGreenhouseDocument?.current;if(r){r.state=state;r.settled_at=Date.now()}}',state)
+                        if greenhouse:
+                            await self.page.evaluate_function('(state)=>{const r=window.__jobbotGreenhouseDocument?.current;if(r){r.state=state;r.settled_at=Date.now()}}',state)
+                        elif current.get('writer_document_id') and current.get('writer_pending'):
+                            await self.page.evaluate_function('()=>{const w=window.__jobbotWriter;if(w){w.pending=false;w.terminal=true;w.operation=null}}')
                         current=await self.observe()
                         return self._result(current,changed,'idle','observed_change' if saw_active_or_change else 'no_observable_progress')
                     await self.sleep(max(.2,self.poll));continue

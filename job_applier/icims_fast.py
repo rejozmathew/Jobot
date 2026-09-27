@@ -10,7 +10,7 @@ from .browser_frames import FrameUnavailable
 from .form_audit import audit, recovery
 from .managed_questions import question_key
 from .managed_shared import ProtocolError, uid
-from .simplify_boundary import SimplifyBoundary
+from .simplify_boundary import SimplifyBoundary, initial_autofill
 
 
 class IcimsRunner:
@@ -189,15 +189,23 @@ class IcimsRunner:
                     prior=None;continue
                 if not await self.gate():return self.result('inspection_required','writer_settlement_required')
                 native=self.last.get('native',{})
-                # Posting and email entry precede bulk application filling.
-                if stage not in ('email_entry','sign_in','create_account') and not native.get('apply') and self.last.get('status')=='ready' and not self.last.get('settled_evidence') and self.last.get('controls',{}).get('autofill',{}).get('enabled'):
+                # Posting footer fields are not the application form.
+                if native.get('apply',{}).get('enabled'):
+                    async with self.batch('advance'):
+                        result=await click_control(self.page,{'ref':native['apply']['ref']})
+                        self.actions['stage_advance']+=int(result.get('clicked'));self.trace.append('open_application')
+                    if not result.get('clicked'):return self.result('inspection_required',result.get('reason','advance_unconfirmed'))
+                    await asyncio.sleep(.15);continue
+                first=initial_autofill(dict(self.last,stage=self.audit['stage'])) if self.settings.get('autofill')!='native' else None
+                if first:
                     async with self.batch('autofill'):
-                        document,_,_=await simplify_document(self.page,operation='autofill')
-                        settled=await SimplifyBoundary(document,budget_seconds=max(.05,min(45,self.deadline-time.monotonic())),checkpoint=self.control).perform('autofill')
+                        document,_,_=await simplify_document(self.page,ref=first.get('ref'),operation='autofill')
+                        settled=await SimplifyBoundary(document,budget_seconds=max(.05,min(45,self.deadline-time.monotonic())),checkpoint=self.control).perform('autofill',automatic=True)
                         self.actions['autofill']+=int(settled.get('execution')=='clicked');self.trace.append('simplify_settlement')
                     if not settled.get('native_takeover_authorized'):return self.result('continue','writer_settlement_required')
+                    prior=None
                     continue
-                self.trace.append('simplify_settled')
+                self.trace.append('residual_audit')
                 verification=self.last.get('verification',{}).get('groups',[])
                 if any(g.get('complete') is False for g in verification):
                     return self.result('verification_required','use_existing_credentials_mail_flow',verification={'groups':verification})

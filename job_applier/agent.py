@@ -963,8 +963,7 @@ class JobApplyAgent:
                         if outcome.result in {HandlerResult.PROGRESSED, HandlerResult.SUBMITTED}:
                             return True, f"Platform recovery #{attempt_no}: {outcome.message}", marker
                         if outcome.result == HandlerResult.BLOCKED:
-                            stagnation_reason = f"Platform blocker ({outcome.blocker_code or 'blocked'}): {outcome.message}"
-                            return True, stagnation_reason, marker
+                            return False, f"Platform helper needs executor recovery ({outcome.blocker_code or 'blocked'}): {outcome.message}. Inspect a fresh screenshot and remaining controls/options.", marker
                         if outcome.result == HandlerResult.FAILED:
                             return False, f"Platform recovery #{attempt_no} failed: {outcome.message}", marker
 
@@ -2781,6 +2780,9 @@ class JobApplyAgent:
                                 "note": recovery_note,
                             })
                         elif recovery_marker:
+                            if recovery_marker=='platform_handler_recover':
+                                memory_text=upsert_memory_line(memory_text,'HELPER-RECOVERY:',recovery_note)
+                                if hasattr(output,'memory'):output.memory=memory_text
                             append_trace({
                                 "step": step_num,
                                 "ts": datetime.utcnow().isoformat(),
@@ -3031,25 +3033,14 @@ class JobApplyAgent:
                         "intervention_reason": None,
                         "screenshot_path": platform_screen_path,
                     }
-                if platform_outcome.result == HandlerResult.BLOCKED:
-                    reason = platform_outcome.message or "Deterministic platform handler reported blocker."
-                    return {
-                        "status": "needs_review",
-                        "message": reason,
-                        "error": "",
-                        "intervention_reason": f"{platform_outcome.blocker_code or 'blocked'}: {reason}",
-                        "screenshot_path": platform_screen_path,
-                    }
-                if platform_outcome.result == HandlerResult.FAILED:
-                    return {
-                        "status": "failed",
-                        "message": platform_outcome.message or "Deterministic platform handler failed.",
-                        "error": platform_outcome.message or "Platform handler failed",
-                        "intervention_reason": None,
-                        "screenshot_path": platform_screen_path,
-                    }
+                if platform_outcome.result in {HandlerResult.BLOCKED,HandlerResult.FAILED}:
+                    platform_handoff_context += (
+                        '\nHelper handoff: '+platform_outcome.message+
+                        '\nContinue this application from its current page. Inspect a fresh screenshot, frames, overlays and remaining controls; '
+                        'try supported field-by-field recovery before concluding an unresolved obstacle. A helper limit is not an application outcome.'
+                    )
                 if (
-                    platform_outcome.result in {HandlerResult.PROGRESSED, HandlerResult.NEEDS_LLM}
+                    platform_outcome.result in {HandlerResult.PROGRESSED, HandlerResult.NEEDS_LLM,HandlerResult.BLOCKED,HandlerResult.FAILED}
                     and not workday_fallback_llm_enabled
                 ):
                     if dry_run and "dry_run" in str(platform_outcome.message or ""):

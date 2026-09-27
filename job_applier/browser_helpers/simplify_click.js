@@ -31,10 +31,15 @@
     scope.autofillAttempts.add(scope.autofillPageKey);
   }
   const receipt=scope.greenhouse&&found.kind==='autofill'?scope.greenhouseReceipt:null;
+  if(!scope.workday&&!scope.greenhouse&&found.kind==='autofill'){
+    scope.writer.autofillSteps=scope.writer.autofillSteps||new Set();
+    scope.writer.autofillSteps.add(scope.autofillPageKey);
+  }
   if(receipt){
     receipt.state='dispatching';receipt.started_at=Date.now();receipt.saw_activity=false;
   }
   if(scope.writer&&!scope.workday&&!scope.greenhouse&&['autofill','autofill_skills','sign_in','create_account_autofill'].includes(found.kind)){
+    scope.writer.operation=found.kind;
     scope.writer.participant=true;scope.writer.pending=true;scope.writer.terminal=false;scope.writer.saw_active=false;scope.writer.dispatch_fingerprint=scope.last_fingerprint;
   }
   try{el.click();}catch(error){

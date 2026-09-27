@@ -47,7 +47,7 @@
       <button type="button">${active ? 'Stop Autofill' : 'Run Autofill Again'}</button></section>`;
     panel.querySelector('button').addEventListener('click', () => {
       if (active) { counters.stopClicks++; setSimplify('needs_review'); }
-      else { counters.autofillClicks++; setSimplify('active'); }
+      else { counters.autofillClicks++; setSimplify('active'); if(Number.isFinite(window.fixture.autofillDelay))setTimeout(()=>setSimplify('needs_review'),window.fixture.autofillDelay); }
     });
     window.fixture.simplifyState = state;
   }

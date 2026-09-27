@@ -223,7 +223,9 @@ def handle(service, session_id, *, include_context=True):
         # an old enabled Autofill recommendation.
         progressed=bool(state['attempt_id'] and service.events(state['attempt_id']))
         result['next_operation']=next_operation(platform,
-            {} if progressed else readiness.get('observation'))
+            {} if progressed else readiness.get('observation'),
+            settings=(result.get('context',{}).get('attempt',{}).get('settings_json') or
+                (service.attempt(state['attempt_id'])['settings_json'] if state['attempt_id'] else service.settings_view()['values'])))
     else:
         result['next_operation']={'operation':'status','parameters':{},'instruction':'Wait for session readiness while reading the detected ATS reference.'}
     if state['metadata'].get('readiness',{}).get('recovery'):
@@ -403,16 +405,27 @@ def browser_action(config,client,ownership,package,target_id,params):
             if not reads and not recovery_navigation and identity['status']!='same_job' and not (
                 (reads or method=='submit') and ((pending and is_post_submit_scope(package['job']['url'],url)) or is_workday_candidate_home(package['job']['url'],url))):
                 raise ProtocolError('target_job_mismatch' if identity['status']=='different_job' else 'job_identity_unresolved')
-            if not pending and method in ('fill','select','check','repair','apply_policy','request_answers') and platform_for_url(url)=='workday':
+            if method in ('fill','select','check','repair','apply_policy','apply_answers','request_answers','upload','click','submit'):
+                from .simplify_boundary import initial_autofill
                 observed=await observe(page,browser_package)
-                if (observed.get('workday') and observed.get('step') in ('my_information','my_experience','application_questions','voluntary_disclosures','self_identify')
-                    and not observed.get('auth') and not observed.get('native_authentication_required') and not observed.get('autofill_attempted')
-                    and observed.get('status') in ('ready','complete','needs_review') and observed.get('controls',{}).get('autofill',{}).get('enabled')):
-                    # After a manual exception the next Workday page returns to
-                    # bulk Autofill. Record exactly what ran; the requested
-                    # individual field write has not happened yet.
+                settings=package['attempt'].get('settings_json') or {}
+                if isinstance(settings,str):settings=json.loads(settings)
+                first=initial_autofill(observed) if settings.get('autofill')!='native' else None
+                if method in ('click','submit') and first:
+                    chosen={k:params[k] for k in ('ref','selector') if params.get(k)}
+                    if not chosen and params.get('source')!='simplify':first=None  # Confirmation-only observation.
+                    elif params.get('source')!='simplify':
+                        info=await inspect_control(page,chosen)
+                        native_refs={c.get('ref') for k,c in observed.get('native',{}).items() if k in ('continue','review','submit')}
+                        residual_action=(method=='submit' or info.get('submission_control') or
+                            chosen.get('ref') in native_refs or info.get('ref') in native_refs or info.get('tag') in ('INPUT','SELECT','TEXTAREA') or
+                            info.get('role') in ('checkbox','radio','combobox','option'))
+                        if not residual_action:first=None
+                if first:
+                    # Record exactly what ran; the requested residual write has
+                    # not happened yet. Reinspect its refs after bulk filling.
                     redirected_from=method;method='simplify'
-                    params={'method':'simplify','action':'autofill','ref':observed['controls']['autofill']['ref']}
+                    params={'method':'simplify','action':'autofill','ref':first['ref']}
             target={k:params[k] for k in ('ref','selector') if params.get(k)}
             submission_control=False
             if method=='click' and target:
@@ -517,7 +530,7 @@ def browser_action(config,client,ownership,package,target_id,params):
                             'observation_error_type':type(exc).__name__}
                     visual_reason='structured_observation_failed'
                 result.update(identity=identity,recovery_only=identity['status']!='same_job')
-                result['next_operation']=next_operation(platform_for_url(url),observed if 'observed' in locals() else {},identity=identity,quiescent=(owned_gate or {}).get('native_takeover_authorized'))
+                result['next_operation']=next_operation(platform_for_url(url),observed if 'observed' in locals() else {},identity=identity,quiescent=(owned_gate or {}).get('native_takeover_authorized'),settings=package['attempt'].get('settings_json'))
                 if identity['status']!='same_job':visual_reason='identity_unresolved_on_owned_page'
                 result['title']=await page.evaluate('document.title')
                 result['text']=await page.evaluate('document.body.innerText.slice(0,8000)')
@@ -648,12 +661,12 @@ def browser_action(config,client,ownership,package,target_id,params):
                 dispatched_at=datetime.now(timezone.utc).isoformat()
                 result=await SimplifyBoundary(document,budget_seconds=45,fast=True,
                     scope={'attempt_id':ownership['attempt_id'],'target_id':target_id} if extension.get('greenhouse') else None).perform(
-                        params.get('action','autofill'),credential_evidence=params.get('credential_evidence'))
+                        params.get('action','autofill'),credential_evidence=params.get('credential_evidence'),automatic=bool(redirected_from))
                 if params.get('action','autofill')=='autofill' and result.get('execution')=='clicked':record_autofill(dispatched_at)
                 if selected and selected.get('recovery'):result['control_recovery']=selected['recovery']
                 if redirected_from:
                     result.update(requested_action_performed=False,redirected_from=redirected_from,
-                        instruction='Used the available first Autofill on this Workday page before manual repair. The requested individual field action was not performed. Inspect the filled page, use enabled Continue, and handle only actual remaining validation. Return each new page to routine fast_forward.')
+                        instruction='Used available initial Autofill before residual work on this form step. The requested action was not performed. Read the fresh screen, use the portal helper for residuals, then recover remaining controls with field assessment and screenshot inspection.')
                 client.call('writer_state',**ownership,state='idle' if result.get('native_takeover_authorized') else 'unknown')
                 succeeded=result.get('execution')=='clicked';return result
             if method=='click' and params.get('ref'):

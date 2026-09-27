@@ -159,7 +159,7 @@ def test_slow_page_and_missing_extension_remain_available_for_recovery(tmp_path,
     monkeypatch.setattr(SimplifyBoundary,'observe',observe)
     h=workspace_host.WorkspaceHost.__new__(workspace_host.WorkspaceHost)
     h.workspace=workspace;h.config={'require_simplify':True};h.startup_timing={}
-    h.service=SimpleNamespace(job=lambda job_id:{'url':job_url},now=lambda:'2026-09-09T00:00:00+00:00')
+    h.service=SimpleNamespace(settings_view=lambda: {'values': {}}, job=lambda job_id:{'url':job_url},now=lambda:'2026-09-09T00:00:00+00:00')
     target,readiness=asyncio.run(h.prepare_target({'job_id':'job'}))
     assert target=='owned' and readiness['target_operable']
     assert readiness['recovery']['reason']=='application_page_loading'

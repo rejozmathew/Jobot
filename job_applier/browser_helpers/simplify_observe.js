@@ -120,6 +120,21 @@
   const hasRecognizedStep = Boolean(marker || stepHeadings.length > 0);
   const page_signature=await digest([publicUrl,marker?(marker.textContent||'').slice(0,160):stepHeadings,
     hasRecognizedStep?[]:fields.map(({key,type})=>({key,type}))]);
+  writer.autofillSteps=writer.autofillSteps||new Set();
+  const linkedinShape=window.__jobbotFormScope?.linkedinAutofillShape;
+  const shape={url:publicUrl,marker:marker?.textContent?.trim()||'',
+    headings:linkedinShape?.headings||stepHeadings,
+    fields:linkedinShape?.fields||fields.map(({key,type})=>JSON.stringify([key,type]))};
+  const priorShape=writer.autofillShape;
+  const expansion=priorShape&&priorShape.url===shape.url&&priorShape.marker===shape.marker&&
+    priorShape.fields.length>0&&shape.fields.length>0&&
+    (priorShape.fields.every(x=>shape.fields.includes(x))||shape.fields.every(x=>priorShape.fields.includes(x)))&&
+    (priorShape.headings.every(x=>shape.headings.includes(x))||shape.headings.every(x=>priorShape.headings.includes(x)));
+  // A conditional question/options expansion is residual work on the same
+  // step, not a fresh bulk-fill opportunity over the executor's repairs.
+  if(!expansion)writer.autofillShapeKey=await digest(shape.marker?[shape.url,shape.marker]:shape);
+  writer.autofillShape=shape;
+  scope.autofillPageKey=await digest([writer.autofillShapeKey,window.__jobbotApplicationSteps||[]]);
   if(workday){
     scope.page_signature=page_signature;
     const step=stepHeadings.find(t=>/^(?:my information|my experience|application questions|voluntary disclosures|self identify|review)$/i.test(t.trim()));
@@ -224,12 +239,19 @@
     if(receipt.state==='none'){receipt.external_pass_observed=true;receipt.automatic_count=Math.max(1,receipt.automatic_count);receipt.started_at=Date.now();}
     receipt.state='active';receipt.saw_activity=true;
   }
-  if(!workday&&!greenhouse&&status==='active'){writer.participant=true;writer.pending=true;writer.terminal=false;writer.saw_active=true;}
+  if(!workday&&!greenhouse&&status==='active'){
+    writer.participant=true;writer.pending=true;writer.terminal=false;writer.saw_active=true;
+    const bulk=roots.some(r=>/autofilling|filling your application|autofill in progress|stop autofill/i.test(rendered.get(r)));
+    if(writer.operation==='autofill'||!writer.operation&&bulk)writer.autofillSteps.add(scope.autofillPageKey);
+  }
+  if(workday&&status==='active'&&!scope.nativeAuthenticationRequired()&&!login_kind)
+    scope.autofillAttempts.add(scope.autofillPageKey);
   // Completion evidence cannot override a concurrently observed active writer.
   const terminal=roots.some(r=>/autofill complete|application autofilled|\d+\s+fields?\s+needs?\s+(?:review|your input)/i.test(rendered.get(r)))&&status!=='active';
-  if(terminal&&(!writer.pending||writer.saw_active||writer.dispatch_fingerprint&&writer.dispatch_fingerprint!==fingerprint)){writer.terminal=true;writer.pending=false;}
+  if(terminal&&(!writer.pending||writer.saw_active||writer.dispatch_fingerprint&&writer.dispatch_fingerprint!==fingerprint)){writer.terminal=true;writer.pending=false;writer.operation=null;}
   scope.last_fingerprint=fingerprint;
   return {url:publicUrl,page_ref:scope.id,page_signature,fingerprint,panel:roots.length>0,status,controls,inventory,login_kind,
+    autofill_page_key:scope.autofillPageKey,autofill_attempted:writer.autofillSteps.has(scope.autofillPageKey),
     writer_document_id:writer.document_id,writer_participant:writer.participant,writer_pending:writer.pending,
     terminal_evidence:terminal,settled_evidence:writer.terminal&&!writer.pending,review_items,
     review_items_unavailable:!review_items.length,

@@ -298,8 +298,8 @@ def month_year_from_value(value: Any) -> str:
 class WorkdayHandler(BasePlatformHandler):
     platform_name = "workday"
 
-    def __init__(self, *, browser_session: Any, profile: dict[str, Any] | None, job_url: str, trace_hook=None) -> None:
-        super().__init__(browser_session=browser_session, profile=profile, job_url=job_url, trace_hook=trace_hook)
+    def __init__(self, *, browser_session: Any, profile: dict[str, Any] | None, job_url: str, trace_hook=None, settings=None) -> None:
+        super().__init__(browser_session=browser_session, profile=profile, job_url=job_url, trace_hook=trace_hook,settings=settings)
         self.auth_create_attempts = 0
         self.auth_signin_attempts = 0
         self.same_state_repeat = 0
@@ -1143,6 +1143,12 @@ class WorkdayHandler(BasePlatformHandler):
                 self._record(note)
                 return self._outcome(HandlerResult.PROGRESSED, state, note, snap)
             return self._outcome(HandlerResult.FAILED, state, f"Recovery navigation failed: {reason}", snap)
+        if state in FORM_STATES:
+            bulk=await self.simplify_before_native(await self.browser_session.get_current_page())
+            if not bulk.get('native_takeover_authorized'):
+                return self._outcome(HandlerResult.NEEDS_LLM,state,bulk.get('reason','writer_settlement_required'),snap)
+            if bulk.get('execution')=='clicked' or bulk.get('changed'):
+                return self._outcome(HandlerResult.PROGRESSED,state,'Simplify filled first; inspect fresh residuals.',snap)
         if state in FORM_STATES and self.referral_fix_attempts < 2:
             self.referral_fix_attempts += 1
             fixed, note = await self.js_fix_referral_source()
@@ -1186,6 +1192,9 @@ class WorkdayHandler(BasePlatformHandler):
         if state in AUTH_STATES:
             return await self._auth_action(state, snap)
         if state in FORM_STATES:
+            bulk=await self.simplify_before_native(await self.browser_session.get_current_page())
+            if not bulk.get('native_takeover_authorized'):return False,bulk.get('reason','writer_settlement_required')
+            if bulk.get('execution')=='clicked' or bulk.get('changed'):return True,'simplify-first:rediscover-residuals'
             url_value = normalize_text(snap.get("url") or "")
             if (
                 "/apply/" not in url_value

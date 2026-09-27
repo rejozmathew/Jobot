@@ -13,10 +13,12 @@ from test_workday_fast import Harness, snapshot
 
 
 @pytest.mark.parametrize('status', ['ready', 'complete', 'needs_review'])
-def test_enabled_extension_continue_precedes_autofill_and_source_repair(status, monkeypatch):
+def test_enabled_extension_continue_follows_initial_autofill_before_source_repair(status, monkeypatch):
     observed = snapshot(status)
     observed['controls']['autofill'] = {'enabled': True}
     observed['native']['continue'] = {'enabled': True}
+    assert SimplifyBoundary.decide(observed)['action'] == 'autofill'
+    observed['autofill_attempted']=True
     assert SimplifyBoundary.decide(observed)['action'] == 'continue'
     harness = Harness([observed])
     runner = harness.runner()

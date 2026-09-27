@@ -67,6 +67,9 @@ def test_real_existing_browser_flag_tabs_retry_restart_and_crash(tmp_path):
     def apply(request):
         result=start(cfg,url=base+'/jobs/fixture',driver_id='fixture-driver',request_id=request)
         sessions.append(result['session_id'])
+        if result['state']=='preparing':
+            wait_for(lambda: service.session(result['session_id'])['state']!='preparing')
+            result=session_call(cfg,result['session_id'],'status',driver_id='fixture-driver')
         assert result['state']=='connected',result
         assert result['metadata']['readiness']['navigator_webdriver'] is False
         assert evaluate(result['target_id'],'navigator.webdriver') is False

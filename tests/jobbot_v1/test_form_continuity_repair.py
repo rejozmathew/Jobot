@@ -21,7 +21,7 @@ def test_next_action_cannot_recommend_writes_when_identity_or_writer_disallows_t
     decision=next_operation(platform, observed, identity={'status':'same_job'}, quiescent=False)
     assert decision['operation']=='browser_observe'
     decision=next_operation('unknown', observed, identity={'status':'same_job'}, quiescent=True)
-    assert decision['parameters']=={'method':'simplify','action':'autofill'}
+    assert decision['parameters']=={'method':'simplify','action':'autofill','ref':'fill'}
 
 
 def test_residual_inventory_exposes_missing_invalid_and_exact_actions():

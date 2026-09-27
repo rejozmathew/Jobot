@@ -85,6 +85,7 @@ class GreenhouseRunner:
         self.started=time.monotonic();self.batch_count=0;self.completed=0;self.field_actions=0
         self.questions=[];self.failures=[];self.verified=[];self.seen_plans=set()
         self.receipt={};self.last={};self.phase='readiness';self.restored=self.read_journal()
+        self.parent_autofill_count=0
         self.browser_package=package;self.owned_observation=owned_observation or {}
 
     def owned(self,operation,**params):return self.call(operation,**self.owner,**params)
@@ -178,7 +179,8 @@ class GreenhouseRunner:
         work=remaining_submission_work(self.last)
         result=dict(handler='greenhouse_fast',status=status,phase=self.phase,reason=reason,
             document={'id':self.document_id,'target_id':self.target,'url':getattr(self,'document_url',self.package['job']['url'])},
-            autofill_dispatch_count=self.receipt.get('dispatch_count',0),batch_count=self.batch_count,
+            autofill_dispatch_count=self.receipt.get('dispatch_count',0)+self.parent_autofill_count,
+            parent_autofill_dispatch_count=self.parent_autofill_count,batch_count=self.batch_count,
             field_action_count=self.field_actions,completed_count=self.completed,residual_count=len(work['required_fields']),
             elapsed_seconds=round(time.monotonic()-self.started,3),questions=self.questions,control_failures=self.failures,
             next_operation={'operation':'greenhouse_advance','parameters':{'seconds':60}},
@@ -210,10 +212,33 @@ class GreenhouseRunner:
 
     async def autofill(self):
         self.phase='simplify'
+        # An embedded native form can be filled by a parent-document panel.
+        # Resolve that observed control without moving native field ownership.
+        from .simplify_boundary import initial_autofill
+        from .browser_controls import simplify_document
+        combined=await observe(self.page,self.browser_package)
+        first=initial_autofill(combined) if self.settings.get('autofill')!='native' else None
+        local=await self.boundary.observe()
+        if first and first.get('document_id')!=local.get('writer_document_id'):
+            if not await self.gate():return False
+            document,_,_=await simplify_document(self.page,ref=first.get('ref'),operation='autofill')
+            aid=uid();result={};started=time.monotonic()
+            self.owned('action_start',action_id=aid,tool_name='greenhouse_fast.simplify')
+            try:
+                result=await SimplifyBoundary(document,budget_seconds=max(.05,min(45,self.deadline-time.monotonic())),
+                    checkpoint=self.control).perform('autofill',automatic=True)
+                self.parent_autofill_count+=int(result.get('execution')=='clicked')
+            finally:
+                self.owned('action_end',action_id=aid,status='success' if result.get('execution')=='clicked' else 'failed',duration_seconds=time.monotonic()-started)
+            self.event('checkpoint',{'phase':'simplify','operation':'parent_autofill_settlement',
+                'execution':result.get('execution'),'reason':result.get('reason')})
+            if not result.get('native_takeover_authorized'):return False
+            await self.native()
         while time.monotonic()<self.deadline:
             extension=await self.boundary.observe();self.receipt=extension['autofill_receipt']
             decision=self.boundary.decide(extension)
             pending=decision['action']=='wait'
+            if self.settings.get('autofill')=='native' and not pending:return True
             if decision['action']!='autofill' and not pending:return True
             if not pending and not await self.gate():return False
             aid=None;result={};started=time.monotonic()

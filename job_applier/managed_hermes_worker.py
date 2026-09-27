@@ -85,7 +85,7 @@ def make_field_metadata(item):
 INVENTORY = r"""(() => {
  const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden';};
  const label=e=>(e.labels?.[0]?.innerText||e.getAttribute('aria-label')||e.innerText||e.name||e.id||'').trim();
- const scope={url:location.href,refs:new Map()};window.__jobbotFormScope=scope;
+ const scope={url:location.href,refs:new Map()};window.__jobbotLegacyFormScope=scope;
  const items=[];
  const cands=Array.from(document.querySelectorAll('input,select,textarea,button,[role="option"],a'));
  for(const h of Array.from(document.querySelectorAll('.simplify-jobs-shadow-root'))){
@@ -163,7 +163,7 @@ AUTH_FIND_AND_FILL = r"""async (args) => {
 }"""
 
 REF = r"""(args) => {
- const s=window.__jobbotFormScope,e=s?.refs.get(args.ref);
+ const s=window.__jobbotLegacyFormScope,e=s?.refs.get(args.ref);
  if(!s||s.url!==location.href||!e?.isConnected)throw Error('stale_ref: inventory again');
  const r=e.getBoundingClientRect();if(!r.width||!r.height||e.disabled)throw Error('control_unavailable');
  const label=(e.labels?.[0]?.innerText||e.getAttribute('aria-label')||e.innerText||e.id||'').trim();
@@ -485,6 +485,18 @@ class ApplicationTool:
                 self.call('browser_observe',target_id=self.target,cdp_url=self.cfg.get('cdp_url','http://127.0.0.1:9222'))
                 with self.action('browser_observe',False):return await self.inventory(page)
             selected = next((it for it in (self._last_inventory or {}).get('items', []) if it.get('ref') == args.get('ref')), None)
+            bulk_ref=None
+            if op in ('fill','select','press','upload_resume','click','submit') and (self.settings or {}).get('autofill')!='native':
+                from .browser_controls import observe
+                from .simplify_boundary import initial_autofill
+                page.application_package=self.package
+                first=initial_autofill(await observe(page,self.package))
+                if first:
+                    # Reuse the existing owned boundary; return a fresh inventory
+                    # instead of using a field ref captured before bulk filling.
+                    original=op;op='autofill';args={'operation':'autofill'};selected=None
+                    bulk_ref=first.get('ref')
+                    self.event('checkpoint',{'category':'autofill_before_residual','redirected_from':original})
             if op == 'click' and selected and selected.get('source') == 'simplify':
                 return await self.operate(dict(args, operation='autofill'))
             if op == 'screenshot':
@@ -564,7 +576,9 @@ class ApplicationTool:
                 from .simplify_boundary import SimplifyBoundary
                 self.call('browser_observe',target_id=self.target,cdp_url=self.cfg.get('cdp_url','http://127.0.0.1:9222'))
                 inv = (self._last_inventory or {}) if args.get('ref') else await self.inventory(page)
-                has_auth = any(it.get('type') == 'password' for it in inv.get('items', []))
+                from .browser_controls import observe
+                native=await observe(page,self.package)
+                has_auth = native.get('native_authentication_required') or native.get('stage',{}).get('name') in ('email_entry','sign_in','create_account')
                 has_auth = has_auth or bool(selected and re.search(r'create.*account|sign in', selected.get('label', ''), re.I))
                 if has_auth:
                     return {
@@ -575,7 +589,16 @@ class ApplicationTool:
                 if args.get('ref'):
                     target_ref = args['ref']
                     matched_item = next((it for it in inv.get('items', []) if it.get('ref') == target_ref), None)
-                    if matched_item and matched_item.get('source') == 'simplify':
+                    from .simplify_boundary import initial_autofill
+                    first = initial_autofill(native) if (self.settings or {}).get('autofill')!='native' else None
+                    progress = matched_item and matched_item.get('source') == 'simplify' and re.fullmatch(
+                        r'continue(?: application)?|next(?: step)?|review(?: application)?|submit(?: application)?', matched_item.get('label',''), re.I)
+                    if first and progress:
+                        bulk_ref=first.get('ref');args={'operation':'autofill'}
+                        self.event('checkpoint',{'category':'autofill_before_residual','redirected_from':'extension_progress'})
+                    elif matched_item and matched_item.get('source') == 'simplify' and re.fullmatch(r'autofill this page|run autofill again',matched_item.get('label',''),re.I):
+                        args={'operation':'autofill'}
+                    elif matched_item and matched_item.get('source') == 'simplify':
                         with self.action('simplify_autofill'):
                             await page.evaluate(REF, {'operation': 'inspect', 'ref': target_ref})
                             self.call('writer_state', state='active')
@@ -593,8 +616,11 @@ class ApplicationTool:
                             'form': form,
                             'instruction': 'Extension action clicked; rediscover application controls.'
                         }
-                    raise ValueError('stale_ref: inventory again')
-                boundary=SimplifyBoundary(page,budget_seconds=40,poll_seconds=.5);boundary.attempted=self.attempted
+                    else:raise ValueError('stale_ref: inventory again')
+                from .browser_controls import simplify_document
+                page.application_package=self.package
+                document,_,_=await simplify_document(page,ref=bulk_ref,operation='autofill')
+                boundary=SimplifyBoundary(document,budget_seconds=40,poll_seconds=.5);boundary.attempted=self.attempted
                 self.event('phase_changed',{'phase':'simplify'})
                 obs=await boundary.observe()
                 controls=obs.get('controls') or {}
@@ -606,7 +632,7 @@ class ApplicationTool:
                 t0=time.monotonic()
                 with self.action('simplify_autofill'):
                     self.call('writer_state',state='active')
-                    result=await boundary.perform(target_op)
+                    result=await boundary.perform(target_op,automatic=bool(bulk_ref))
                     settled = result['writer_state']=='idle' or (target_op=='start' and result.get('changed'))
                     self.call('writer_state',state='idle' if settled else 'active')
                 elapsed=time.monotonic()-t0
@@ -691,7 +717,7 @@ class ApplicationTool:
                             await self.key(page,args['key'])
                         elif op=='click':
                             link_info = await page.evaluate(r"""(ref) => {
-                                const e = window.__jobbotFormScope?.refs.get(ref);
+                                const e = window.__jobbotLegacyFormScope?.refs.get(ref);
                                 if (!e) return null;
                                 const a = e.tagName === 'A' ? e : e.closest('a');
                                 return a ? {is_anchor: true, href: a.href} : {is_anchor: false};

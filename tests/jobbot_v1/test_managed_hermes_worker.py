@@ -206,10 +206,14 @@ def test_submission_permissions_and_duplicate_click_guard(monkeypatch):
             async def evaluate(self, script, args=None):
                 if script == 'location.href':
                     return 'https://careers.example.test/jobs/1'
+                if 'jobbot:simplify:observe' in script:
+                    return {'status':'missing','controls':{},'writer_safe':True}
                 evaluated.append((script, args))
                 return {'url': 'https://careers.example.test/jobs/1', 'items': [
                     {'ref': 'sub-1', 'type': 'submit', 'tag': 'BUTTON', 'label': 'Submit', 'required': False}
                 ], 'errors': [], 'text': 'form text'}
+            async def evaluate_function(self,script,args=None):
+                return {'inventory':[],'native':{'submit':{'ref':'sub-1','enabled':True}},'blocking_errors':[]}
 
         class DummyBrowser:
             async def get_current_page(self): return DummyPage()

@@ -329,7 +329,7 @@ class WorkspaceHost:
             if recovery:readiness['recovery']=recovery
             from .browser_controls import next_operation
             from .managed_context import platform_for_url
-            readiness['next_operation']=next_operation(platform_for_url(job['url']),readiness.get('observation'))
+            readiness['next_operation']=next_operation(platform_for_url(job['url']),readiness.get('observation'),settings=self.service.settings_view()['values'])
             readiness['observed_at']=self.service.now()
             return target,readiness
         finally:await browser.close()

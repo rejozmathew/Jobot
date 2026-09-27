@@ -39,16 +39,19 @@ from scoped posting metadata; existing labels and historical outcomes remain.
 
 1. Confirm role, identity, approved asset and submission authorization once.
 2. Call the runner for routine observe/act/wait/advance. It checks controls and
-   writer state. Prefer enabled **Simplify Continue Application** immediately
-   after settlement, even with needs_review. Do not run dropdown/source repair
-   ahead of that action. If Simplify Continue is unavailable or failed to advance,
-   use available **Autofill This Page once before manual field repair** or native
-   Continue. Wait for settlement and continue. The page checkpoint and shared
+   writer state. After native application entry/authentication, run available
+   **Autofill This Page first on each form step**, including Review, before
+   Continue, skills prompts or manual field repair. Wait for settlement, then
+   prefer enabled **Simplify Continue Application**, even with needs_review.
+   Use helpers for residuals and executor field/screenshot recovery afterward.
+   The page checkpoint and shared
    browser receipt prevent an Autofill loop across calls and changing values.
    Return every new page to the runner, including Voluntary Disclosures and
    Self Identify, after finishing a manual exception. The shared browser also
    routes a first manual field-repair request on these Workday pages through
    available Autofill first; its result identifies the field action not performed.
+   This also applies to mapped non-authentication recovery: refresh the screen
+   and rebind any remaining approved recovery fields after bulk filling.
    On a landing page/chooser it prefers native Apply Manually, then other direct
    Apply actions, over chat or the extension's start action. Follow an employer
    landing page's direct application link when it leads into Workday.

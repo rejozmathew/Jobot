@@ -36,6 +36,9 @@ def test_make_field_metadata_stable_and_safe():
 
 
 def test_field_telemetry_attribution_and_no_secrets(tmp_path, monkeypatch):
+    from job_applier import browser_controls
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(browser_controls, 'observe', AsyncMock(return_value={'status': 'missing', 'controls': {}}))
     """Field action emits field_context before action, attributes time, and emits field_verified on change."""
     events_recorded = []
     actions_recorded = []
@@ -122,6 +125,9 @@ def test_field_telemetry_attribution_and_no_secrets(tmp_path, monkeypatch):
 
 
 def test_field_unchanged_emits_structured_recovery(tmp_path, monkeypatch):
+    from job_applier import browser_controls
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(browser_controls, 'observe', AsyncMock(return_value={'status': 'missing', 'controls': {}}))
     """When a field action does not produce committed change, a structured recovery event is emitted."""
     events_recorded = []
 

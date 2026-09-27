@@ -29,6 +29,8 @@ def choose(observed, state):
     if (observed.get('step')=='unknown' and (state.get('account_action') in ('sign_in','verify') or state.get('account_state')=='creation_pending') and
         not state.get('account_entry_attempted') and native.get('sign_in',{}).get('enabled')):
         return 'native_sign_in'
+    if enabled('autofill') and not filled:
+        return 'autofill'
     if observed.get('step') == 'review' and (enabled('submit') or native.get('submit', {}).get('enabled')):
         return 'blocked' if observed.get('blocking_errors') else 'submit'
     if enabled('continue') and not state.get('advance_failed'):
@@ -36,8 +38,6 @@ def choose(observed, state):
     if enabled('autofill_skills'):
         label=controls['autofill_skills'].get('label','autofill_skills')
         if label not in state.get('skills_actions',[]):return 'autofill_skills'
-    if enabled('autofill') and not filled:
-        return 'autofill'
     if state.get('advance_failed'):
         return 'blocked'
     if native.get('continue', {}).get('enabled'):
@@ -379,6 +379,25 @@ class FastRunner:
         metrics=self.state.setdefault('metrics',{'polls':0,'clicks':0,'wait_seconds':0,'elapsed_seconds':0})
         try:
             if recovery is not None:
+                from .simplify_boundary import SimplifyBoundary,initial_autofill
+                observed=await self.observe()
+                if self.settings.get('autofill','simplify')=='simplify' and initial_autofill(observed):
+                    gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
+                    if not gate.get('native_takeover_authorized',gate.get('quiescent')):
+                        return self.report('inspection_required',observed,'writer_settlement_required')
+                    async def checkpoint():
+                        pulse=self.owned('heartbeat')
+                        if pulse.get('control','running')!='running':raise ProtocolError(pulse['control'])
+                    aid=str(uuid.uuid4());result={}
+                    self.owned('action_start',action_id=aid,tool_name='workday_fast.simplify')
+                    try:
+                        result=await SimplifyBoundary(self.page,budget_seconds=min(45,seconds),checkpoint=checkpoint).perform('autofill',automatic=True)
+                    finally:
+                        self.owned('action_end',action_id=aid,status='success' if result.get('execution')=='clicked' else 'failed')
+                    report=self.report('inspection_required',await self.observe(),'autofill_before_mapped_recovery')
+                    report['recovery_result']={'execution':'not_executed','autofill':result,
+                        'instruction':'Initial Autofill ran first. Inspect fresh remaining fields and bind any still-needed recovery to the returned screen; the prior mapped field actions have not run.'}
+                    return report
                 if isinstance(recovery,dict) and 'source_choice' in recovery:
                     if set(recovery)!={'screen_key','source_choice'} or not isinstance(recovery['source_choice'],str) or not recovery['source_choice'].strip():
                         raise ValueError('source_choice_and_screen_key_required')

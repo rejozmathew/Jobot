@@ -28,6 +28,7 @@ def create_platform_handler(
     browser_session: Any,
     profile: dict[str, Any] | None,
     trace_hook: Optional[TraceHook] = None,
+    settings: dict[str, Any] | None = None,
 ) -> BasePlatformHandler | None:
     override = os.environ.get("JOB_APPLIER_PLATFORM", "").strip().lower()
     want_greenhouse = override == "greenhouse" or GreenhouseHandler.can_handle(url)
@@ -39,6 +40,7 @@ def create_platform_handler(
             job_url=url,
             trace_hook=trace_hook,
             cdp_url=cdp_url,
+            settings=settings,
         )
     for handler_type in HANDLER_TYPES:
         if handler_type.platform_name == "greenhouse":
@@ -49,6 +51,7 @@ def create_platform_handler(
                 profile=profile or {},
                 job_url=url,
                 trace_hook=trace_hook,
+                settings=settings,
             )
     return None
 

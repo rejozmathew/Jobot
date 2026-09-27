@@ -238,14 +238,14 @@ included in the September 9 checkpoint. Attempt 44 exercised the flow and
 submitted with user intervention; its remaining issues motivated the follow-up
 changes below. The checkpoint's subsequent regression results are recorded below.
 
-Workday prioritizes enabled Simplify Continue after settlement. If advancement
-cannot proceed, it uses available page Autofill once before manual repair. Its
-runner checkpoint uses the logical step, and the shared browser click receipt
-uses page identity rather than changing field fingerprints. Polls, new tool
-connections and a remaining Autofill button do not reset that attempt. The
-shared Simplify boundary prefers settled enabled Continue on every ATS. Autofill
-receipts and routing manual repair through first Autofill apply only to observed
-Workday. A mistaken reference to Workday's Autofill
+Every portal uses application entry/authentication first, then available Simplify
+Autofill, then residual helpers, then executor field-by-field and screenshot
+recovery. Initial Autofill precedes Continue even when a stale Complete or
+needs_review label is visible. Shared document/step receipts survive reconnects
+and field edits; conditional form expansion does not automatically refill over
+manual repairs. Accepted iframe controls retain their frame-qualified refs,
+and a parent panel follows embedded logical form steps. Workday and Greenhouse
+retain their specialized receipts and writer/ownership rules. A mistaken reference to Workday's Autofill
 panel tab can resolve to the unique observed Autofill This Page action in the
 same document. The shared screen handoff exposes approved standard answers on
 every ATS. Workday also exposes the full field question behind Select One and
@@ -254,10 +254,13 @@ Source repair runs only after advancement cannot proceed; it never intercepts
 an already selected Continue action. Workday selection metadata includes chips,
 including suffixed IDs and chips inside an expanded prompt, instead of treating
 an empty search input as an empty answer. Generic select/combobox inventory also
-reports selected values. After a manual exception, a new Workday page's first
-manual field-repair request uses available Autofill first and reports that the
-requested individual field action has not been performed. This routing is
-specific to Workday; shared instructions return every ATS to routine filling.
+reports selected values. Shared native field/answer/upload requests use available
+initial Autofill first and report that the requested field action has not run.
+Workday mapped non-authentication recovery also returns fresh refs after filling.
+Small email/password access forms are distinguished from full profiles containing
+those same controls. A form's Apply submit button uses the submission service;
+posting-entry Apply precedes footer-field repair. Missing or unsupported Simplify
+continues through supported helper/executor recovery, respecting native-only settings.
 Choosing answers remains executor reasoning governed by the common job-apply
 skill, not arbitrary yes/no generation. The human queue is invoked
 only explicitly and still reuses policy/exact saved answers. These changes are
@@ -784,7 +787,8 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
 | application_answers.py | Shared label_has, match_answer_to_option, approved_answer, answer_action and saved_answer (re-exported by LinkedIn); approved Greenhouse plan journal restoration; interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | One activation per explicit call, current incomplete-form continuation, retained dispatch evidence and native/Simplify confirmation; local browser and Workday callers |
-| simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Official extension observation/dispatch/settlement; Workday receipts and Greenhouse attempt/root/document receipts survive reconnects/rerenders. One initial and one eligible residual automatic pass precede custom repair; explicit recovery remains available. |
+| simplify_boundary.py / browser_helpers/simplify_observe.js / simplify_click.js | Shared initial-Autofill recommendation, dispatch/step receipts and settlement for all portals; called by browser routing, iCIMS, LinkedIn, Workday, Greenhouse and legacy handlers/worker. Greenhouse retains its eligible residual second pass; explicit recovery remains available. |
+| platform_handlers/base.py / workday.py / greenhouse.py / registry.py | Legacy agent callers share SimplifyBoundary through the existing CDP page or actor evaluation adapter before native form work/recovery. Missing controls and helper failures return to the existing executor with visual-recovery context. |
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | browser_helpers/workday_source.js | Workday-only recruiting-source field/menu association, live option inventory and virtualized-menu scrolling; workday_fast drives pointer actions and verifies commitment |
 | managed_credentials.py / managed_documents.py / hermes_gmail.py | Selected account-field filling, executor-supplied code entry without group/format permission, existing Hermes Gmail CLI wrapper, code screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |

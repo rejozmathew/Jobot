@@ -208,7 +208,7 @@ def test_decide_no_inference_that_all_controls_available_means_complete():
     }
     decision = cls.decide(obs, already_attempted=False)
     assert decision["action"] != "complete"
-    assert decision["action"] == "continue"
+    assert decision["action"] == "autofill"
     assert obs["status"] == "ready"
 
 

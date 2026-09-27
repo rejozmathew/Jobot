@@ -183,6 +183,10 @@ from job_applier.managed_hermes_worker import ApplicationTool
 
 
 def test_anchor_click_valid_and_invalid(monkeypatch):
+    from job_applier import browser_controls
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(browser_controls, 'observe', AsyncMock(return_value={
+        'status': 'missing', 'controls': {}, 'native_authentication_required': False}))
     class DummyCtrl:
         def handle(self, req, session_id=None):
             return json.dumps({"status": "ok"})
