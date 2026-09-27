@@ -65,7 +65,13 @@ def settle(service, item):
     sessions=find_sessions(service,item)
     active=[session for session in sessions if not session['ended_at']]
     if active:
+        root=getattr(service,'desktop_dispatch_spool',None)
+        path=Path(root)/'dispatch'/item['id']/'desktop-session.json' if root else None
+        receipt=json.loads(path.read_text()) if path and path.exists() else {}
+        from .hermes_desktop import native_driver_id
         for session in active:
+            if (receipt.get('stored_session_id') and session['driver_id']!=receipt['stored_session_id']
+                    and native_driver_id(session)!=receipt.get('session_id')):continue
             if session['run_id']:service.control(session['run_id'],command='stop')
             else:service.session_stopped(session['id'],reason='Executor ended before browser allocation',browser_stopped=True)
         return False  # host acknowledges owned-browser stop before the next job
@@ -79,11 +85,23 @@ def settle(service, item):
     root=getattr(service,'desktop_dispatch_spool',None)
     timed_out=bool(root and (Path(root)/'dispatch'/item['id']/'deadline.json').exists())
     receipt_path=Path(root)/'dispatch'/item['id']/'desktop-session.json' if root else None
+    receipt={};failure=None
     if receipt_path and receipt_path.exists():
-        timed_out=timed_out or json.loads(receipt_path.read_text()).get('stop_reason')=='application_time_limit'
+        receipt=json.loads(receipt_path.read_text())
+        timed_out=timed_out or receipt.get('stop_reason')=='application_time_limit'
+        terminal=receipt.get('last_terminal')
+        if terminal and terminal.get('status')=='error' or 'last_terminal' not in receipt:
+            failure=receipt.get('last_executor_failure')
+        if receipt.get('stop_reason')=='application_stop_requested':failure=None
+    launch_path=Path(root)/'dispatch'/item['id']/'desktop-error.json' if root else None
+    if not failure and launch_path and launch_path.exists():
+        launch=json.loads(launch_path.read_text());failure={'kind':'executor_launch_'+str(launch.get('error','unknown'))}
+    detail=(attempt or {}).get('evidence') or (session or {}).get('reason')
+    if (attempt or {}).get('outcome') not in ('applied','already_applied','blocked','ready_for_review'):
+        if timed_out:detail='application_time_limit: Application time limit reached'
+        elif failure:detail='Executor failure: '+str(failure.get('kind','executor_error'))+'; browser cleanup recorded separately.'
     service.queue_complete(item['id'],outcome=(attempt or {}).get('outcome') or 'interrupted',
-        detail=(attempt or {}).get('evidence') or (session or {}).get('reason') or
-            ('application_time_limit: Application time limit reached' if timed_out else 'Executor exited without a recorded application outcome.'),
+        detail=detail or 'Executor exited without a recorded application outcome.',
         session_id=session['id'] if session else None)
     return True
 

@@ -185,6 +185,7 @@ class QueueServices:
             for row in db.execute("""SELECT * FROM dispatch_queue WHERE state='queued'
                     ORDER BY immediate_requested_at IS NULL,immediate_requested_at,
                     (SELECT MAX(r.rowid) FROM dispatch_immediate_requests r WHERE r.item_id=dispatch_queue.id),
+                    CASE WHEN request_id LIKE 'automatic-retry:%' THEN 1 ELSE 0 END,
                     created_at,rowid""").fetchall():
                 if datetime.fromisoformat(schedule[row['id']]['next_attempt_at'])>datetime.fromisoformat(self.now()):continue
                 try:self._eligible(db,row['job_id'],self._settings_record(db)['values'])

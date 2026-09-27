@@ -67,10 +67,16 @@ def _has_desktop_parent(directory, proc):
         return False
 
 
+class RPCRejected(ValueError):
+    """Explicit native rejection, distinct from a lost acknowledgement."""
+    pass
+
+
 class RPC:
     def __init__(self, socket):
         self.socket=socket
         self.sequence=0
+        self.terminal_events={}
 
     def call(self, method, params):
         self.sequence+=1
@@ -83,11 +89,91 @@ class RPC:
             frame=self.socket.recv(timeout=remaining)
             for line in frame.splitlines():
                 message=json.loads(line)
+                event=message.get('params',{}) if message.get('method')=='event' else {}
+                if event.get('type')=='message.complete' and event.get('session_id'):
+                    self.terminal_events[event['session_id']]=terminal_summary(event.get('payload',{}))
                 if message.get('id')!=rid:continue
                 if 'error' in message:
                     # Do not copy arbitrary server payloads (which can contain private prompts).
-                    raise ValueError('Hermes desktop RPC failed: '+method+' ('+str(message['error'].get('code'))+')')
+                    raise RPCRejected('Hermes desktop RPC failed: '+method+' ('+str(message['error'].get('code'))+')')
                 return message['result']
+
+
+def terminal_summary(payload):
+    """Keep a cause signature, never a provider's raw prompt/error payload."""
+    status=payload.get('status');error=str(payload.get('error') or '').casefold()
+    if 'decod' in error and ('fail' in error or 'error' in error):kind='model_decode_error'
+    elif 'timeout' in error or 'timed out' in error:kind='model_timeout'
+    elif 'tool' in error and ('stream' in error or 'partial' in error):kind='tool_stream_incomplete'
+    elif status=='error' or error:kind='executor_error'
+    elif status=='interrupted':kind='executor_interrupted'
+    else:kind='executor_turn_complete'
+    result={'status':status,'kind':kind}
+    surface=payload.get('error_surface')
+    if isinstance(surface,dict):
+        result['error_surface']={k:v for k,v in surface.items() if k in ('layer','code','retryable') and
+            (type(v) is bool or isinstance(v,str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,100}',v))}
+    return result
+
+
+def continuation_context(config,receipt):
+    """Durable application state decides whether an idle model still has work."""
+    if not config.get('db_path') or not receipt.get('dispatch_id'):return None
+    from .managed import Service
+    from .queue_runtime import find_sessions
+    service=Service(config['db_path'],instance_id=config.get('instance_id'))
+    service.desktop_dispatch_spool=config['spool_dir']
+    with service.tx() as db:
+        row=db.execute('SELECT * FROM dispatch_queue WHERE id=?',(receipt['dispatch_id'],)).fetchone()
+        if not row or row['state']!='dispatched':return None
+        item=dict(row)
+    sessions=find_sessions(service,item)
+    if not sessions:return {'job_id':item['job_id'],'request_id':'queue:'+item['id'],'stage':'startup'}
+    if any(s['attempt_id'] and service.attempt(s['attempt_id'])['outcome'] in ('applied','already_applied') for s in sessions):return None
+    session=sessions[-1]
+    if session['ended_at'] or session['state']=='finishing':return None
+    if session['driver_id']!=receipt.get('stored_session_id') and native_driver_id(session)!=receipt.get('session_id'):return None
+    attempt=service.attempt(session['attempt_id']) if session['attempt_id'] else None
+    if attempt and attempt['completed_at']:return None
+    with service.tx() as db:
+        run=db.execute('SELECT control FROM runs WHERE id=?',(session['run_id'],)).fetchone() if session['run_id'] else None
+        if run and run['control'] in ('stop_requested','stopped'):return {'terminal':'application_stop_requested'}
+        waiting=bool(run and run['control'] in ('pause_requested','paused') or session['state']=='paused')
+        if attempt:waiting=waiting or any(q['state']=='pending' for q in service._questions(db,item['job_id'],item['identity_id']))
+    return {'session_id':session['id'],'attempt_id':session['attempt_id'],'request_id':session['request_id'],
+        'stage':(attempt or {}).get('phase') or session['state'],'wait':waiting}
+
+
+def idle_snapshot(rpc,receipt):
+    state=rpc.call('session.activate',{'session_id':receipt['session_id'],'omit_messages':True})
+    replay=rpc.call('session.events.since',{'session_id':receipt['session_id'],'last_seen':receipt.get('event_seq',0)})
+    if receipt.get('event_epoch') and replay.get('epoch')!=receipt['event_epoch']:
+        getattr(rpc,'terminal_events',{}).pop(receipt['session_id'],None)
+        replay=rpc.call('session.events.since',{'session_id':receipt['session_id'],'last_seen':0})
+    terminal=None
+    for event in replay.get('events',[]):
+        data=event.get('params',event)
+        if data.get('type')=='message.complete':terminal=terminal_summary(data.get('payload',{}))
+    if terminal is None:
+        inflight=state.get('inflight') or {}
+        if inflight.get('status') in ('error','complete','interrupted'):terminal=terminal_summary(inflight)
+    if terminal is None:terminal=getattr(rpc,'terminal_events',{}).get(receipt['session_id'])
+    receipt['event_seq']=replay.get('latest_seq',receipt.get('event_seq',0))
+    receipt['event_epoch']=replay.get('epoch')
+    if terminal:
+        receipt['last_terminal']=terminal
+        if terminal['status']=='error':receipt['last_executor_failure']=terminal
+    return state,replay
+
+
+def continuation_accepted(rpc,receipt,state):
+    marker=receipt.get('continuation_marker')
+    if not marker:return False
+    if any(marker in str((state.get(k) or {}).get('user','')) for k in ('inflight','queued')):return True
+    # The native API has no prompt idempotency key or filtered-history endpoint.
+    # Inspect privately only after uncertain acknowledgement; never save messages.
+    history=rpc.call('session.history',{'session_id':receipt['session_id']})
+    return any(row.get('role')=='user' and marker in row.get('text','') for row in history.get('messages',[]))
 
 
 @contextmanager
@@ -192,8 +278,9 @@ def run_session(rpc, prompt, config, receipt_path, *, sleep=time.sleep, owner=No
             if config.get('application_effort'):params['reasoning_effort']=config['application_effort']
         created=rpc.call('session.create',params)
         receipt={key:created[key] for key in ('session_id','stored_session_id')}
-        receipt.update(state='created',backend_owner=owner)
+        receipt.update(state='created',backend_owner=owner,dispatch_id=receipt_path.parent.name)
         write_receipt(receipt_path,receipt)
+    if receipt.get('state')=='created':
         if options.get('yolo'):
             rpc.call('config.set',{'session_id':receipt['session_id'],'key':'yolo','value':'on','scope':'session'})
         skills=options.get('skills') or []
@@ -201,22 +288,74 @@ def run_session(rpc, prompt, config, receipt_path, *, sleep=time.sleep, owner=No
         prefix+=('Actual conversation ID: '+receipt['stored_session_id']+'. Use --driver-id '+
                  receipt['stored_session_id']+' for this application runtime request.\n\n')
         # Persist before sending: a lost reply must not submit the application task twice.
-        receipt['state']='submitting'
+        import uuid
+        receipt.update(state='submitting',original_marker='[JobBot task '+str(uuid.uuid4())+']')
         write_receipt(receipt_path,receipt)
         if deadline.expired():
             receipt.update(state='finished',stop_reason='application_time_limit')
             write_receipt(receipt_path,receipt)
             return receipt
-        rpc.call('prompt.submit',{'session_id':receipt['session_id'],'text':prefix+prompt,'surface':'desktop'})
+        getattr(rpc,'terminal_events',{}).pop(receipt['session_id'],None)
+        try:rpc.call('prompt.submit',{'session_id':receipt['session_id'],'text':receipt['original_marker']+' '+prefix+prompt,'surface':'desktop'})
+        except RPCRejected:
+            receipt['state']='created';write_receipt(receipt_path,receipt);raise
         receipt['state']='submitted'
         write_receipt(receipt_path,receipt)
     if receipt.get('state')=='finished':return receipt
-    while session_active(rpc,receipt['session_id'],stored_session_id=receipt.get('stored_session_id')):
+    while True:
+        active=session_active(rpc,receipt['session_id'],stored_session_id=receipt.get('stored_session_id'))
         if deadline.expired():
             receipt['stop_reason']='application_time_limit'
             write_receipt(receipt_path,receipt)
             if interrupt_owned(rpc,receipt['session_id'],receipt.get('stored_session_id')):break
-        sleep(2)
+            sleep(2);continue
+        if active:sleep(2);continue
+        snapshot=None
+        if config.get('db_path'):
+            snapshot=idle_snapshot(rpc,receipt);write_receipt(receipt_path,receipt)
+        context=continuation_context(config,receipt)
+        if context is None:break
+        if context.get('terminal'):
+            receipt['stop_reason']=context['terminal'];break
+        state,replay=snapshot or idle_snapshot(rpc,receipt)
+        write_receipt(receipt_path,receipt)
+        if state.get('running') or context.get('wait') or replay.get('open_requests'):
+            sleep(2);continue
+        if (receipt.get('last_terminal') or {}).get('status')=='interrupted':break
+        # A lost submit acknowledgement is reconciled through native turn evidence;
+        # idle alone is never permission to submit the same continuation twice.
+        if receipt.get('state') in ('continuing','submitting'):
+            pending=receipt if receipt['state']=='continuing' else dict(receipt,continuation_marker=receipt.get('original_marker'))
+            if not continuation_accepted(rpc,pending,state):
+                receipt['ack_checks']=receipt.get('ack_checks',0)+1;write_receipt(receipt_path,receipt)
+                sleep(min(30,2**min(receipt['ack_checks'],5)));continue
+            receipt['state']='submitted';write_receipt(receipt_path,receipt)
+        receipt['continuation_count']=receipt.get('continuation_count',0)+1
+        sleep(min(30,2**min(receipt['continuation_count'],5)))
+        if deadline.expired():continue
+        # Re-read ownership/stop/answer state after backoff, before sending.
+        refreshed=continuation_context(config,receipt)
+        if refreshed is None:break
+        if refreshed.get('terminal'):
+            receipt['stop_reason']=refreshed['terminal'];break
+        if refreshed.get('wait'):sleep(2);continue
+        if session_active(rpc,receipt['session_id'],stored_session_id=receipt.get('stored_session_id')):continue
+        if deadline.expired():continue
+        import uuid
+        receipt.update(state='continuing',continuation_marker='[JobBot continuation '+str(uuid.uuid4())+']')
+        write_receipt(receipt_path,receipt)
+        text=(receipt['continuation_marker']+' Continue the same owned application in this same conversation. The prior model turn ended '
+              'without a recorded application outcome. Preserve the original application deadline and request. '
+              'Do not create another conversation or restart completed actions. Retrieve the current owned '
+              'session context, observe the actual page, and resume the next supported action. A model error '
+              'is not an employer rejection. If startup was unfinished, use the original idempotent start request. '
+              'Respect user stop, human input, confirmation evidence and existing submission permissions. '
+              'Current durable checkpoint: '+json.dumps(refreshed))
+        getattr(rpc,'terminal_events',{}).pop(receipt['session_id'],None)
+        try:rpc.call('prompt.submit',{'session_id':receipt['session_id'],'text':text,'surface':'desktop'})
+        except RPCRejected:
+            receipt['state']='submitted';write_receipt(receipt_path,receipt);raise
+        receipt.update(state='submitted',last_terminal=None);write_receipt(receipt_path,receipt)
     receipt['state']='finished'
     write_receipt(receipt_path,receipt)
     return receipt

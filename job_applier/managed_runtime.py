@@ -71,7 +71,9 @@ class RuntimeServices:
         canonical=canonical_url(url);parsed=urlsplit(canonical);display=urlunsplit(parsed._replace(query='',fragment=''))
         identity=job_key(canonical)
         with self.tx() as db:
-            a=self._owner(db,attempt_id,worker_id,fence);job=self._get(db,'jobs',a['job_id']);expected=urlsplit(canonical_url(job['url']))
+            a=self._owner(db,attempt_id,worker_id,fence)
+            from .managed_sessions import application_job
+            job=application_job(db,a,self._get(db,'jobs',a['job_id']));expected=urlsplit(canonical_url(job['url']))
             from .managed_sessions import local_session
             session=local_session(db,attempt_id)
             if session and session['target_id']!=target_id:raise ProtocolError('target_not_owned')
@@ -83,7 +85,8 @@ class RuntimeServices:
                 and parsed.path==expected.path+'/apply' and parsed.query==expected.query)
             if (expected.hostname or '').endswith(('.myworkdayjobs.com','.icims.com')):
                 apply_child=is_same_application_scope(job['url'],canonical)
-            if not verified and not apply_child:raise ProtocolError('target_job_mismatch')
+            accepted_route=job.get('posting_url') and is_same_application_scope(job['url'],canonical)
+            if not verified and not apply_child and not accepted_route:raise ProtocolError('target_job_mismatch')
             old=db.execute('SELECT * FROM owned_targets WHERE profile=? AND target_id=? AND state!=?',(a['browser_profile'],target_id,'closed')).fetchone()
             if old:
                 if old['attempt_id']!=attempt_id or (old['identity_key']!=identity and not same_job_url(old['url'],canonical)):raise ProtocolError('target_owned_elsewhere')

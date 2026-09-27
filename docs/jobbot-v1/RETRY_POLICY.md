@@ -55,6 +55,11 @@ an in-progress application, rewrites evidence or bypasses browser cleanup.
 derives attempt counts and due times from durable request lineage. Both the
 worker and Run next use that reconciliation. `queue_take` skips future retries
 while allowing other ready jobs, and preserves one dispatched application.
+Ready fresh/operator work precedes due automatic retries. This changes ordering,
+not eligibility, due times or the existing automatic attempt count. Retries receive
+compact advisory history for the same candidate/posting; past errors never become
+new blocking rules. Native model turns may continue in the same conversation while
+their owned application remains unfinished, retaining the original overall deadline.
 The desktop receipt's exact conversation, job and candidate also associate
 replacement application sessions with their dispatch. A finished dispatch is
 checked for retained sessions. After the native task is confirmed idle or gone,

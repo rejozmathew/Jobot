@@ -90,14 +90,8 @@ class GreenhouseRunner:
     def owned(self,operation,**params):return self.call(operation,**self.owner,**params)
 
     def read_journal(self):
-        if not self.config.get('spool_dir'):return {}
-        path=Path(self.config['spool_dir'])/'answers'/('attempt-'+str(self.owner['attempt_id'])+'.json')
-        try:
-            history=json.loads(path.read_text(encoding='utf-8'))
-            if history['attempt_id']!=self.owner['attempt_id'] or history['job_url']!=self.package['job']['url']:return {}
-            return {r['question_key']:r for r in history['answers'] if r.get('source')=='greenhouse_fast' and
-                r.get('verified') is True and r.get('answer_basis') and r.get('question_key') and 'answer_value' in r}
-        except (OSError,ValueError,KeyError):return {}
+        from .application_answers import reusable_answers
+        return reusable_answers(self.config,self.package,self.owner['attempt_id'],source='greenhouse_fast')
 
     def event(self,kind,payload,**extra):
         self.owned('event',event_id=uid(),event_type=kind,action_id=self.aid,

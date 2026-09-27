@@ -1,5 +1,46 @@
 # Application runtime: ownership, helper map, and rationale
 
+## September 27: route continuity and retry learning
+
+`cdp_client.NavigationTrace` observes the owned main document before startup or
+an Apply action. `workspace_host.prepare_target` and
+`application_runtime.click_and_follow_external_apply` pass observed navigation
+to `managed_sessions.handoff_target`. Public redirect chains retain the original
+posting and reject conflicting known requisitions. Popup selection still requires
+its exact expected destination; a different popup is never inferred from its opener.
+Greenhouse API posting URLs start at the matching hosted application form.
+
+`managed_sessions.application_job` projects the verified current route from the
+owned target. Context, target rebinding, account events/mail and account coordination
+use that projection. `browser_frames.router_for` refreshes an existing reader's
+package while retaining frame ownership/document checks. Intake and historical
+posting URLs remain unchanged.
+
+`managed_context.prior_application_history` supplies bounded, deterministic prior
+outcomes and recovery evidence to the execution brief and context for the same
+candidate and related posting. History is advisory. `application_answers.reusable_answers`
+feeds the Greenhouse and iCIMS runners only verified exact-question answers with
+matching profile/candidate/posting provenance; fresh refs and current option checks
+still govern writes. Unverified observations, passwords and verification codes are
+not reused. Original saved human-answer handling remains in place.
+
+The shared account ledger distinguishes explicit `account_absent` and
+`creation_rejected` outcomes from an uncertain creation click. Workday observes
+those signals inside its current authentication form. It records explicit rejection
+before handing off field/credential repair and does not replay unchanged rejection.
+Generic invalid credentials do not establish account absence.
+
+`hermes_desktop` reconciles native idle state with the owned managed application.
+An unfinished application can continue in the same native conversation with the
+original deadline. User controls, input waits, ownership transfers and actual
+outcomes remain authoritative. Explicit RPC rejection differs from a lost reply;
+uncertain prompt acceptance uses a unique visible marker and private native history
+inspection, never a second blind submission. Compact native failure signatures
+remain separate from cleanup. Due automatic retries follow ready fresh/operator
+work; existing retry due times, limits and eligibility remain unchanged.
+
+Daily iteration procedure: [Self-improvement](SELF_IMPROVEMENT.md).
+
 ## September 21: Greenhouse forwarded verification
 
 Private runtime configuration may set `email_routes.greenhouse` with
@@ -92,7 +133,7 @@ to group existing fill/select/check actions in one connection, checking document
 writer and ownership state between operations. Upload remains the existing
 selected-asset operation. Browser navigation, shared form observations, answer
 history and Workday/Greenhouse callers retain their original responsibilities.
-Dedicated previous-attempt summaries remain deferred.
+Previous-attempt summaries were added in the September 27 iteration above.
 
 Validation and deployment evidence: [September 19 repair](FORM_REPAIR_20260919.md).
 

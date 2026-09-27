@@ -23,7 +23,11 @@ skill does not launch a model. Engineering and application execution are separat
 
 Use a fresh conversation for each dispatched job, with its exact selected config,
 identity, resume and request ID. Fetch the prepared session's context rather than
-depending on another job's conversation. The mailbox handoff can describe the
+depending on another job's conversation. The brief/context includes compact
+`prior_attempts` for this candidate and posting. Treat it as historical evidence:
+check the current page, reuse useful recovery facts and verified answers, and choose
+a different supported action when the earlier approach failed unchanged. Never
+reuse old controls, codes or passwords from history. The mailbox handoff can describe the
 existing Himalaya account or Gmail wrapper: check and use that actual integration
 before declaring email unavailable. Use the configured `email_route` when present: `application_email`
 is the form recipient and `verification_mailbox` is the inbox to read through

@@ -19,6 +19,19 @@ def local_session(db, attempt_id):
     return db.execute('SELECT * FROM application_sessions WHERE attempt_id=?', (attempt_id,)).fetchone()
 
 
+def application_job(db, attempt, job):
+    """Project the host-verified route for every helper without rewriting intake."""
+    session=local_session(db,attempt['id'])
+    if not session:return dict(job)
+    route=json.loads(session['metadata_json']).get('application_route_url')
+    if not route:return dict(job)
+    from .managed_identity import job_key
+    owned=db.execute("SELECT identity_key FROM owned_targets WHERE attempt_id=? AND target_id=? AND state='open'",
+                     (attempt['id'],session['target_id'])).fetchone()
+    if not owned or owned['identity_key']!=job_key(route):return dict(job)
+    return dict(job,posting_url=job['url'],url=route)
+
+
 class SessionServices:
     @staticmethod
     def _has_local_schema(db):
@@ -221,6 +234,12 @@ class SessionServices:
         # Existing target identity enforcement is reused after the atomic transition.
         self.session_authority=(session_id,s['driver_id'],host_id)
         self.bind_target(attempt_id,worker_id=run['worker_id'],fence=fence,target_id=target_id,url=job['url'])
+        navigation=readiness.get('application_navigation')
+        if navigation:
+            self.handoff_target(attempt_id,worker_id=run['worker_id'],fence=fence,
+                current_target_id=target_id,new_target_id=target_id,url=navigation['url'],
+                source_url=job['url'],navigation_chain=navigation['chain'],
+                evidence='Host observed initial navigation and redirect in the owned application tab')
         return self.session(session_id)
 
     def session_browser_attachment(self, session_id, host_id, attachment, target_id=None):
@@ -234,7 +253,7 @@ class SessionServices:
                        (dumps(meta),target_id,session_id))
 
     def handoff_target(self, attempt_id, *, worker_id, fence, current_target_id,
-                       new_target_id, url, evidence, expected_url=None, source_url=None):
+                       new_target_id, url, evidence, expected_url=None, source_url=None, navigation_chain=None):
         """Atomically move one local session to a correlated application target."""
         from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope
         from urllib.parse import urlsplit,urlunsplit
@@ -272,6 +291,17 @@ class SessionServices:
                 # Only host-observed navigation from the owned verified document
                 # establishes continuity for an intermediate page without an ID.
                 correlated=verified_source and same_origin and no_conflict
+            if navigation_chain and source_url:
+                from .managed_identity import explicit_job_conflict
+                from .cdp_client import _public_destination
+                chain=[canonical_url(item) for item in navigation_chain]
+                source=canonical_url(source_url)
+                verified_source=(job_key(source)==current['identity_key'] or is_same_application_scope(job['url'],source)
+                                 or is_same_application_scope(current['url'],source))
+                correlated=(verified_source and chain[0]==source and chain[-1]==canonical
+                    and all(_public_destination(item) for item in chain)
+                    and not explicit_job_conflict(anchor,canonical)
+                    and not explicit_job_conflict(source,canonical))
             if not alias and not is_same_application_scope(job['url'],canonical) and not correlated:
                 raise ProtocolError('target_job_mismatch')
             occupied=db.execute("SELECT * FROM owned_targets WHERE profile=? AND target_id=? AND state!='closed'",
@@ -289,7 +319,8 @@ class SessionServices:
                 db.execute('INSERT INTO target_history VALUES (?,?,?,?,?)',(uid(),current['id'],'preserved',safe,now))
             meta=json.loads(session['metadata_json']);attachment=meta.get('browser_attachment')
             meta['application_route_url']=canonical
-            if source_url is None:meta['application_identity_url']=canonical
+            if source_url is None or (navigation_chain and urlsplit(anchor).netloc!=urlsplit(canonical).netloc):
+                meta['application_identity_url']=canonical
             if source_url is not None:
                 meta['last_application_transition']={'source':source_url.split('?')[0],
                     'destination':display,'observed_at':now,'evidence':safe}
@@ -342,7 +373,9 @@ class SessionServices:
     def coordinate_account(self, session_id, *, release=False):
         with self.tx() as db:
             s=self._get(db,'application_sessions',session_id);self._local_owner(db,s)
-            job=self._get(db,'jobs',s['job_id']);namespace=self._job_account_namespace(db,job)
+            job=self._get(db,'jobs',s['job_id'])
+            if s['attempt_id']:job=application_job(db,self._get(db,'application_attempts',s['attempt_id']),job)
+            namespace=self._job_account_namespace(db,job)
             # Credentials remain tied to candidate/portal. Another browser using
             # that account is not a reason to prevent this session from signing in.
             return {'namespace':namespace,'state':'released' if release else 'available','session_id':session_id}

@@ -248,8 +248,8 @@ class WorkspaceHost:
             mode='headless' if '--headless' in args else 'headed'
             if mode!=w['mode']:raise ProtocolError('browser_mode_mismatch')
             target=(await browser_command(endpoint,'Target.createTarget',{'url':'about:blank'}))['targetId']
-        from .cdp_client import CDPBrowser
-        from .managed_identity import is_same_application_scope,application_match
+        from .cdp_client import CDPBrowser,NavigationTrace
+        from .managed_identity import is_same_application_scope,application_match,application_start_url
         browser=await CDPBrowser.connect(endpoint,target_id=target,expected_mode=mode)
         try:
             page=await browser.get_current_page();job=self.service.job(session['job_id'])
@@ -279,7 +279,8 @@ class WorkspaceHost:
                     window_state=bounds['bounds'].get('windowState','unconfirmed')
                 except Exception:window_state='maximize_requested'
             self.startup_timing['employer_navigation_requested_at']=self.service.now()
-            try:await page.goto(job['url'])
+            navigation=await NavigationTrace.start(page,job['url'])
+            try:await page.goto(application_start_url(job['url']))
             except asyncio.TimeoutError:
                 pass  # A delayed navigation response is resolved by owned reads.
             deadline=time.monotonic()+20
@@ -287,7 +288,7 @@ class WorkspaceHost:
             recovery=None
             while time.monotonic()<deadline:
                 observed_url=await page.evaluate('location.href')
-                if is_same_application_scope(job['url'],observed_url) and await page.evaluate("document.readyState!=='loading'"):break
+                if (is_same_application_scope(job['url'],observed_url) or navigation and navigation.accepts(observed_url)) and await page.evaluate("document.readyState!=='loading'"):break
                 await asyncio.sleep(.2)
             else:
                 identity=application_match(job['url'],observed_url)
@@ -297,6 +298,9 @@ class WorkspaceHost:
                        'simplify':'unverified','observed_at':self.service.now(),'window_state':window_state,
                        'employer_storage':employer_storage,'startup_timing':dict(self.startup_timing),
                        'viewport':await page.evaluate('({width:innerWidth,height:innerHeight})')}
+            if navigation and navigation.accepts(observed_url):
+                readiness['application_navigation']={'url':observed_url,'chain':list(navigation.chain)}
+            if navigation:navigation.close()
             readiness['connection_mode']='existing' if self.existing_browser else 'managed'
             readiness['navigator_webdriver']=await page.evaluate('navigator.webdriver')
             from .managed_context import platform_for_url

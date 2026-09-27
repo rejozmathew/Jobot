@@ -131,12 +131,15 @@
   const pendingConsent=checkboxes.filter(e=>consent(e)&&unchecked(e));
   authControl('auth_consent',pendingConsent);
   const notices=all('[role="alert"],[data-automation-id="errorMessage"],h1,h2,h3,p').map(text).join(' ');
+  const authErrors=authRoot?all('[role="alert"],[data-automation-id="errorMessage"]').filter(e=>authRoot.contains(e)).map(text).join(' '):'';
   const pageNotices=all('main,[role="main"],[role="alert"],[data-automation-id="errorPage"],h1,h2,h3,p').map(text).join(' ');
   const refresh_error=/something went wrong/i.test(pageNotices)&&/(?:refresh|reload) (?:the |this |your )?page/i.test(pageNotices);
   const auth_ui={mode,unknown_required_consent:pendingConsent.length>1||checkboxes.some(e=>unchecked(e)&&!consent(e)&&(e.required||e.getAttribute('aria-required')==='true')),
     challenge:/verify your (?:email|account)|verification (?:email|code)|check your (?:email|inbox)|multi.factor authentication/i.test(notices),
     account_exists:/(?:account|email).{0,70}already (?:exists|registered|in use)/i.test(notices),
     account_created:/(?:account.{0,50}(?:successfully created|has been created)|account created successfully)/i.test(notices),
+    account_absent:mode==='sign_in'&&/(?:no account (?:was |is )?found|account (?:does not|doesn't) exist|email (?:address )?(?:is not|isn't) registered)/i.test(authErrors),
+    creation_rejected:mode==='create_account'&&/(?:account (?:was not|could not be|wasn't) created|unable to create (?:your |the |an )?account)/i.test(authErrors),
     credential_rejected:/(?:invalid|incorrect).{0,35}(?:password|credentials|email)|(?:password|credentials).{0,35}(?:invalid|incorrect)|account.{0,30}locked/i.test(notices)};
   const escaped=(args.requisition||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
   const req=escaped?new RegExp('(?:^|[^A-Za-z0-9])'+escaped+'(?:$|[^A-Za-z0-9])','i'):null;

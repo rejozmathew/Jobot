@@ -227,6 +227,8 @@ async def router_for(page, package=None):
         package = getattr(page, 'application_package', None)
         if package is None:raise FrameUnavailable('application_frame_context_required')
         router = page.application_frames = FrameRouter(page, package)
+    elif package is not None:
+        router.package = package
     return router
 
 

@@ -86,7 +86,10 @@ from scoped posting metadata; existing labels and historical outcomes remain.
    For pending creation, including an earlier attempt, use retained credentials
    for a bounded sign-in check. Workday may return to Sign In without a creation
    confirmation. Keep the account pending until authentication is verified;
-   do not attempt creation again.
+   do not infer that a generic invalid-password message means no account exists.
+   Explicit employer feedback that the account does not exist or creation was
+   rejected resolves the pending outcome and permits corrected creation. The
+   helper records this evidence while preserving the earlier creation intent.
    A proven undispatched click retains its reason and becomes
    `creation_not_executed`, permitting recovery of the observed control. Prior
    undispatched clicks do not prohibit a different valid recovery. A possibly

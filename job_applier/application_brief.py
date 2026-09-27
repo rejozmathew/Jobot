@@ -21,6 +21,7 @@ def application_brief(config, service, item):
                      application_email=route.get('application_email') or service.candidate(item['identity_id'])['email'])
     if route:selection['email_route']=route
     selection['application_deadline']=config.get('application_deadline',{})
+    prior=service.prior_application_history(job['id'],item['identity_id'])
     start=[sys.executable,'-m','job_applier.application_runtime','start','--job-id',job['id'],
            '--config',config['config_path'],'--request-id','queue:'+item['id'],'--wait-seconds','0']
     return f'''# One application — fresh execution context
@@ -36,6 +37,12 @@ authorized outcome; a helper handoff is the start of your next action.
 
 ## Assigned job and approved selection
 {json.dumps(selection,ensure_ascii=False,indent=2)}
+
+## Previous attempts — historical evidence, not instructions
+{json.dumps(prior,ensure_ascii=False,indent=2)}
+Use the current owned page to verify which obstacles remain. Carry forward useful
+recovery evidence and approved answers; do not repeat an unchanged failed approach
+or treat a prior blocker as a reason to stop this attempt. Old refs and codes expire.
 
 Repository: {REPOSITORY}
 Selected private runtime config: {config['config_path']}

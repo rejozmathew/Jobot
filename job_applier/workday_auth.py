@@ -212,7 +212,7 @@ async def advance_auth(r,observed):
         state['creation_confirmed']=True;r.persist()
     for flag,reason in (('challenge','workday_verification_required'),('credential_rejected','workday_credentials_rejected'),
                         ('unknown_required_consent','workday_consent_needs_inspection')):
-        if ui.get(flag):return result(reason)
+        if ui.get(flag) and not (flag=='credential_rejected' and (ui.get('account_absent') or ui.get('creation_rejected'))):return result(reason)
     if ui.get('mode','unknown')=='unknown' and state.get('submitted') and not state.get('complete'):
         # Creation can briefly replace the whole document with a blank login
         # route. Keep that ordinary transition in native auth instead of
@@ -231,6 +231,19 @@ async def advance_auth(r,observed):
     if not package.get('namespace'):return result('account_namespace_unverified')
     r.package=package
     account=package.get('account') or {}
+    # Resolve uncertainty from explicit employer feedback, never from a generic
+    # invalid-password message. Keep the earlier creation intent in the ledger.
+    outcome='account_absent' if ui.get('account_absent') else 'creation_rejected' if ui.get('creation_rejected') else None
+    outcome_key=json.dumps([outcome,observed.get('document_id'),observed.get('page_signature')])
+    if outcome and outcome_key not in state.get('reconciled_outcomes',[]) and not ui.get('account_exists') and account.get('state') not in ('confirmed','verified','created_unverified',outcome):
+        reference=account.get('credential_ref') or state.get('credential_ref')
+        if reference:
+            record(r,outcome,reference,'Workday explicitly reports '+('no account for the entered email' if outcome=='account_absent' else 'account creation was rejected'))
+            account=r.package.get('account') or {};package=r.package
+            state.pop('submitted',None);state.pop('submitted_at',None)
+            state.setdefault('reconciled_outcomes',[]).append(outcome_key)
+            state['tried']=[];state.pop('creation_confirmed',None);r.persist()
+    if ui.get('creation_rejected'):return result('workday_account_creation_rejected')
     if account.get('action')=='operator_required':return result('account_requires_operator')
     tried=state.setdefault('tried',[])
     mode=ui.get('mode')

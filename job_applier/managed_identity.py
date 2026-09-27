@@ -40,8 +40,9 @@ def ats_posting_identity(url, *, namespace=None, source_id=None):
             identity=identify(url)
             if identity:return identity
         board=None;posting=None
-        if p.hostname=='job-boards.greenhouse.io':
-            match=re.fullmatch(r'/([A-Za-z0-9_-]+)/jobs/([0-9]{1,20})(?:/(?:apply|confirmation))?',p.path)
+        if p.hostname in ('job-boards.greenhouse.io','boards-api.greenhouse.io'):
+            prefix=r'/v1/boards' if p.hostname=='boards-api.greenhouse.io' else ''
+            match=re.fullmatch(prefix+r'/([A-Za-z0-9_-]+)/jobs/([0-9]{1,20})(?:/(?:apply|confirmation))?',p.path)
             if not match:return None
             board,posting=match.groups()
             if any(k=='gh_jid' for k,v in parse_qsl(p.query,keep_blank_values=True)) and query_requisition(url)!=posting:
@@ -59,7 +60,8 @@ def ats_posting_identity(url, *, namespace=None, source_id=None):
                 board=reference[1]
             elif re.fullmatch(r'[A-Za-z0-9_-]+',supplied):board=supplied
             if not board:return None
-        opaque=tuple((k,v) for k,v in parse_qsl(p.query,keep_blank_values=True) if k!='gh_jid')
+        opaque=tuple((k,v) for k,v in parse_qsl(p.query,keep_blank_values=True)
+                     if k!='gh_jid' and not (p.hostname=='boards-api.greenhouse.io' and k=='content'))
         return ('greenhouse',board.casefold(),posting,opaque)
     except (ValueError,ProtocolError):return None
 
@@ -67,6 +69,25 @@ def ats_posting_identity(url, *, namespace=None, source_id=None):
 def ats_posting_key(url, *, namespace=None, source_id=None):
     identity=ats_posting_identity(url,namespace=namespace,source_id=source_id)
     return hashlib.sha256(dumps(['ats_posting',identity]).encode()).hexdigest() if identity else None
+
+
+def application_start_url(url):
+    """Provider-specific data endpoint -> public form; original intake stays intact."""
+    p=urlsplit(url)
+    identity=ats_posting_identity(url)
+    if p.hostname=='boards-api.greenhouse.io' and identity and identity[0]=='greenhouse':
+        return urlunsplit(('https','job-boards.greenhouse.io',
+            '/'+identity[1]+'/jobs/'+identity[2],urlencode(identity[3]),''))
+    return url
+
+
+def explicit_job_conflict(left, right):
+    """A different hostname alone is not contradictory observed redirect evidence."""
+    for identify in (linkedin_identity,workday_identity,icims_identity,ats_posting_identity):
+        a,b=identify(left),identify(right)
+        if a and b and a[0]==b[0] and a!=b:return True
+    a,b=form_route_identity(left),form_route_identity(right)
+    return bool(a and b and a[:3]==b[:3] and a[3]!=b[3])
 
 
 def retain_posting_aliases(db):
@@ -138,6 +159,8 @@ def same_job_url(left, right):
         a, b = urlsplit(canonical_url(left)), urlsplit(canonical_url(right))
     except (ValueError, ProtocolError):
         return False
+    gh_left,gh_right=ats_posting_identity(left),ats_posting_identity(right)
+    if gh_left and gh_right and gh_left[0]==gh_right[0]=='greenhouse':return gh_left==gh_right
     li_left,li_right=linkedin_identity(left),linkedin_identity(right)
     if li_left or li_right:return bool(li_left and li_right and li_left==li_right)
     wd_left,wd_right=workday_identity(left),workday_identity(right)
@@ -305,6 +328,8 @@ def public_url(url):
 
 def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
     try:
+        gh_expected,gh_actual=ats_posting_identity(job_url),ats_posting_identity(candidate_url)
+        if gh_expected and gh_actual and gh_expected[0]==gh_actual[0]=='greenhouse':return gh_expected==gh_actual
         li_expected,li_actual=linkedin_identity(job_url),linkedin_identity(candidate_url)
         if li_expected or li_actual:return bool(li_expected and li_actual and li_expected==li_actual)
         workday_host=urlsplit(str(job_url).strip()).hostname or ''

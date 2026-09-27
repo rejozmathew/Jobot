@@ -73,7 +73,8 @@ class AccountServices:
         if not isinstance(evidence,str) or not evidence.strip():raise ProtocolError('account_evidence_required')
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence,completed=True)
-            actual=self._job_account_namespace(db,self._get(db,'jobs',a['job_id']),namespace)
+            from .managed_sessions import application_job
+            actual=self._job_account_namespace(db,application_job(db,a,self._get(db,'jobs',a['job_id'])),namespace)
             if actual is None:raise ProtocolError('account_namespace_not_verified_for_job')
             # Ownership check, replay check and mutation share the same writer lock.
             return self._account_update(db,namespace=actual,identity_id=a['identity_id'],state=state,
@@ -87,10 +88,10 @@ class AccountServices:
                 state=state,credential_ref=credential_ref,request_id=request_id,evidence=evidence)
 
     def _account_update(self,db,*,namespace,identity_id,state,credential_ref,request_id,evidence,attempt_id=None,allow_mutation=True):
-        if state not in ('creation_pending','creation_not_executed','created_unverified','confirmed','verified','recovery_required','reconciliation_required','locked','disabled'):raise ProtocolError('invalid_account_state')
+        if state not in ('creation_pending','creation_not_executed','account_absent','creation_rejected','created_unverified','confirmed','verified','recovery_required','reconciliation_required','locked','disabled'):raise ProtocolError('invalid_account_state')
         if not request_id or not re.fullmatch(r'(?:vault|keyring|credential):[A-Za-z0-9._/-]+',credential_ref or ''):raise ProtocolError('credential_reference_required')
         evidence=safe_text(evidence)
-        if state in ('confirmed','verified') and not evidence:raise ProtocolError('evidence_required')
+        if state in ('confirmed','verified','account_absent','creation_rejected') and not evidence:raise ProtocolError('evidence_required')
         key=hashlib.sha256(dumps([namespace,identity_id,state,credential_ref,evidence]).encode()).hexdigest()
         candidate=self._get(db,'candidates',identity_id)
         prior=db.execute('SELECT * FROM account_requests WHERE id=?',(request_id,)).fetchone()
@@ -104,7 +105,7 @@ class AccountServices:
             if attempt_id is None or not old or old['status']!='creation_pending' or not latest or latest['attempt_id']!=attempt_id or not evidence:
                 raise ProtocolError('matching_creation_attempt_required')
         if old:
-            if state=='creation_pending' and old['status']!='creation_not_executed':raise ProtocolError('reconciliation_required')
+            if state=='creation_pending' and old['status'] not in ('creation_not_executed','account_absent','creation_rejected'):raise ProtocolError('reconciliation_required')
             db.execute('UPDATE company_portal_accounts SET status=?,credential_ref=?,notes=?,updated_at=? WHERE id=?',(state,credential_ref,evidence,self.now(),old['id']))
             account_id=old['id']
         else:
@@ -129,7 +130,7 @@ class AccountServices:
             if candidate['state']!='active':return {'action':'operator_required','reason':'identity_inactive'}
             row=self._account_for_namespace(db,namespace,identity_id)
             if not row:return {'action':'unknown','namespace':namespace,'identity_id':identity_id}
-            action={'confirmed':'sign_in','verified':'sign_in','created_unverified':'verify','creation_pending':'reconcile','creation_not_executed':'create_account','recovery_required':'reconcile','reconciliation_required':'reconcile','locked':'operator_required','disabled':'operator_required'}.get(row['status'],'operator_required')
+            action={'confirmed':'sign_in','verified':'sign_in','created_unverified':'verify','creation_pending':'reconcile','creation_not_executed':'create_account','account_absent':'create_account','creation_rejected':'create_account','recovery_required':'reconcile','reconciliation_required':'reconcile','locked':'operator_required','disabled':'operator_required'}.get(row['status'],'operator_required')
             latest=db.execute('SELECT attempt_id,created_at FROM account_requests WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 1',(row['id'],)).fetchone()
             return {'action':action,'namespace':namespace,'identity_id':identity_id,'account_id':row['id'],'credential_ref':row['credential_ref'],
                     'state':row['status'],'created_at':row['created_at'],'last_attempt_id':latest['attempt_id'] if latest else None,
@@ -155,7 +156,8 @@ class AccountServices:
         valid_namespace(namespace)
         with self.tx() as db:
             a=self._owner(db,attempt_id,worker_id,fence)
-            canonical=self._job_account_namespace(db,self._get(db,'jobs',a['job_id']),namespace)
+            from .managed_sessions import application_job
+            canonical=self._job_account_namespace(db,application_job(db,a,self._get(db,'jobs',a['job_id'])),namespace)
             if canonical is None:raise ProtocolError('mail_namespace_not_verified')
             request=self._mail_request(db,identity_id=a['identity_id'],namespace=canonical,purpose=purpose,requested_at=requested_at,expected_sender=expected_sender)
             db.execute('INSERT INTO attempt_mail_requests VALUES (?,?)',(request['id'],attempt_id))

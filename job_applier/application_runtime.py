@@ -329,19 +329,29 @@ def external_apply_destination(control,current_url):
 async def click_and_follow_external_apply(browser,page,control,activate,client,ownership,target_id):
     """Arm before Apply, then hand one correlated destination to the owned session."""
     import asyncio
-    from .cdp_client import arm_target_observation,wait_for_apply_target
+    from .cdp_client import arm_target_observation,wait_for_apply_target,NavigationTrace
     current=await page.evaluate('location.href')
     destination=external_apply_destination(control,current)
-    observation=await asyncio.to_thread(arm_target_observation,browser.base_url,target_id,destination) if destination else None
-    result=await activate()
-    if not observation or not (result.get('clicked') or result.get('status')=='clicked'):
-        return result
-    found=await wait_for_apply_target(observation,current_url=lambda:page.evaluate('location.href'))
-    if not found:return result
-    handoff=client.call('handoff_target',**ownership,current_target_id=target_id,
-        new_target_id=found['target_id'],url=found['url'],expected_url=destination,
-        evidence='Observed external Apply '+found['kind']+' with the armed public destination')
-    return dict(result,target_handoff=handoff)
+    label=str(control.get('text') or control.get('label') or '')
+    apply_control=not control.get('submission_control') and bool(re.match(r'^apply\b',label,re.I))
+    navigation=await NavigationTrace.start(page,current) if apply_control else None
+    observation=await asyncio.to_thread(arm_target_observation,browser.base_url,target_id,destination or current) if destination or navigation else None
+    try:
+        result=await activate()
+        if not observation or not (result.get('clicked') or result.get('status')=='clicked'):
+            return result
+        found=await wait_for_apply_target(observation,current_url=lambda:page.evaluate('location.href'),
+                                         navigation=navigation,timeout=5.0)
+        if not found:return result
+        proof={'expected_url':destination}
+        if found.get('navigation_chain'):
+            proof={'source_url':current,'navigation_chain':found['navigation_chain']}
+        handoff=client.call('handoff_target',**ownership,current_target_id=target_id,
+            new_target_id=found['target_id'],url=found['url'],**proof,
+            evidence='Observed Apply '+found['kind']+' from the owned document and correlated navigation')
+        return dict(result,target_handoff=handoff)
+    finally:
+        if navigation:navigation.close()
 
 
 def browser_action(config,client,ownership,package,target_id,params):

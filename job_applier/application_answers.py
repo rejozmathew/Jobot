@@ -9,6 +9,36 @@ from urllib.parse import urlsplit
 POLICY_KEYS={'salary_expectation','routine_privacy_consent','submission_evidence_sources'}
 
 
+def reusable_answers(config,package,attempt_id,*,source):
+    """Exact verified answers from authoritative same-candidate retry lineage."""
+    if not config.get('spool_dir'):return {}
+    folder=Path(config['spool_dir'])/'answers';result={}
+    attempt=package.get('attempt',{});job=package['job']
+    profile_hash=package.get('profile_hash') or attempt.get('profile_hash')
+    prior=list(reversed(package.get('prior_attempts',{}).get('attempts',[])))
+    for item in prior+[{'attempt_id':attempt_id,'job_id':job.get('id')}]:
+        try:
+            aid=int(item['attempt_id']);history=json.loads((folder/f'attempt-{aid}.json').read_text(encoding='utf-8'))
+            if history['attempt_id']!=aid:continue
+            if aid!=attempt_id:
+                # Legacy journals inherit provenance only from this authoritative
+                # candidate/posting attempt list, never from a filesystem scan.
+                saved_profile=history.get('profile_hash') or item.get('profile_hash')
+                if (not profile_hash or saved_profile!=profile_hash
+                    or not attempt.get('identity_id') or history.get('identity_id',attempt['identity_id'])!=attempt['identity_id']
+                    or history.get('job_id')!=item.get('job_id')):continue
+            elif not (history.get('job_url')==job['url'] or job.get('id') and history.get('job_id')==job['id']
+                      and history.get('identity_id')==attempt.get('identity_id')):continue
+            for row in history['answers']:
+                if (row.get('source')==source and row.get('verified') is True and row.get('question_key')
+                    and row.get('answer_basis') not in (None,'','not_recorded') and 'answer_value' in row):
+                    from .managed_redaction import reject_secrets
+                    reject_secrets(row)
+                    result[row['question_key']]=row
+        except (OSError,ValueError,KeyError,TypeError):continue
+    return result
+
+
 def save_answer_history(config,package,attempt_id,answers,*,page,source,basis=None):
     """Best-effort private journal; its failure cannot make a form write retryable."""
     try:return _save_answer_history(config,package,attempt_id,answers,page=page,source=source,basis=basis)
@@ -25,10 +55,12 @@ def _save_answer_history(config,package,attempt_id,answers,*,page,source,basis=N
     job=package['job'];attempt=package.get('attempt',{})
     history=json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {
         'attempt_id':attempt_id,'session_id':attempt.get('local_session_id'),
+        'identity_id':attempt.get('identity_id'),'profile_hash':package.get('profile_hash') or attempt.get('profile_hash'),
         'company':job.get('company'),'job_title':job.get('title'),'job_id':job.get('id'),
         'job_url':job['url'],'platform':package.get('platform'),
         'portal_namespace':package.get('namespace') or urlsplit(job['url']).hostname,'answers':[]}
-    if history['attempt_id']!=attempt_id or history['job_url']!=package['job']['url']:
+    stable_job=job.get('id') and history.get('job_id')==job['id'] and history.get('identity_id')==attempt.get('identity_id')
+    if history['attempt_id']!=attempt_id or not (stable_job or history['job_url']==package['job']['url']):
         raise ValueError('answer_history_scope_mismatch')
     metadata_changed=False
     for key,value in {'company':job.get('company'),'job_title':job.get('title'),
@@ -77,7 +109,7 @@ async def capture_answers(browser_page,config,package,ownership,*,page='form',so
         if call:
             try:
                 result=call('observe_job_metadata',**ownership,metadata={k:context[k] for k in ('url','company','title','source') if k in context})
-                job=result['job'];package['job']=job
+                job=dict(result['job'],**{k:job[k] for k in ('url','posting_url') if k in job});package['job']=job
             except Exception:pass  # Audit/metadata errors do not change the form result.
         if not job.get('company') and context.get('company'):
             job.update(company=context['company'],company_source=context.get('source'))

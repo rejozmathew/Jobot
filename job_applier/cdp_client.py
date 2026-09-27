@@ -96,6 +96,47 @@ class ApplyTargetObservation:
     armed_at: float
 
 
+class NavigationTrace:
+    """Ephemeral evidence from one owned main frame, armed before an action."""
+    def __init__(self, frame_id, source_url):
+        self.frame_id=frame_id
+        self.source_url=source_url
+        self.chain=[source_url]
+        self._remove=[]
+
+    def _record(self,url):
+        if _public_destination(url) and url!=self.chain[-1]:self.chain.append(url)
+
+    def request(self,event):
+        if event.get('type')=='Document' and event.get('frameId')==self.frame_id:
+            self._record(event.get('request',{}).get('url'))
+
+    def within_document(self,event):
+        if event.get('frameId')==self.frame_id:self._record(event.get('url'))
+
+    def accepts(self,url):
+        from .managed_identity import explicit_job_conflict
+        return bool(len(self.chain)>1 and _public_destination(url) and
+                    _public_destination(self.chain[-1])==_public_destination(url) and
+                    not explicit_job_conflict(self.source_url,url))
+
+    @classmethod
+    async def start(cls,page,source_url):
+        session=getattr(page,'_session',None)
+        if not session or not hasattr(session,'subscribe'):return None
+        tree=await session.call('Page.getFrameTree')
+        trace=cls(tree['frameTree']['frame']['id'],source_url)
+        trace._remove=[session.subscribe('Network.requestWillBeSent',trace.request),
+                       session.subscribe('Page.navigatedWithinDocument',trace.within_document)]
+        await session.call('Network.enable')
+        await session.call('Page.enable')
+        return trace
+
+    def close(self):
+        for remove in self._remove:remove()
+        self._remove=[]
+
+
 def arm_target_observation(cdp_url: str, current_target_id: str, expected_url: Optional[str], *, targets=None):
     """Snapshot targets before an external Apply activation.
 
@@ -113,15 +154,19 @@ def arm_target_observation(cdp_url: str, current_target_id: str, expected_url: O
         current.get('browserContextId'),time.monotonic())
 
 
-async def wait_for_apply_target(observation, *, inventory=None, current_url=None, timeout=2.0, poll_interval=.05):
+async def wait_for_apply_target(observation, *, inventory=None, current_url=None, timeout=2.0, poll_interval=.05, navigation=None):
     """Resolve only one correlated same-tab or popup destination after Apply."""
     if observation is None:return None
     inventory=inventory or (lambda: asyncio.to_thread(_target_rows,observation.cdp_url))
     deadline=asyncio.get_running_loop().time()+max(0,timeout)
     while True:
         live_url=await current_url() if current_url else ''
-        if _public_destination(live_url)==observation.expected_public_url:
+        if (_public_destination(live_url)==observation.expected_public_url and
+                (not navigation or live_url!=navigation.source_url)):
             return {'target_id':observation.current_target_id,'url':live_url,'kind':'same_tab'}
+        if navigation and navigation.accepts(live_url):
+            return {'target_id':observation.current_target_id,'url':live_url,'kind':'same_tab',
+                    'navigation_chain':list(navigation.chain)}
         rows=await inventory()
         candidates=[]
         for raw in rows:
@@ -131,10 +176,12 @@ async def wait_for_apply_target(observation, *, inventory=None, current_url=None
             if observation.browser_context_id is not None and row.get('browserContextId')!=observation.browser_context_id:continue
             opener=row.get('openerId')
             if opener is not None and opener!=observation.current_target_id:continue
-            if _public_destination(row.get('url'))==observation.expected_public_url:candidates.append(row)
+            exact=_public_destination(row.get('url'))==observation.expected_public_url
+            if exact:candidates.append(row)
         if len(candidates)==1:
             row=candidates[0]
-            return {'target_id':row['targetId'],'url':row['url'],'kind':'popup'}
+            result={'target_id':row['targetId'],'url':row['url'],'kind':'popup'}
+            return result
         # Never choose among ambiguous matching tabs, even if one is newer.
         if len(candidates)>1:return None
         if asyncio.get_running_loop().time()>=deadline:return None

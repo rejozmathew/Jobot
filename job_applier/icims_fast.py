@@ -95,7 +95,8 @@ class IcimsRunner:
         return True
 
     async def repair(self,plans):
-        from .application_answers import apply_policy, save_answer_history
+        from .application_answers import apply_policy, save_answer_history, reusable_answers
+        restored=reusable_answers(self.config,self.package,self.owner['attempt_id'],source='icims_fast')
         work=self.audit['required_missing']+self.audit['invalid_blockers'];actions=[];questions=[];seen=set();approved={};changed=False
         async with self.batch('repair'):
             # Reuse policy only for actual residuals. Optional blanks remain untouched.
@@ -141,8 +142,10 @@ class IcimsRunner:
                     q=dict(data,ref=item['ref'],question_key=key)
                     q['options']=[dict(o,**({'ref':item['option_refs'][(o['value'],o['label'])]} if (o['value'],o['label']) in item['option_refs'] else {})) for o in data['options']]
                     plan=next((p for p in plans if p.get('ref')==q['ref'] and p.get('question_key')==key),None)
+                    basis=plan['basis'] if plan else 'approved_profile_or_exact_saved_answer'
                     answer=plan['answer'] if plan else saved_answer(q,self.package)
                     if answer is None:answer=approved_answer(q['question'],self.profile)
+                    if answer is None and key in restored:answer=restored[key]['answer_value'];basis=restored[key]['answer_basis']
                     if answer is None and self.audit['stage']['name']=='email_entry' and field.get('type')=='email':answer=self.profile.get('identity',{}).get('email')
                     if answer is None:questions.append(q);continue
                     action=answer_action(q,answer)
@@ -151,7 +154,7 @@ class IcimsRunner:
                         actions.append(action)
                         approved[action['ref']]={'field':q['field'],'question':q['question'],'question_key':key,
                             'answer':str(answer),'answer_value':answer,'verified':True,
-                            'answer_basis':plan['basis'] if plan else 'approved_profile_or_exact_saved_answer'}
+                            'answer_basis':basis}
             if actions:
                 result=await repair_fields(self.page,actions,checkpoint=self.checkpoint)
                 await self.control()
