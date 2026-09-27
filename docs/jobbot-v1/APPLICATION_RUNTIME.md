@@ -1,5 +1,18 @@
 # Application runtime: ownership, helper map, and rationale
 
+## September 27: operator pause for a break
+
+Migration 24 retains `dispatch_control.automation_paused` independently of the
+automatic pickup setting. The dashboard header and queue CLI send `pause_all` /
+`resume_all` through the existing operator `queue_control`. `queue_take` and
+`harvest_runtime.run_harvest` check it in the same transaction that admits work.
+Admitted application/discovery work finishes normally; queue recovery and cleanup
+continue. Pending manual requests and retry due times survive the pause. The
+discovery timer treats a paused check as a successful no-op. Resume restores
+normal scheduling without changing prior settings or submission evidence.
+This is the operator-requested queue/discovery control; it adds no failure-based
+restriction, automatic retry limit or rule for independent manual sessions.
+
 ## September 27: route continuity and retry learning
 
 `cdp_client.NavigationTrace` observes the owned main document before startup or

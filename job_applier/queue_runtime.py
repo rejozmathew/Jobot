@@ -149,7 +149,7 @@ def dispatch_one(config, service, *, launcher=subprocess.Popen):
     if any(r['workspace_id'] in workspace_ids for r in active):
         return {'state':'waiting_for_browser'}
     item=service.queue_take()
-    if not item:return {'state':'empty'}
+    if not item:return {'state':'paused' if service.queue_status()['automation_paused'] else 'empty'}
     root=Path(config['spool_dir'])/'dispatch'/item['id']
     from .model_settings import application_selection
     effective_settings=service.settings_view()['values']
@@ -205,11 +205,14 @@ def watch(config, service, *, once=False):
             due=not status['next_automatic_at'] or now>=datetime.fromisoformat(status['next_automatic_at'])
             # Cleanup is observed even with scheduling paused.
             recovered=recover_dispatch(service)
-            if once or status['wake_requested'] or status['immediate_count'] or (status['enabled'] and due):
+            if status['automation_paused']:
+                service.queue_heartbeat(process_identity(os.getpid()),detail='Paused; waiting for Resume JobBot')
+                if once:return {'state':'paused'}
+            elif once or status['wake_requested'] or status['immediate_count'] or (status['enabled'] and due):
                 result=dispatch_one(config,service) if recovered else {'state':'waiting_for_executor_or_cleanup'}
-                if result['state'] not in ('waiting_for_browser','waiting_for_executor_or_cleanup'):
+                if result['state'] not in ('paused','waiting_for_browser','waiting_for_executor_or_cleanup'):
                     with service.tx() as db:
-                        db.execute('UPDATE dispatch_control SET wake_requested=0,next_automatic_at=? WHERE id=1',
+                        db.execute('UPDATE dispatch_control SET wake_requested=0,next_automatic_at=? WHERE id=1 AND automation_paused=0',
                                    ((datetime.fromisoformat(service.now())+timedelta(seconds=interval)).isoformat(),))
                 service.queue_heartbeat(process_identity(os.getpid()),detail=result['state'])
                 if once:return result
@@ -237,7 +240,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config')
     sub=parser.add_subparsers(dest='command',required=True)
-    for command in ('status','doctor','watch','once','serve','run-next','pause','resume'):sub.add_parser(command)
+    for command in ('status','doctor','watch','once','serve','run-next','pause','resume','pause-all','resume-all'):sub.add_parser(command)
     add=sub.add_parser('enqueue');add.add_argument('urls',nargs='*');add.add_argument('--job-id',action='append',default=[])
     add.add_argument('--retry',action='store_true');add.add_argument('--run-next',action='store_true')
     args=parser.parse_args(argv)

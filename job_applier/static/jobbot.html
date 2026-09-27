@@ -15,6 +15,7 @@
   </div>
   <div class="header-actions">
     <span id="mode" class="badge">Not connected</span>
+    <button id="automation-toggle" type="button" aria-describedby="automation-status" hidden>Pause JobBot</button>
     <button id="refresh" hidden>Refresh</button>
 
   </div>
@@ -29,6 +30,7 @@
 </section>
 
 <main id="console" hidden>
+  <p id="automation-status" role="status" aria-live="polite"></p>
   <nav aria-label="Workspace">
     <button data-tab="queue" class="active">Applications</button>
     <button data-tab="answers">Needs your answer <span id="answer-count"></span></button>

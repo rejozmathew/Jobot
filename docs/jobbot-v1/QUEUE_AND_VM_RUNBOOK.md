@@ -50,6 +50,20 @@ the launcher before the next attempt. No additional automatic retry limit is add
 
 ### Queue controls
 
+**Pause JobBot** in the dashboard header gives the application queue and discovery
+a break. Work already admitted finishes normally; the banner shows **Finishing
+current work** until it has ended, then **Paused**. No new queued application or
+discovery run starts until **Resume JobBot** is clicked. The pause survives service
+and machine restarts. Queue selected, Apply now and Wake existing queue requests
+are saved during the pause and wait for Resume. Resume preserves the prior
+automatic queue setting, discovery interval, retry timing and application history.
+This controls the queue and discovery, not unrelated model use or independently
+started application sessions. It does not unload the shared model server.
+
+CLI equivalents are `python -m job_applier.queue_runtime pause-all` and
+`python -m job_applier.queue_runtime resume-all`, using the selected private config.
+The older `pause` / `resume` commands change automatic pickup only.
+
 In the dashboard, **Add a job** accepts its official URL and optional company/title.
 The worker automatically queues active intake using its configured candidate and
 resume. No second enqueue click is required. Existing cancellation, recorded

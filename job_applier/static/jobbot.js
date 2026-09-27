@@ -344,6 +344,7 @@ async function applyNow(job,button){
   const result=await api('queue_enqueue',{job_ids:[job.id],identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_retry'});
   const q=result.queue||{},item=result.items[0];
   const message=item.state==='dispatched'?'This application is already in progress.':
+   q.automation_paused?'Request saved. Choose Resume JobBot to start queued applications.':
    !q.worker_online?'Request saved, but the queue worker is offline. It will start this job when the service is back online.':
    q.counts?.dispatched?'Request saved. This job will run after the current application and any earlier Apply now requests.':
    'Request saved. The worker will start this job as soon as its browser is free, ahead of automatic jobs.';
@@ -353,6 +354,7 @@ async function applyNow(job,button){
  finally{button.disabled=false;}
 }
 function runNextMessage(q){
+ if(q.automation_paused)return 'Request saved. Applications and discovery are paused. Choose Resume JobBot to run queued work.';
  if(!q.counts?.queued)return q.counts?.dispatched?'An application is already in progress. No other jobs are waiting.':'No eligible jobs are waiting. Active jobs are picked up automatically; check job reasons below.';
  if(!q.worker_online)return 'Request saved, but the queue worker is offline. Start the JobBot queue service to run queued jobs.';
  if(q.ready_count===0&&q.scheduled_count)return `Retries are scheduled for later. Next retry: ${stamp(q.next_job_at)}.`;
@@ -361,12 +363,26 @@ function runNextMessage(q){
 function renderDispatcher(v){
  const q=v.dispatch_queue||{};
  const discovery=v.discovery;
+ const paused=!!q.automation_paused;
+ const draining=!!q.counts?.dispatched||discovery?.last_run?.state==='running'||(v.local_runtime?.sessions||[]).some(s=>!s.ended_at);
+ if($('automation-toggle')){
+  $('automation-toggle').hidden=!q.installed||q.automation_pause_supported===false;
+  $('automation-toggle').textContent=paused?'Resume JobBot':'Pause JobBot';
+ }
+ if($('automation-status')){
+  $('automation-status').hidden=!q.installed||q.automation_pause_supported===false;
+  $('automation-status').classList.toggle('paused',paused);
+  $('automation-status').textContent=paused?
+   (draining?'Finishing current work, then paused. No new queued applications or discovery will start until you choose Resume JobBot.':
+    'Paused. Applications and discovery will wait until you choose Resume JobBot.'):
+   'Pause JobBot finishes current work, then pauses the application queue and discovery until you resume.';
+ }
  if($('discovery-status')){
   const last=discovery?.last_run;
   $('discovery-status').textContent=!discovery?.installed?'Discovery status unavailable until the updated discovery service is installed.':
    `Discovery: up to ${discovery.batch_size} jobs every ${discovery.interval_hours} hours · Runner: ${discovery.runner}. `+
    `${last?`Last started ${stamp(last.started_at)} · ${last.state==='completed'?'Executor finished; see discovered jobs':last.state==='incomplete'?'Incomplete: executor ended without saving discovery results':displayStatus(last.state)}. `:'No discovery run recorded yet. '}`+
-   `${last?.state==='running'?'Discovery is running. ':`Next due: ${discovery.next_due_at?stamp(discovery.next_due_at):'next scheduler check'}. `}`+
+   `${paused?'New discovery is paused until Resume JobBot. ':last?.state==='running'?'Discovery is running. ':`Next due: ${discovery.next_due_at?stamp(discovery.next_due_at):'next scheduler check'}. `}`+
    `${discovery.scheduler_recent?'Scheduler checked recently.':last?.state==='running'?`Last scheduler check: ${stamp(discovery.scheduler_last_checked_at)}.`:'No recent scheduler check; check the discovery service.'} Change frequency and job limit in Settings.`;
  }
  if($('main-resume-filename'))$('main-resume-filename').hidden=!!v.local_runtime?.workspaces?.length;
@@ -378,8 +394,9 @@ function renderDispatcher(v){
   choice('queue-resume',options,selected);
  }
  if($('dispatcher-status'))$('dispatcher-status').textContent=!q.installed?'Queue upgrade required: restart with the current queue dashboard launcher.':
-  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.counts?.dispatched||0} in progress · Automatic queue ${q.enabled?'on':'paused'}. Active jobs are picked up automatically, one application at a time.`;
+  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.counts?.dispatched||0} in progress · ${paused?'JobBot paused. Queued jobs are saved until you resume.':`Automatic queue ${q.enabled?'on':'paused'}. Active jobs are picked up automatically, one application at a time.`}`;
  if($('application-schedule'))$('application-schedule').textContent=
+  paused?'New applications are paused, including Queue selected, Apply now and Wake existing queue requests. Current work finishes normally.':
   `${q.counts?.dispatched?'An application is running. The next ready job follows after it finishes. ':''}`+
   `${q.enabled?`Next application check: ${q.next_automatic_at?stamp(q.next_automatic_at):'worker’s next check'}.`:'Automatic applications are paused; Queue selected or Apply now can request work immediately.'}`+
   `${q.ready_count===0&&q.next_job_at?` Next scheduled retry: ${stamp(q.next_job_at)}.`:''} Up to 6 attempts: 4 in the first 24 hours, then 2 the next day. Targets: 0, 2, 4, 6, 24 and 28 hours; busy or long runs move later. After 6 attempts, review the failure reason.`;
@@ -784,7 +801,7 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{
   const submission_mode=$('main-submission-mode').value;
   if(submission_mode!==state.view.settings.values.submission_mode)await api('configure',{changes:{submission_mode,mode:submission_mode==='submit'?'pilot':'development'},expected_version:state.settingsVersion});
   const result=await api('queue_enqueue',{job_ids:orderedIds,identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_enqueue'});
-  state.selected.clear();notice(`${result.items.length} selected job(s) requested in table order. ${result.queue?.worker_online===false?'The worker is offline; requests are saved until it returns.':'The worker runs them one at a time after the current application and earlier manual requests, ahead of automatic pickups.'}`);await refresh();return;
+  state.selected.clear();notice(`${result.items.length} selected job(s) requested in table order. ${result.queue?.automation_paused?'Requests are saved until you choose Resume JobBot.':result.queue?.worker_online===false?'The worker is offline; requests are saved until it returns.':'The worker runs them one at a time after the current application and earlier manual requests, ahead of automatic pickups.'}`);await refresh();return;
  }
  if(!state.selected.size)throw Error('Please select at least one job from the queue.');
  const candidateId=$('candidate').value;if(!candidateId)throw Error('Please select a candidate.');
@@ -802,6 +819,12 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{
 $('queue-selected-jobs').onclick=()=>$('start-application-btn').onclick();
 if($('queue-run-next'))$('queue-run-next').onclick=async()=>{try{const q=await api('queue_control',{command:'run_next'});notice(runNextMessage(q));await refresh();}catch(e){notice(e.message,true);}};
 if($('queue-toggle'))$('queue-toggle').onclick=async()=>{try{await api('queue_control',{command:state.view?.dispatch_queue?.enabled?'pause':'resume'});await refresh();}catch(e){notice(e.message,true);}};
+if($('automation-toggle'))$('automation-toggle').onclick=async()=>{
+ const button=$('automation-toggle');if(button.disabled)return;button.disabled=true;
+ try{const q=await api('queue_control',{command:state.view?.dispatch_queue?.automation_paused?'resume_all':'pause_all'});
+  notice(q.automation_paused?'Pause saved. Current work finishes; new applications and discovery wait until you resume.':'JobBot resumed. Saved queue and discovery schedules are active again.');await refresh();
+ }catch(e){notice(e.message,true);}finally{button.disabled=false;}
+};
 $('run-picker').onchange=()=>{state.run=$('run-picker').value;state.attempt=null;refresh();};
 for(const b of document.querySelectorAll('[data-control]'))b.onclick=async()=>{try{const r=state.view?.current_run;if(!r)throw Error('No run selected.');await api('control',{run_id:r.run_id,command:b.dataset.control});notice('Control request recorded; observe acknowledgement.');await refresh();}catch(e){notice(e.message,true);}};
 $('copy-handoff').onclick=async()=>{const r=state.view?.current_run;if(!r)return;const text=`Use the canonical job-apply skill to accept JobBot run ${r.run_id} in instance ${state.instance}; pull one job at a time and obey app controls.`;try{await navigator.clipboard.writeText(text);notice('Worker handoff copied.');}catch{notice(text);}};

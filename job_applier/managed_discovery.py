@@ -12,6 +12,8 @@ class DiscoveryServices:
             installed=bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_runs'").fetchone())
             row=db.execute('SELECT * FROM discovery_runs ORDER BY rowid DESC LIMIT 1').fetchone() if installed else None
             check=db.execute('SELECT last_checked_at FROM discovery_control WHERE id=1').fetchone()[0] if installed else None
+            control=dict(db.execute('SELECT * FROM dispatch_control WHERE id=1').fetchone()) if installed else {}
+            paused=bool(control.get('automation_paused',False))
         last=dict(row) if row else None
         due=None
         if last:
@@ -21,7 +23,7 @@ class DiscoveryServices:
                 'completed' if last['record_file_exists'] else 'incomplete')
             due=(datetime.fromisoformat(last['started_at'])+timedelta(hours=settings['discovery_interval_hours'])).isoformat()
         age=(datetime.fromisoformat(self.now())-datetime.fromisoformat(check)).total_seconds() if check else None
-        return {'installed':installed,'batch_size':settings['discovery_batch_size'],
+        return {'installed':installed,'automation_paused':paused,'batch_size':settings['discovery_batch_size'],
             'interval_hours':settings['discovery_interval_hours'],'last_run':last,'next_due_at':due,
             'scheduler_last_checked_at':check,'scheduler_recent':age is not None and 0<=age<180,
             'runner':'JobBot discovery service / Hermes'}

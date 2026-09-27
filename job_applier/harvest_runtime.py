@@ -133,11 +133,15 @@ def run_harvest(config, service, *, enqueue=False, scheduled=False, launcher=sub
             with service.tx() as db:
                 db.execute('UPDATE discovery_control SET last_checked_at=? WHERE id=1',(service.now(),))
         status=service.discovery_status()
+        if status['automation_paused']:return {'state':'paused'}
         if scheduled and status['next_due_at'] and datetime.fromisoformat(service.now())<datetime.fromisoformat(status['next_due_at']):
             return {'state':'not_due','next_due_at':status['next_due_at']}
         run_id=uid();root=Path(config['spool_dir'])/'harvest'/run_id
         started=service.now()
         with service.tx() as db:
+            # Serialize admission with the operator pause. Already admitted work drains.
+            if db.execute('SELECT automation_paused FROM dispatch_control WHERE id=1').fetchone()[0]:
+                return {'state':'paused'}
             db.execute('INSERT INTO discovery_runs(id,started_at,process_identity_json,batch_size,enqueue_authorized) VALUES (?,?,?,?,?)',
                 (run_id,started,json.dumps(process_identity(os.getpid()) or {}),status['batch_size'],int(enqueue)))
         try:
@@ -186,7 +190,7 @@ def main(argv=None):
     try:
         config=resolve_config(args.config)
         result=run_harvest(config,prepare_local(config),enqueue=args.enqueue,scheduled=args.scheduled)
-        print(json.dumps(result));return 0 if result['state'] in ('completed','not_due') else 1
+        print(json.dumps(result));return 0 if result['state'] in ('completed','not_due','paused') else 1
     except (ProtocolError,OSError,ValueError,KeyError) as exc:
         print(json.dumps({'error':getattr(exc,'code',type(exc).__name__)}));return 2
 

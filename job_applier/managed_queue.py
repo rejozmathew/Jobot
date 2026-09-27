@@ -162,6 +162,8 @@ class QueueServices:
         heartbeat=control.get('heartbeat_at')
         age=(datetime.fromisoformat(self.now())-datetime.fromisoformat(heartbeat)).total_seconds() if heartbeat else None
         return {**control,'installed':True,'enabled':bool(control['enabled']),
+                'automation_paused':bool(control.get('automation_paused',False)),
+                'automation_pause_supported':'automation_paused' in control,
                 'worker_online':bool(identity and process_matches(identity) and age is not None and age<30),
                 'counts':counts,'ready_count':ready,'scheduled_count':len(waiting)-ready,'next_job_at':next_job,
                 'immediate_count':sum(bool(r['immediate_requested_at']) for r in waiting),
@@ -169,17 +171,20 @@ class QueueServices:
                 'items':items,'latest_by_job':latest,'selection':getattr(self,'dispatch_selection',None)}
 
     def queue_control(self, *, command):
-        if command not in ('run_next','pause','resume'):raise ProtocolError('invalid_queue_control')
+        if command not in ('run_next','pause','resume','pause_all','resume_all'):raise ProtocolError('invalid_queue_control')
         selection=getattr(self,'dispatch_selection',None)
         if command in ('run_next','resume') and selection:self.queue_reconcile(**selection)
         with self.tx() as db:
-            if command=='run_next':db.execute('UPDATE dispatch_control SET wake_requested=1 WHERE id=1')
+            if command in ('pause_all','resume_all'):
+                db.execute('UPDATE dispatch_control SET automation_paused=? WHERE id=1',(int(command=='pause_all'),))
+            elif command=='run_next':db.execute('UPDATE dispatch_control SET wake_requested=1 WHERE id=1')
             else:db.execute('UPDATE dispatch_control SET enabled=? WHERE id=1',(int(command=='resume'),))
         return self.queue_status()
 
     def queue_take(self):
         """Only the dispatcher calls this, under its OS lock; no model in Service."""
         with self.tx() as db:
+            if db.execute('SELECT automation_paused FROM dispatch_control WHERE id=1').fetchone()[0]:return None
             if db.execute("SELECT 1 FROM dispatch_queue WHERE state='dispatched'").fetchone():return None
             schedule=attempt_schedule([dict(r) for r in db.execute('SELECT * FROM dispatch_queue ORDER BY rowid')])
             for row in db.execute("""SELECT * FROM dispatch_queue WHERE state='queued'
