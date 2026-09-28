@@ -89,3 +89,33 @@ authorization. New execution restrictions, refusal conditions or retry limits st
 require explicit approval. If the evidence does not support a fix, record that fact
 and continue observation. Serving-engine changes require engine-side evidence or a
 synthetic reproduction; a decoder error alone does not prove GPU memory exhaustion.
+
+### Self-improvement #002 — 2026-09-28
+
+Tag: [`self-improvement-002-2026-09-28`](https://github.com/rejozmathew/auto-job-applier/releases/tag/self-improvement-002-2026-09-28).
+The annotated tag identifies the deployed code commit and records the verified
+Ubuntu deployment timestamp and post-deployment checks. The matching private
+Ubuntu manifest retains file hashes and backups. GitHub branch: `self-improvement`.
+
+Opening the dashboard over LAN HTTP exposed a browser compatibility bug:
+`crypto.randomUUID()` requires a secure context. Manual Add Job failed while
+constructing its payload, before sending an intake request. Four queue/start/retry
+paths used the same unsupported call.
+
+All five actions now share a request ID function. It uses native `randomUUID`
+where available and otherwise creates UUID v4 identifiers with the browser's
+HTTP-compatible `getRandomValues`. Distinct actions receive distinct identifiers;
+authentication retries retain the original request identity. This changes no
+application permissions, queue policy, recovery limits or operator deadlines.
+
+Validation reproduced six failures before the fix. All 51 focused tests passed,
+and the final managed suite passed 1,066 tests with 111 skips. Synthetic dashboard
+tests exercise all five actual handlers with and without native UUID support and
+verify authenticated retry identity. No live application was used as a fixture.
+
+Deployment updates the dashboard asset, synthetic regression and these notes at
+an idle application boundary. The dashboard serves the asset directly from disk,
+so no service restart is needed; existing browser tabs must reload. Ubuntu fixture
+results, served-asset hash, service health and cumulative file verification are
+recorded in the tag and private run record. This fixes dashboard request failures;
+it does not establish an increase in employer-portal submission success.

@@ -19,6 +19,15 @@ async function request(path,body,method='POST'){
  if(!r.ok){if(r.status===401&&path!='/login')showLogin();throw new Error(data.error||`HTTP ${r.status}`);}return data;
 }
 const api=(operation,payload={})=>request('/v1/'+operation,payload);
+function newRequestId(){
+ const source=globalThis.crypto;
+ if(typeof source.randomUUID==='function')return source.randomUUID();
+ // LAN HTTP pages retain getRandomValues even when randomUUID is unavailable.
+ const bytes=source.getRandomValues(new Uint8Array(16));
+ bytes[6]=(bytes[6]&0x0f)|0x40;bytes[8]=(bytes[8]&0x3f)|0x80;
+ const hex=Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');
+ return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
 const LEGACY_ALLOWED=new Set(['identity','summary','years_experience','target_roles','industries','skills','leadership_scope','work_authorization','work_preferences','dealbreakers','eeo_information','standard_answers','experience','education','certifications','projects','languages','links','resume']);
 const LEGACY_EXCLUDED=new Set(['accounts','cover_letter','login','greenhouse','automation_preferences','application_answer_policy']);
 const LEGACY_IDENTITY=new Set(['full_name','first_name','middle_name','last_name','preferred_name','email','phone','country code','address','location','linkedin','website','github']);
@@ -341,7 +350,7 @@ async function applyNow(job,button){
   if(!asset)throw Error('Choose a candidate with a registered resume.');
   const submission_mode=$('main-submission-mode').value;
   if(submission_mode!==state.view.settings.values.submission_mode)await api('configure',{changes:{submission_mode,mode:submission_mode==='submit'?'pilot':'development'},expected_version:state.settingsVersion});
-  const result=await api('queue_enqueue',{job_ids:[job.id],identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_retry'});
+  const result=await api('queue_enqueue',{job_ids:[job.id],identity_id,resume_asset_id:asset.id,request_id:newRequestId(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_retry'});
   const q=result.queue||{},item=result.items[0];
   const message=item.state==='dispatched'?'This application is already in progress.':
    q.automation_paused?'Request saved. Choose Resume JobBot to start queued applications.':
@@ -780,14 +789,14 @@ if($('queue-answered-batch'))$('queue-answered-batch').onclick=async()=>{
   notice(`${count} answered application${count===1?'':'s'} queued for the next batch.`);await refresh();
  }catch(error){notice(answerError(error),true);}
 };
-$('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:crypto.randomUUID(),producer:'dashboard'});
+$('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:newRequestId(),producer:'dashboard'});
  for(const id of ['job-search','job-source-filter','job-country-filter','job-assessment-filter','job-added-from','job-added-to'])$(id).value='';state.selected.clear();state.queueKey=null;
  if(job.disposition==='canceled'){$('job-filter').value='canceled';notice('This job is already saved as canceled. Restore it here if you want to pursue it again.');}
  else if(submitted(job)){$('job-filter').value='submitted';notice('This job is already saved as submitted.');}
  else{$('job-filter').value='active';state.selected.add(job.id);notice('Job saved and selected. Choose Queue selected to apply.');}
  $('intake-form').reset();await refresh();}catch(err){notice(err.message,true);}};
 $('mark-ready').onclick=async()=>{try{if(!state.selected.size)throw Error('Select at least one job.');for(const id of state.selected)await api('eligibility',{job_id:id,decision:'ready',reason:'Explicit operator approval'});notice('Selected eligibility recorded.');await refresh();}catch(e){notice(e.message,true);}};
-$('request-run').onclick=async()=>{try{if(!state.selected.size||!$('candidate').value||!$('browser-profile').value.trim())throw Error('Select jobs, candidate and exact browser profile.');const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:[...state.selected],identity_id:$('candidate').value,browser_profile:$('browser-profile').value.trim()});state.run=r.id;state.attempt=null;notice('Run requested; waiting for worker acceptance.');tab('run');await refresh();}catch(e){notice(e.message,true);}};
+$('request-run').onclick=async()=>{try{if(!state.selected.size||!$('candidate').value||!$('browser-profile').value.trim())throw Error('Select jobs, candidate and exact browser profile.');const r=await api('request_run',{request_id:newRequestId(),job_ids:[...state.selected],identity_id:$('candidate').value,browser_profile:$('browser-profile').value.trim()});state.run=r.id;state.attempt=null;notice('Run requested; waiting for worker acceptance.');tab('run');await refresh();}catch(e){notice(e.message,true);}};
 if($('start-application-btn')){$('start-application-btn').onclick=async()=>{
  if(state.queueSubmitting)return;
  state.queueSubmitting=true;selection();
@@ -800,7 +809,7 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{
   if(!asset)throw Error('Choose a candidate with a registered resume.');
   const submission_mode=$('main-submission-mode').value;
   if(submission_mode!==state.view.settings.values.submission_mode)await api('configure',{changes:{submission_mode,mode:submission_mode==='submit'?'pilot':'development'},expected_version:state.settingsVersion});
-  const result=await api('queue_enqueue',{job_ids:orderedIds,identity_id,resume_asset_id:asset.id,request_id:crypto.randomUUID(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_enqueue'});
+  const result=await api('queue_enqueue',{job_ids:orderedIds,identity_id,resume_asset_id:asset.id,request_id:newRequestId(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_enqueue'});
   state.selected.clear();notice(`${result.items.length} selected job(s) requested in table order. ${result.queue?.automation_paused?'Requests are saved until you choose Resume JobBot.':result.queue?.worker_online===false?'The worker is offline; requests are saved until it returns.':'The worker runs them one at a time after the current application and earlier manual requests, ahead of automatic pickups.'}`);await refresh();return;
  }
  if(!state.selected.size)throw Error('Please select at least one job from the queue.');
@@ -813,7 +822,7 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{
  const opMode=chosenSubMode==='submit'?'pilot':'development';
  await api('configure',{changes:{reasoning_provider:'openai-codex',reasoning_model:chosenModel,reasoning_effort:chosenEffort,submission_mode:chosenSubMode,mode:opMode,browser_mode:chosenBrowserMode},expected_version:state.settingsVersion});
  for(const id of state.selected){await api('eligibility',{job_id:id,decision:'ready',reason:'Operator approved start application'});}
- const r=await api('request_run',{request_id:crypto.randomUUID(),job_ids:orderedIds,identity_id:candidateId,browser_profile:browserProfile});
+ const r=await api('request_run',{request_id:newRequestId(),job_ids:orderedIds,identity_id:candidateId,browser_profile:browserProfile});
  state.run=r.id;state.attempt=null;tab('run');notice('Application run started; waiting for worker acceptance.');await refresh();
 }catch(err){notice(err.message,true);}finally{state.queueSubmitting=false;selection();}};}
 $('queue-selected-jobs').onclick=()=>$('start-application-btn').onclick();
