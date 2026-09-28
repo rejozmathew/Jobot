@@ -35,6 +35,55 @@ idle services, verify source hashes/services, restore pickup and record the depl
 commit, timestamp and file manifest privately. Preserve active applications through
 the existing lifecycle; a deployment is never a reason to terminate one.
 
+## Run labels and public notes
+
+Use a sequential run number and the America/Chicago review date, starting with
+the first explicitly numbered run below. Check existing run notes and remote tags
+before choosing the next number. Commit subjects use
+`Self-improvement #NNN (YYYY-MM-DD): <concrete change>`. Multiple checkpoints for
+one review share its run number.
+
+Publish an annotated tag `self-improvement-NNN-YYYY-MM-DD` pointing to the exact
+validated, deployed code commit. Its description and an entry below explain the
+problem, behavior changes, validation, deployment time and remaining limitations.
+Keep the same run label, source commit and tag in the private Ubuntu deployment
+record. A documentation-only follow-up records its separate commit without
+changing which executable source was deployed. Preserve published history and
+existing tags; append corrections instead of moving a run's identity. Detailed
+job records, account information, answers and transcripts remain private.
+
+### Self-improvement #001 — 2026-09-28
+
+Code commit: `67a22fc2ad3bdca663f5e58aac9105b476b7cc24`.
+Tag: `self-improvement-001-2026-09-28`.
+Ubuntu deployed: September 28, 2026 at 10:01:23 America/Chicago (15:01:23 UTC),
+after the active application finished. GitHub branch: `self-improvement`.
+
+Delayed form navigation could lose the owned application route after a helper's
+browser connection closed. The iCIMS posting Apply path also bypassed the shared
+navigation handoff. This run:
+
+- Retains verified same-origin main-document navigation history across helper
+  connections, including delayed document changes and push/replaceState.
+- Routes iCIMS Apply through the shared same-tab/popup handoff and refreshes
+  embedded-form context and derived profile/email facts after adoption.
+- Uses fresh final-submit control classification consistently for Autofill,
+  audit and the existing review/submission path.
+- Updates the integration test to discover the installed Hermes interpreter and
+  isolate its temporary home; production Hermes configuration is unchanged.
+
+Validation: the final managed suite passed 1,055 tests with 111 skips; focused
+route-history and iCIMS/Autofill suites passed 67 and 52 tests respectively.
+Ubuntu synthetic validation passed all 132 tests. All 80 cumulative deployed file
+hashes, authenticated health, dashboard access and services were verified, and
+queue pickup was restored. Private configuration and the existing pause behavior
+were preserved. The first numbered label was added after the code had already
+been published; the original code commit remains unchanged.
+
+Cross-host SSO account-principal handling remains a separate issue. This release
+does not claim a measured increase in submission rate or a reduction in GPU use;
+those require post-deployment application evidence.
+
 The daily task can make these tested improvements under the operator's standing
 authorization. New execution restrictions, refusal conditions or retry limits still
 require explicit approval. If the evidence does not support a fix, record that fact
