@@ -1,5 +1,31 @@
 # Application runtime: ownership, helper map, and rationale
 
+## September 28: delayed same-origin form navigation
+
+`managed_runtime.browser_observe` uses `route_history.reconcile_history` before
+its identity observations. It retains the verified main-document CDP history
+entry ID and source URL with the local session, attempt, fence, target and browser
+binding. This evidence survives a helper connection closing before Next finishes,
+including same-entry `replaceState`. A fresh history/current-URL pair can project
+an observed same-origin continuation through the existing `handoff_target` checks.
+History is not treated as a network redirect chain or a general domain allowance.
+The full traversed segment is compared with the original application identity as
+well as the latest source. Anchor comparison and route promotion are atomic.
+
+Writer settlement, selected autofill strategy, saved deadline, account principal
+and submission evidence retain their existing responsibilities. Missing history
+leaves ordinary recovery available. Cross-host Apply correlation remains in its
+existing helper; shared SSO account identity is a separate outstanding issue.
+The iCIMS runner refreshes the projected context before reading an embedded form
+after an observed route change, including within the same helper call.
+Its posting Apply path also uses `application_runtime.click_and_follow_external_apply`
+before activating the observed control, retaining the existing same-tab/popup
+correlation. A popup returns a resumable snapshot handoff so the next call connects
+to the newly owned target; same-tab adoption refreshes context and continues.
+The refreshed package also refreshes derived profile/email facts. A fresh inspection
+that identifies final submission updates the local decision and audit before
+Autofill or the existing review/submission service handles that control.
+
 ## September 27: operator pause for a break
 
 Migration 24 retains `dispatch_control.automation_paused` independently of the
@@ -787,9 +813,10 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | static/jobbot.js / managed_queue.py | Queue selected sends visible selection in table order as one immediate request; queued items are reused and receipt insertion order breaks equal-time ties. Repeated requests retain their original position; a new manual selection can reorder its waiting jobs. Current applications continue, automatic scheduling remains enabled or paused as configured. |
 | managed.py / managed_runtime.py / managed_events.py / managed_views.py / managed_continuity.py | Existing policy/actions/events/duplicates consult local lifecycle or explicit legacy ownership |
 | managed_identity.py | Workday host/site/full-requisition and iCIMS host/job-id comparison, history equivalence, application scope and diagnostic match states; existing frame router, runtime, credentials and binding callers share scope matching |
+| route_history.py / managed_sessions.handoff_target | Called by managed_runtime.browser_observe before scope reads; retains local owned main-document history evidence and atomically projects delayed same-origin continuations. The iCIMS reader refreshes context through this shared observer before inspecting a changed embedded form. No browser writes, account migration, retry decision or application outcome. |
 | managed_shared.submission_state / submission_pending and managed_events._submission_state / _submission_pending | One per-attempt evidence projection from existing ordered events; evidence reporting only; accepted alone suppresses a new requested attempt |
 | greenhouse_fast.py | Session-owned `greenhouse_advance` residual batches; next_operation/startup guidance, local workspace host and nonlocal plugin dispatch call the same advance entry. Simplify remains the bulk filler. Legacy platform_handlers/greenhouse.py stays available to its existing agent/registry callers. |
-| icims_fast.py | Thin `icims_advance` runner called by native plugin, portable CLI and workspace host; reuses shared writer/identity checks, audit, private credentials, approved answers/policy, grouped repair and final submission. Slices/unknown controls return to the same executor. |
+| icims_fast.py | Thin `icims_advance` runner called by native plugin, portable CLI and workspace host; reuses shared writer/identity checks, audit, private credentials, approved answers/policy, grouped repair and final submission. Posting Apply calls the shared application_runtime target-handoff observer. Slices/unknown controls return to the same executor. |
 | form_audit.py | Pure compact projection of the shared inventory; `browser(method="audit")`, post-Simplify handoffs, snapshots and iCIMS use the same required/invalid/private/optional classification. No independent scanner, writer permission or outcome authority. |
 | workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |

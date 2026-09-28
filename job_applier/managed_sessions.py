@@ -253,7 +253,8 @@ class SessionServices:
                        (dumps(meta),target_id,session_id))
 
     def handoff_target(self, attempt_id, *, worker_id, fence, current_target_id,
-                       new_target_id, url, evidence, expected_url=None, source_url=None, navigation_chain=None):
+                       new_target_id, url, evidence, expected_url=None, source_url=None, navigation_chain=None,
+                       _history_proof=None):
         """Atomically move one local session to a correlated application target."""
         from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope
         from urllib.parse import urlsplit,urlunsplit
@@ -273,6 +274,19 @@ class SessionServices:
             job=self._get(db,'jobs',attempt['job_id'])
             meta=json.loads(session['metadata_json'])
             anchor=meta.get('application_identity_url') or job['url']
+            if _history_proof is not None:
+                # Internal browser-history observer: compare and promote in the
+                # same transaction so a newer route/anchor cannot be overwritten.
+                replacement=_history_proof['replacement']
+                binding={'session_id':session['id'],'attempt_id':attempt_id,'fence':fence,
+                         'target_id':current_target_id,
+                         'browser_id':(meta.get('browser_attachment') or {}).get('browser_id')}
+                if (current_target_id!=new_target_id or
+                        meta.get('route_history_anchor')!=_history_proof['expected'] or
+                        current['identity_key']!=_history_proof['target_identity'] or
+                        anchor!=_history_proof['identity_url'] or
+                        any(replacement.get(k)!=v for k,v in binding.items())):
+                    return None  # Fresh ordinary observation can retry its proof.
             alias=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',
                              (job['id'],identity)).fetchone()
             correlated=False
@@ -319,6 +333,7 @@ class SessionServices:
                 db.execute('INSERT INTO target_history VALUES (?,?,?,?,?)',(uid(),current['id'],'preserved',safe,now))
             meta=json.loads(session['metadata_json']);attachment=meta.get('browser_attachment')
             meta['application_route_url']=canonical
+            if _history_proof is not None:meta['route_history_anchor']=_history_proof['replacement']
             if source_url is None or (navigation_chain and urlsplit(anchor).netloc!=urlsplit(canonical).netloc):
                 meta['application_identity_url']=canonical
             if source_url is not None:

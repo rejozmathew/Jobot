@@ -1,8 +1,10 @@
 import asyncio
 from contextlib import nullcontext
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import pytest
 from job_applier.managed_hermes_worker import select_runtime, confirmation_verified, local_asset_path
 
@@ -263,15 +265,28 @@ def test_submission_permissions_and_duplicate_click_guard(monkeypatch):
 
 
 def test_hermes_runtime_plugin_context_and_agent_integration(tmp_path):
-    hermes_python = Path('C:/Users/rejoz/AppData/Local/hermes/hermes-agent/venv/Scripts/python.exe')
+    hermes_root = Path(os.environ.get('JOBBOT_TEST_HERMES_ROOT',
+        str(Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData/Local')) / 'hermes/hermes-agent')))
+    if not hermes_root.is_dir():
+        pytest.skip('Hermes source installation not found')
+    # PM-managed Hermes upgrades can leave the old in-tree venv behind. Resolve
+    # the committed environment before isolating the integration child's home.
+    if (hermes_root / 'pm/environments.py').is_file():
+        probe = subprocess.run([sys.executable, '-S', '-c',
+            'import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); '
+            'from pm.environments import project_python; print(project_python(Path(sys.argv[1])))',
+            str(hermes_root)], capture_output=True, text=True, timeout=10, check=True)
+        hermes_python = Path(probe.stdout.strip())
+    else:
+        hermes_python = hermes_root / ('venv/Scripts/python.exe' if os.name == 'nt' else 'venv/bin/python')
     if not hermes_python.exists():
         pytest.skip('Hermes interpreter not found')
 
     script = tmp_path / 'verify_hermes_integration.py'
     script.write_text("""
 import sys, os, json
-sys.path.insert(0, 'C:/Users/rejoz/AppData/Local/hermes/hermes-agent')
-sys.path.insert(0, 'C:/GitClone/auto-job-applier-jobbot-v1')
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
 from hermes_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
 from tools.registry import registry
 from run_agent import AIAgent
@@ -317,6 +332,8 @@ assert registry.get_entry('application') is None, 'application still in registry
 print('SUCCESS_HERMES_INTEGRATION')
 """, encoding='utf-8')
 
-    res = subprocess.run([str(hermes_python), str(script)], capture_output=True, text=True, timeout=30)
+    child_env = dict(os.environ, HERMES_HOME=str(tmp_path / 'hermes-home'), HERMES_DISABLE_LAZY_INSTALLS='1')
+    res = subprocess.run([str(hermes_python), str(script), str(hermes_root), str(Path(__file__).resolve().parents[2])],
+                         env=child_env, capture_output=True, text=True, timeout=30)
     assert res.returncode == 0, f"Hermes integration failed:\\nSTDOUT: {res.stdout}\\nSTDERR: {res.stderr}"
     assert 'SUCCESS_HERMES_INTEGRATION' in res.stdout

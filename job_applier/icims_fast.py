@@ -5,7 +5,7 @@ import time
 from contextlib import asynccontextmanager
 
 from .application_answers import approved_answer, answer_action, saved_answer
-from .browser_controls import observe, observe_writers, repair_fields, required_questions, click_control, simplify_document, upload_file
+from .browser_controls import observe, observe_writers, repair_fields, required_questions, inspect_control, click_control, simplify_document, upload_file
 from .browser_frames import FrameUnavailable
 from .form_audit import audit, recovery
 from .managed_questions import question_key
@@ -15,14 +15,17 @@ from .simplify_boundary import SimplifyBoundary, initial_autofill
 
 class IcimsRunner:
     def __init__(self,page,call,package,ownership,config,target_id,*,account_lock=None):
-        self.page,self.call,self.package,self.owner,self.config,self.target=page,call,package,ownership,config,target_id
-        self.page.application_package=package;self.account_lock=account_lock
-        self.profile=package['attempt'].get('profile_json') or {};self.settings=package['attempt'].get('settings_json') or {}
-        if isinstance(self.profile,str):self.profile=json.loads(self.profile)
-        if isinstance(self.settings,str):self.settings=json.loads(self.settings)
+        self.page,self.call,self.owner,self.config,self.target=page,call,ownership,config,target_id
+        self.set_package(package);self.account_lock=account_lock
         self.started=time.monotonic();self.deadline=None;self.last={};self.audit={};self.questions=[];self.failures=[]
         self.actions={'autofill':0,'credentials':0,'repair_fields':0,'stage_advance':0,'audits':0}
         self.trace=[];self.documents=None;self.aid=None
+
+    def set_package(self,package):
+        self.package=package;self.page.application_package=package
+        self.profile=package['attempt'].get('profile_json') or {};self.settings=package['attempt'].get('settings_json') or {}
+        if isinstance(self.profile,str):self.profile=json.loads(self.profile)
+        if isinstance(self.settings,str):self.settings=json.loads(self.settings)
 
     def owned(self,op,**params):return self.call(op,**self.owner,**params)
 
@@ -43,6 +46,16 @@ class IcimsRunner:
 
     async def read(self):
         await self.control()
+        from .managed_identity import is_same_application_scope
+        live_url=await self.page.evaluate('location.href')
+        if not is_same_application_scope(self.package['job']['url'],live_url):
+            # A delayed Continue may complete between loop iterations. Reconcile
+            # owned route evidence before validating the new embedded document.
+            gate=await asyncio.to_thread(self.owned,'browser_observe',target_id=self.target,cdp_url=self.config['cdp_url'])
+            if gate.get('identity',{}).get('status')=='same_job':
+                self.set_package(await asyncio.to_thread(self.call,'application_context',
+                    attempt_id=self.owner['attempt_id'],worker_id=self.owner['worker_id']))
+            await self.control()
         self.last=await observe(self.page,self.package)
         await self.control()
         self.audit=audit(self.last);self.actions['audits']+=1
@@ -191,11 +204,32 @@ class IcimsRunner:
                 native=self.last.get('native',{})
                 # Posting footer fields are not the application form.
                 if native.get('apply',{}).get('enabled'):
-                    async with self.batch('advance'):
-                        result=await click_control(self.page,{'ref':native['apply']['ref']})
-                        self.actions['stage_advance']+=int(result.get('clicked'));self.trace.append('open_application')
-                    if not result.get('clicked'):return self.result('inspection_required',result.get('reason','advance_unconfirmed'))
-                    await asyncio.sleep(.15);continue
+                    target={'ref':native['apply']['ref']}
+                    entry=await inspect_control(self.page,target)
+                    if entry.get('submission_control'):
+                        # A final Apply control belongs to shared submission,
+                        # including review mode and its existing intent/evidence.
+                        native=dict(native,submit=native['apply']);native.pop('apply')
+                        self.last=dict(self.last,native=native)
+                        self.audit=audit(self.last,writer=self.audit.get('writer'))
+                    else:
+                        from .application_runtime import click_and_follow_external_apply
+                        async def activate_entry():return await click_control(self.page,target)
+                        async with self.batch('advance'):
+                            result=await click_and_follow_external_apply(None,self.page,entry,activate_entry,
+                                self,self.owner,self.target,cdp_url=self.config['cdp_url'])
+                            self.actions['stage_advance']+=int(result.get('clicked'));self.trace.append('open_application')
+                        if not result.get('clicked'):return self.result('inspection_required',result.get('reason','advance_unconfirmed'))
+                        handoff=result.get('target_handoff')
+                        if handoff:
+                            if handoff['target_id']!=self.target:
+                                result=self.result('continue','application_target_handoff',target_handoff=handoff)
+                                result['next_operation']={'operation':'browser','parameters':{'method':'snapshot'}}
+                                return result  # The next call owns the new target/socket.
+                            self.set_package(await asyncio.to_thread(self.call,'application_context',
+                                attempt_id=self.owner['attempt_id'],worker_id=self.owner['worker_id']))
+                            prior=None
+                        await asyncio.sleep(.15);continue
                 first=initial_autofill(dict(self.last,stage=self.audit['stage'])) if self.settings.get('autofill')!='native' else None
                 if first:
                     async with self.batch('autofill'):

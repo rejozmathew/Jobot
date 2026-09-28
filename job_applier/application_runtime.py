@@ -328,7 +328,7 @@ def external_apply_destination(control,current_url):
     return href if _public_destination(href) else None
 
 
-async def click_and_follow_external_apply(browser,page,control,activate,client,ownership,target_id):
+async def click_and_follow_external_apply(browser,page,control,activate,client,ownership,target_id,*,cdp_url=None):
     """Arm before Apply, then hand one correlated destination to the owned session."""
     import asyncio
     from .cdp_client import arm_target_observation,wait_for_apply_target,NavigationTrace
@@ -337,7 +337,7 @@ async def click_and_follow_external_apply(browser,page,control,activate,client,o
     label=str(control.get('text') or control.get('label') or '')
     apply_control=not control.get('submission_control') and bool(re.match(r'^apply\b',label,re.I))
     navigation=await NavigationTrace.start(page,current) if apply_control else None
-    observation=await asyncio.to_thread(arm_target_observation,browser.base_url,target_id,destination or current) if destination or navigation else None
+    observation=await asyncio.to_thread(arm_target_observation,cdp_url or browser.base_url,target_id,destination or current) if destination or navigation else None
     try:
         result=await activate()
         if not observation or not (result.get('clicked') or result.get('status')=='clicked'):

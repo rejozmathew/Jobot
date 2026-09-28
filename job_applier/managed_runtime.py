@@ -160,11 +160,23 @@ class RuntimeServices:
         async def read_bound_browser():
             import asyncio
             from .cdp_client import CDPBrowser
+            from .route_history import reconcile_history
+            async def route_scope(url):
+                nonlocal target
+                scope=verify_url(url)
+                if await reconcile_history(page,self,
+                        {'attempt_id':attempt_id,'worker_id':worker_id,'fence':fence},
+                        target['target_id'],url,verified=scope):
+                    with self.tx() as db:
+                        target=db.execute("SELECT * FROM owned_targets WHERE attempt_id=? AND target_id=? AND state='open'",
+                            (attempt_id,target['target_id'])).fetchone()
+                    scope=verify_url(url)
+                return scope
             browser=await CDPBrowser.connect(endpoint_url,target_id=target['target_id'],expected_mode=settings.get('browser_mode','headed'))
             try:
                 page=await browser.get_current_page()
                 before_url=await page.evaluate('location.href')
-                before_scope=verify_url(before_url)
+                before_scope=await route_scope(before_url)
                 from .browser_controls import observe_writers
                 async def read_writers():return await observe_writers(page,{'job':dict(job,url=before_url) if before_scope else dict(job),'attempt':dict(a)})
                 before=await read_writers()
@@ -184,7 +196,7 @@ class RuntimeServices:
                 # The observer deliberately omits query parameters from its public
                 # URL. Workday login ownership depends on the full job redirect.
                 after_url=await page.evaluate('location.href')
-                after_scope=verify_url(after_url)
+                after_scope=await route_scope(after_url)
                 # Read-only audit remains available even when a writer prevents repair.
                 audit_observation=None
                 if not after.get('workday') and not after.get('greenhouse') and after.get('status') in ('complete','needs_review','unknown','missing','unsupported'):

@@ -46,11 +46,11 @@ def test_workday_review_residuals_begin_with_available_autofill():
 
 def test_icims_posting_opens_apply_before_repairing_footer_fields(monkeypatch):
     from job_applier.icims_fast import IcimsRunner
-    from job_applier import icims_fast
+    from job_applier import icims_fast, application_runtime
     from job_applier.managed_shared import ProtocolError
     events=[]
     runner=IcimsRunner(type('Page', (), {})(), lambda *a, **k: {},
-        {'attempt': {'profile_json': {}, 'settings_json': {}}}, {}, {}, 'fixture')
+        {'attempt': {'profile_json': {}, 'settings_json': {}}}, {}, {'cdp_url':'http://fixture.test'}, 'fixture')
     async def read():
         runner.last={'status':'missing','native':{'apply':{'ref':'apply','enabled':True}},'inventory':[]}
         runner.audit={'stage':{'name':'email_entry'},'required_missing':[{'ref':'footer-email'}],
@@ -61,8 +61,12 @@ def test_icims_posting_opens_apply_before_repairing_footer_fields(monkeypatch):
         events.append('repair');raise ProtocolError('stop_requested')
     async def click(*args):
         events.append('apply');raise ProtocolError('stop_requested')
+    async def inspect(*args):return {'submission_control':False}
+    async def follow(browser,page,info,activate,*args,**kwargs):return await activate()
     runner.read=read;runner.gate=gate;runner.checkpoint=checkpoint;runner.repair=repair
     monkeypatch.setattr(icims_fast,'click_control',click)
+    monkeypatch.setattr(icims_fast,'inspect_control',inspect)
+    monkeypatch.setattr(application_runtime,'click_and_follow_external_apply',follow)
     asyncio.run(runner.run())
     assert events==['apply']
 
