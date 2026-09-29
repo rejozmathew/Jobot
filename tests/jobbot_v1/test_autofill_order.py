@@ -57,6 +57,7 @@ def test_icims_posting_opens_apply_before_repairing_footer_fields(monkeypatch):
             'invalid_blockers':[],'credential_tasks':[],'unknown_controls':[], 'coverage':{'unresolved_documents':[]}}
     async def gate(): return True
     async def checkpoint(): pass
+    async def receipt(**kwargs): return None
     async def repair(plans):
         events.append('repair');raise ProtocolError('stop_requested')
     async def click(*args):
@@ -64,6 +65,7 @@ def test_icims_posting_opens_apply_before_repairing_footer_fields(monkeypatch):
     async def inspect(*args):return {'submission_control':False}
     async def follow(browser,page,info,activate,*args,**kwargs):return await activate()
     runner.read=read;runner.gate=gate;runner.checkpoint=checkpoint;runner.repair=repair
+    runner.advance_receipt=receipt
     monkeypatch.setattr(icims_fast,'click_control',click)
     monkeypatch.setattr(icims_fast,'inspect_control',inspect)
     monkeypatch.setattr(application_runtime,'click_and_follow_external_apply',follow)

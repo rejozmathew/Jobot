@@ -1,5 +1,6 @@
 """Thin, resumable iCIMS supervisor over existing owned form services. No model."""
 import asyncio
+import hashlib
 import json
 import time
 from contextlib import asynccontextmanager
@@ -28,6 +29,30 @@ class IcimsRunner:
         if isinstance(self.settings,str):self.settings=json.loads(self.settings)
 
     def owned(self,op,**params):return self.call(op,**self.owner,**params)
+
+    async def advance_receipt(self, *, signature=None, clear=False):
+        # The page outlives helper/CDP connections. Remember only this attempt's
+        # short observation window, not answers or a permanent retry prohibition.
+        return await self.page.evaluate_function('''(p)=>{
+            const key=JSON.stringify(p.scope);
+            let receipt=window.__jobbotIcimsAdvance;
+            if(p.clear){if(receipt?.key===key)delete window.__jobbotIcimsAdvance;return null;}
+            if(p.signature){receipt={key,signature:p.signature,started:Date.now()};window.__jobbotIcimsAdvance=receipt;}
+            return receipt?.key===key?{signature:receipt.signature,age_seconds:(Date.now()-receipt.started)/1000}:null;
+        }''', {'scope':[self.owner['attempt_id'],self.owner['fence'],self.target],
+               'signature':signature,'clear':clear})
+
+    def advance_signature(self, stage):
+        # Optional field fills, footer widgets and button rerenders can happen
+        # while the server is processing Continue. They are not its response.
+        fields=[{k:f.get(k) for k in ('name','label','tag','type','role','required','present','checked','validation')}
+            for f in self.last.get('inventory',[]) if f.get('required') or f.get('validation',{}).get('rejected')]
+        documents=[d.get('document_id') for d in self.last.get('writer_documents',[])] or [self.last.get('writer_document_id')]
+        # Preserve multiplicity, but an order-only rerender is not a response.
+        response=(stage,self.last.get('url'),sorted(documents,key=lambda d:json.dumps(d)),
+            sorted(json.dumps(f,sort_keys=True) for f in fields),
+            sorted(json.dumps(v,sort_keys=True) for v in self.audit.get('validation_summary',[])))
+        return hashlib.sha256(json.dumps(response,sort_keys=True).encode()).hexdigest()
 
     async def control(self):
         pulse=self.owned('heartbeat')
@@ -189,6 +214,19 @@ class IcimsRunner:
                 await self.read();stage=self.audit['stage']['name']
                 # A prior unchanged decision returns evidence, never an application finish.
                 signature=(self.last.get('structure'),stage,[(f.get('ref'),f.get('present'),f.get('checked'),f.get('validation')) for f in self.last.get('inventory',[])])
+                fingerprint=self.advance_signature(stage)
+                pending=await self.advance_receipt()
+                if pending:
+                    if pending['signature']==fingerprint and pending['age_seconds']<5:
+                        # Only an actual intermediate click opens this window.
+                        # Keep heartbeat/deadline checks on every read; a short
+                        # call can resume observation without clicking twice.
+                        await asyncio.sleep(.15);continue
+                    await self.advance_receipt(clear=True)
+                    if pending['signature']==fingerprint:
+                        return self.result('inspection_required','unchanged_after_action',
+                            advance_observation={'wait_seconds':round(pending['age_seconds'],3)})
+                    prior=None  # Fresh stage/validation: Simplify gets first use.
                 if prior==signature:return self.result('inspection_required','unchanged_after_action')
                 prior=signature
                 if self.last.get('status')=='active' or self.last.get('writer_pending'):
@@ -259,9 +297,12 @@ class IcimsRunner:
                 control=native.get('apply') or native.get('continue')
                 if control and control.get('enabled'):
                     async with self.batch('advance'):
+                        await self.advance_receipt(signature=fingerprint)
                         result=await click_control(self.page,{'ref':control['ref']})
-                        await self.control()
+                        if not result.get('clicked') and result.get('execution')=='not_executed':
+                            await self.advance_receipt(clear=True)
                         self.actions['stage_advance']+=int(result.get('clicked'));self.trace.append('stage_advance:'+stage)
+                        await self.control()
                     if not result.get('clicked'):return self.result('inspection_required',result.get('reason','advance_unconfirmed'))
                     await asyncio.sleep(.15);await self.control();continue
                 control=native.get('submit',{})

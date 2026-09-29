@@ -83,7 +83,7 @@ class GreenhouseRunner:
         if isinstance(self.settings,str):self.settings=json.loads(self.settings)
         self.document=None;self.document_id=None;self.aid=None;self.deadline=None
         self.started=time.monotonic();self.batch_count=0;self.completed=0;self.field_actions=0
-        self.questions=[];self.failures=[];self.verified=[];self.seen_plans=set()
+        self.questions=[];self.failures=[];self.question_diagnostics=[];self.verified=[];self.seen_plans=set()
         self.receipt={};self.last={};self.phase='readiness';self.restored=self.read_journal()
         self.parent_autofill_count=0
         self.browser_package=package;self.owned_observation=owned_observation or {}
@@ -183,6 +183,7 @@ class GreenhouseRunner:
             parent_autofill_dispatch_count=self.parent_autofill_count,batch_count=self.batch_count,
             field_action_count=self.field_actions,completed_count=self.completed,residual_count=len(work['required_fields']),
             elapsed_seconds=round(time.monotonic()-self.started,3),questions=self.questions,control_failures=self.failures,
+            question_diagnostics=self.question_diagnostics,
             next_operation={'operation':'greenhouse_advance','parameters':{'seconds':60}},
             instruction='Continue this owned application. Return one answers plan with each current ref, exact question_key, answer and approved basis; recover control failures through the scoped browser and resume greenhouse_advance. Helper handoffs do not finish the application.')
         if self.email_route:
@@ -265,15 +266,36 @@ class GreenhouseRunner:
         q=await document.evaluate_function(FORM,dict(target,method='question'))
         if q.get('reason'):return None
         q.update(ref=field['ref'],required=field['required'])
-        if q['kind']=='select' and not q.get('options'):
-            captured=await required_questions(self.page,[field['ref']],include_answered=True,include_optional=True,checkpoint=self.checkpoint)
-            if captured['questions']:
-                q.update(captured['questions'][0]['data'],required=field['required'])
-            else:
-                self.failures.extend(captured['skipped']);return None
-        elif q['kind']=='radio':
-            q['options']=[dict(o,ref=document.wrap(o['ref']) if isinstance(document,FramePage) else o['ref']) for o in q['options']]
-        q['question_key']=question_key(binding(q))
+        try:
+            if q['kind']=='select' and not q.get('options'):
+                captured=await required_questions(self.page,[field['ref']],include_answered=True,include_optional=True,checkpoint=self.checkpoint)
+                if captured['questions']:
+                    q.update(captured['questions'][0]['data'],required=field['required'])
+                else:
+                    self.failures.extend(captured['skipped']);return None
+            elif q['kind']=='radio':
+                q['options']=[dict(o,ref=document.wrap(o['ref']) if isinstance(document,FramePage) else o['ref']) for o in q['options']]
+            q['question_key']=question_key(binding(q))
+        except ProtocolError as exc:
+            if str(exc)!='invalid_question':raise
+            # A malformed label/identity is local to this control. Preserve exact
+            # bindings elsewhere; never invent a label or truncate a question key.
+            diagnostic=next((d for d in self.question_diagnostics if d['ref']==field['ref']),None)
+            if diagnostic is None:
+                name,text=q.get('field'),q.get('question')
+                diagnostic=dict(ref=field['ref'],reason='invalid_question',kind=q.get('kind'),
+                    needs_recovery=False,
+                    metadata={'field_missing':not isinstance(name,str) or not name,
+                        'field_length':len(name) if isinstance(name,str) else None,
+                        'question_missing':not isinstance(text,str) or not text.strip(),
+                        'question_length':len(text.strip()) if isinstance(text,str) else None})
+                self.question_diagnostics.append(diagnostic)
+            diagnostic.update(required=bool(field.get('required')),
+                invalid=bool(field.get('validation',{}).get('rejected')))
+            diagnostic['needs_recovery']=bool(diagnostic.get('explicit_plan') or diagnostic['required'] or diagnostic['invalid'])
+            if diagnostic['needs_recovery'] and diagnostic not in self.failures:self.failures.append(diagnostic)
+            elif not diagnostic['needs_recovery'] and diagnostic in self.failures:self.failures.remove(diagnostic)
+            return None
         return q
 
     async def recover_resume(self):
@@ -345,6 +367,16 @@ class GreenhouseRunner:
                     exact=any(k.strip().casefold()==label.casefold() for k in (self.profile.get('standard_answers') or {}))
                     if not exact and label_has(label,'gender','race','ethnicity','disability','veteran','pronouns'):continue
                 q=await self.question(field)
+                if q is None:
+                    diagnostic=next((d for d in self.question_diagnostics if d['ref']==field['ref']),None)
+                    if diagnostic:
+                        for plan in (p for p in plans if p.get('ref')==field['ref']):
+                            # Account for the supplied plan as a control failure,
+                            # without treating its answer as applied or saved.
+                            self.seen_plans.add((plan['ref'],plan['question_key']))
+                            diagnostic['explicit_plan']=True
+                            diagnostic['needs_recovery']=True
+                            if diagnostic not in self.failures:self.failures.append(diagnostic)
                 if not q or q['question_key'] in processed:continue
                 processed.add(q['question_key'])
                 if PRIVATE.search(q['field']+' '+q['question']):continue

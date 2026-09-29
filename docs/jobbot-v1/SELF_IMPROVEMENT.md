@@ -119,3 +119,51 @@ so no service restart is needed; existing browser tabs must reload. Ubuntu fixtu
 results, served-asset hash, service health and cumulative file verification are
 recorded in the tag and private run record. This fixes dashboard request failures;
 it does not establish an increase in employer-portal submission success.
+
+### Self-improvement #003 — 2026-09-28
+
+Tag: [`self-improvement-003-2026-09-28`](https://github.com/rejozmathew/auto-job-applier/releases/tag/self-improvement-003-2026-09-28).
+The annotated tag identifies the validated code commit and verified Ubuntu
+deployment time. Matching private run records retain test reports, file hashes
+and rollback copies. GitHub branch: `self-improvement`.
+
+Recent Greenhouse helper calls returned `invalid_question` when an observed
+control had a missing or oversized question identity. This stopped the whole
+residual batch and sent supported fields back to the model. The runner now
+finishes the supported fields and returns scoped metadata diagnostics without
+field values. Unreadable required, rejected or explicitly planned controls still
+receive recovery; an unrelated optional control no longer aborts the batch.
+Conditional changes refresh the diagnostic's required/rejected classification.
+Exact question bindings, verified answer history and ownership checks remain in
+use; labels and question identities are never invented or truncated.
+
+An iCIMS synthetic fixture reproduced a second premature handoff: Continue's
+response arrived after the existing 150 ms pause. The runner now observes an
+intermediate click for up to five seconds, resuming that window across helper
+connections without an automatic duplicate click. The operator explicitly
+approved this observation window. Incidental optional-field and footer changes
+do not count as a response. A new step, document or actionable validation resumes
+normal handling. An unchanged page clears the receipt and returns the existing
+recovery handoff; later retries remain possible. Helper slices, operator stop and
+the overall application deadline still apply.
+
+Available Simplify remains first on each non-authentication form step. Native
+credential handling remains the authentication path. Tests cover Simplify on the
+new iCIMS step before residual inspection, including delayed transitions and a
+new browser connection. No universal page delay, model/provider change or new
+GPU inference layer is introduced. Workday's current behavior is retained and
+included in regression validation.
+
+Validation first reproduced eight Greenhouse failures, two delayed-transition
+failures and two duplicate-click failures caused by reordered fields. The
+combined Windows browser/helper suite passed 205 tests. After the ordering fix,
+all 59 affected iCIMS and shared Autofill checks passed. The final managed suite
+passed 1,066 tests with 130 skips (125 opt-in browser cases and five Linux-only
+cases). Post-deployment Ubuntu results are recorded in the annotated tag and
+private run record. All application fixtures use synthetic data and isolated
+profiles.
+
+These changes remove reproduced helper failures and unnecessary model handoffs.
+They do not establish an end-to-end speedup or a higher submission rate. Recent
+operator-assisted Greenhouse attempts are not autonomous timing benchmarks;
+production comparisons must retain intervention and deployed-version context.
