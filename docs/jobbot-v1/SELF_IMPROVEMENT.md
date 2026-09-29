@@ -167,3 +167,34 @@ These changes remove reproduced helper failures and unnecessary model handoffs.
 They do not establish an end-to-end speedup or a higher submission rate. Recent
 operator-assisted Greenhouse attempts are not autonomous timing benchmarks;
 production comparisons must retain intervention and deployed-version context.
+
+### Self-improvement #004 — 2026-09-29
+
+Tag: [`self-improvement-004-2026-09-29`](https://github.com/rejozmathew/auto-job-applier/releases/tag/self-improvement-004-2026-09-29).
+The annotated tag identifies the validated code commit, Ubuntu deployment time
+and final test counts. The matching private report and deployment manifest retain
+the daily audit, source fingerprints, hashes, backups and validation logs.
+GitHub branch: `self-improvement`.
+
+Credential calls could report that Simplify needed to settle even when the
+browser was idle and the actual obstacle was an unresolved or mismatched job
+identity. This sent recovery toward the wrong subsystem. The shared workspace
+host now reports the existing job-identity error codes for those two causes and
+directs the executor to inspect a fresh owned screenshot and recover the route
+in the same session. Actual Simplify settlement failures keep their existing
+diagnosis. The change applies to employer credentials and email verification
+across portals; it adds no denial, permission requirement or retry limit.
+
+Synthetic regressions reproduced four incorrect diagnoses before the fix. They
+exercise the real host dispatch and private test database, verify that denied
+calls do not reach credential handling, preserve the session and its metadata,
+and then complete a credential call in the same session after corrected browser
+evidence. Recovery events omit the private observation payload. Focused browser,
+account, Workday and Simplify tests and the final managed suite are delegated to
+authenticated Antigravity; Ubuntu repeats the focused suite against deployed
+files with isolated synthetic fixtures and short private disk-backed paths.
+
+This corrects recovery guidance; it does not implement cross-host SSO account
+handoff or repair missing posting URLs. The preceding day's attempts finished
+before #003 deployed, and some submissions were operator-assisted. They cannot
+establish a production speed or submission-rate gain from #003 or this run.

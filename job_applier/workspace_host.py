@@ -492,6 +492,12 @@ class WorkspaceHost:
                 from .managed_credentials import handle_credentials,credential_progress
                 gate=client.call('browser_observe',**own,target_id=session['target_id'],cdp_url=cfg['cdp_url'])
                 if not gate.get('native_takeover_authorized',gate.get('quiescent')):
+                    identity=(gate.get('identity') or {}).get('status')
+                    if identity in ('different_job','identity_unresolved'):
+                        raise ProtocolError('target_job_mismatch' if identity=='different_job' else 'job_identity_unresolved',
+                            'The observed page is outside the verified application route or its job identity is unresolved. '
+                            'Inspect a fresh owned-page snapshot and screenshot, including any authentication continuation; '
+                            'recover the application route in this same session, then retry credentials.')
                     raise ProtocolError('simplify_input_or_settlement_required',
                         'Observe or cancel ongoing Simplify work. For a broken page or missing panel before submission, use browser reload or session restart, then inspect and continue.')
                 action=uid();started=time.monotonic();result={}
