@@ -1,0 +1,243 @@
+--- a/jobnavigator_bridge/config.py
++++ b/jobnavigator_bridge/config.py
+@@ -1,7 +1,7 @@
+ """Strict, nonsecret configuration and versioned deterministic preferences."""
+ from __future__ import annotations
+ 
+-from dataclasses import dataclass, fields
++from dataclasses import dataclass, field, fields
+ import os
+ from pathlib import Path
+ import re
+@@ -72,6 +72,7 @@
+     producer: str = "jobnavigator_bridge"
+     source_type: str = "jobnavigator"
+     jobbot_importer: str | None = None
++    direct_scored_companies: list[str] = field(default_factory=list)
+ 
+     @classmethod
+     def load(cls, path: str):
+@@ -91,6 +92,7 @@
+             if type(getattr(self, key)) is not bool:
+                 raise BridgeError("invalid_config_boolean")
+         strings(self.allowed_search_ids)
++        strings(self.direct_scored_companies, empty=True)
+         for key in ("source_instance", "jobnavigator_api_key_env", "producer", "source_type"):
+             value = getattr(self, key)
+             if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,180}", value):
+--- a/jobnavigator_bridge/source.py
++++ b/jobnavigator_bridge/source.py
+@@ -23,9 +23,11 @@
+         if v is not None and (not isinstance(v, str) or len(v) > (100000 if field == "description" else 8192)):
+             raise BridgeError("invalid_job_schema")
+         result[field] = v or ""
+-    for field in ("url", "search_id", "source"):
++    for field in ("url", "source"):
+         if not result[field].strip():
+             raise BridgeError("invalid_job_schema")
++    if not result["search_id"].strip() and result["source"] != "direct":
++        raise BridgeError("invalid_job_schema")
+     for field, allowed in (("application_type", APPLICATION_TYPES), ("resolution_status", RESOLUTION_STATUSES)):
+         field_value = value.get(field, "")
+         if field_value is None:
+@@ -106,8 +108,9 @@
+         self.cfg, self.key = cfg, key
+         self.transport = transport or GetTransport()
+ 
+-    def page(self, offset, budget):
+-        url = self.cfg.jobnavigator_base_url.rstrip("/") + "/api/jobs?" + urlencode({"sort_by": "date", "limit": self.cfg.page_size, "offset": offset})
++    def page(self, offset, budget, scope):
++        query = {"sort_by": "date", "limit": self.cfg.page_size, "offset": offset, **scope}
++        url = self.cfg.jobnavigator_base_url.rstrip("/") + "/api/jobs?" + urlencode(query)
+         origin = urlsplit(url)
+         attempt = 0
+         hops = 0
+@@ -158,26 +161,36 @@
+     def scan(self, budget):
+         observed, previous = {}, None
+         pages, total = 0, None
++        scopes = [{"search_id": search_id} for search_id in self.cfg.allowed_search_ids]
++        if self.cfg.direct_scored_companies:
++            scopes.append({"source": "direct", "status": "new", "min_score": 1})
+         try:
+             for _ in range(self.cfg.reconciliation_passes):
+-                current, totals = {}, set()
+-                offset, consistent = 0, True
+-                while True:
+-                    if pages >= self.cfg.max_pages:
+-                        return Scan(list(observed.values()), False, "page_cap", pages, total)
+-                    total, jobs = self.page(offset, budget)
+-                    pages += 1
+-                    totals.add(total)
+-                    for job in jobs:
+-                        if job["id"] in current and current[job["id"]] != job:
+-                            consistent = False
+-                        current[job["id"]] = job
+-                        observed[job["id"]] = job
+-                    if not jobs or offset + len(jobs) >= total:
+-                        break
+-                    offset += self.cfg.page_size - self.cfg.page_overlap
++                current, consistent, full, total = {}, True, True, 0
++                for scope in scopes:
++                    scoped, totals, offset = {}, set(), 0
++                    while True:
++                        if pages >= self.cfg.max_pages:
++                            return Scan(list(observed.values()), False, "page_cap", pages, total)
++                        scoped_total, jobs = self.page(offset, budget, scope)
++                        pages += 1
++                        totals.add(scoped_total)
++                        for job in jobs:
++                            if job["id"] in scoped and scoped[job["id"]] != job:
++                                consistent = False
++                            if job["id"] in current and current[job["id"]] != job:
++                                consistent = False
++                            scoped[job["id"]] = job
++                            current[job["id"]] = job
++                            observed[job["id"]] = job
++                        if not jobs or offset + len(jobs) >= scoped_total:
++                            break
++                        offset += self.cfg.page_size - self.cfg.page_overlap
++                    if len(totals) != 1 or len(scoped) != scoped_total:
++                        full = False
++                    total += scoped_total
+                 signature = digest(sorted(current.items()))
+-                full = consistent and len(totals) == 1 and len(current) == total
++                full = full and consistent and len(current) == total
+                 if full and signature == previous:
+                     return Scan(list(current.values()), True, "reconciled_two_passes", pages, total)
+                 previous = signature if full else None
+--- a/jobnavigator_bridge/selection.py
++++ b/jobnavigator_bridge/selection.py
+@@ -35,8 +35,14 @@
+ def select(job, cfg, prefs, *, approved=False, rejected=False, availability=("unknown", "availability_unverified")):
+     if rejected:
+         return Decision("rejected", "user_rejected")
+-    if job["search_id"] not in cfg.allowed_search_ids:
++    direct_bank = (job["source"] == "direct" and
++                   job["company"].strip().casefold() in {v.strip().casefold() for v in cfg.direct_scored_companies})
++    if not direct_bank and job["search_id"] not in cfg.allowed_search_ids:
+         return Decision("excluded", "search_not_allowed")
++    if direct_bank and job["status"].strip().casefold() != "new":
++        return Decision("held_for_review", "source_" + job["status"].strip().casefold())
++    if direct_bank and usable_score(job) is None:
++        return Decision("pending_score", "score_not_completed")
+     status = job["status"].strip().casefold()
+     if status in ("closed", "expired", "withdrawn", "deleted", "unavailable"):
+         return Decision("unavailable", "source_closed")
+--- a/jobnavigator_bridge/engine.py
++++ b/jobnavigator_bridge/engine.py
+@@ -2,6 +2,7 @@
+ from __future__ import annotations
+ 
+ from collections import Counter
++from concurrent.futures import ThreadPoolExecutor
+ import time
+ 
+ from .common import BridgeError, digest, encoded, json_loads
+@@ -21,6 +22,7 @@
+             raise BridgeError("dry_run_requires_memory_state")
+         self.identities = {}
+         self.availability_cache = {}
++        self.availability_futures = {}
+         self.policy_hash = digest({"preferences": prefs.fingerprint, "mode": cfg.selection_mode,
+                                    "threshold": cfg.score_threshold, "searches": sorted(cfg.allowed_search_ids)})
+ 
+@@ -30,9 +32,51 @@
+             self.identities[url] = self.jobbot.identities([url], self.budget)[0]
+         return self.identities[url]
+ 
++    def prefetch_checks(self, jobs, pool):
++        """Run the same identity and public URL checks ahead of the row loop."""
++        urls = set()
++        routes = set()
++        for job in jobs:
++            decision = select(job, self.cfg, self.prefs, availability=("unchecked", "unchecked"))
++            if decision.status not in ("eligible", "held_for_review", "pending_score"):
++                continue
++            if job["source"] == "direct" and decision.status != "eligible":
++                continue
++            execution_url, _ = self.route(job)
++            if not execution_url:
++                continue
++            source_url = job.get("source_url") or job.get("linkedin_url") or job["url"]
++            try:
++                parse_url(source_url)
++                parse_url(execution_url)
++            except BridgeError:
++                # The ordinary row path records the precise unsafe-URL result.
++                continue
++            urls.update((source_url, execution_url))
++            routes.add(execution_url)
++        ordered = sorted(urls)
++        for start in range(0, len(ordered), 64):
++            batch = ordered[start:start + 64]
++            try:
++                identities = self.jobbot.identities(batch, self.budget)
++            except BridgeError:
++                # A malformed row must not fail the whole scan; fall back to
++                # the original per-row check and its recorded error.
++                continue
++            self.identities.update(zip(batch, identities))
++        for url in routes:
++            identity = self.identities.get(url)
++            if identity:
++                canonical = identity["canonical"]
++                if canonical not in self.availability_futures:
++                    self.availability_futures[canonical] = pool.submit(
++                        self.availability.check, canonical, self.budget)
++
+     @staticmethod
+     def route(job):
+         """Resolve application intent before validating or gating any URL."""
++        if job["source"] == "direct":
++            return job["url"], "direct_official_url"
+         application_type = job.get("application_type", "")
+         resolution = job.get("resolution_status", "")
+         if application_type in ("", "unknown", "conflict"):
+@@ -60,9 +104,12 @@
+         target = old["target_key"] if old else None
+         availability = ("unknown", "availability_unverified")
+         decision = select(job, self.cfg, self.prefs, approved=approved, rejected=rejected, availability=("unchecked", "unchecked"))
+-        execution_url, route_resolution = self.route(job)
++        # Do not spend URL/identity checks on direct records that fail selection.
++        # The official ATS URL is used only for a scored matching bank role.
++        direct_not_eligible = job["source"] == "direct" and decision.status != "eligible"
++        execution_url, route_resolution = (None, "not_required") if direct_not_eligible else self.route(job)
+         if execution_url is None:
+-            if decision.status not in ("rejected", "excluded", "unavailable"):
++            if not direct_not_eligible and decision.status not in ("rejected", "excluded", "unavailable"):
+                 decision = Decision("held_for_review", route_resolution)
+         else:
+             try:
+@@ -98,7 +145,9 @@
+                         decision = Decision("rejected", "canonical_user_rejected")
+                     if not reconciliation and decision.status in ("eligible", "held_for_review", "pending_score"):
+                         if anchor_url not in self.availability_cache:
+-                            self.availability_cache[anchor_url] = self.availability.check(anchor_url, self.budget)
++                            future = self.availability_futures.get(anchor_url)
++                            self.availability_cache[anchor_url] = (future.result() if future else
++                                                                   self.availability.check(anchor_url, self.budget))
+                         availability = self.availability_cache[anchor_url]
+                         decision = select(job, self.cfg, self.prefs, approved=approved, rejected=rejected, availability=availability)
+                     stage = self.state.stage(target)
+@@ -240,6 +289,12 @@
+             with self.state.db:
+                 self.state.db.execute("INSERT INTO runs(complete,reason,pages,observed,created_at) VALUES (0,?,0,0,?)", (exc.code, time.time()))
+             raise
++        pool = ThreadPoolExecutor(max_workers=16)
++        try:
++            self.prefetch_checks(scan.jobs, pool)
++        except BridgeError:
++            # Row handling below retains the source and URL error semantics.
++            pass
+         completed_processing = True
+         if scan.complete:
+             with self.state.db:
+@@ -287,6 +342,7 @@
+                       jobbot_gates="not_checked_in_dry_run" if self.dry_run else "checked_before_delivery",
+                       preference_path=self.cfg.profile_path, preference_version=self.prefs.version,
+                       preference_hash=self.prefs.fingerprint)
++        pool.shutdown(wait=False, cancel_futures=True)
+         return report
+ 
+ 
