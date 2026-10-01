@@ -198,3 +198,43 @@ This corrects recovery guidance; it does not implement cross-host SSO account
 handoff or repair missing posting URLs. The preceding day's attempts finished
 before #003 deployed, and some submissions were operator-assisted. They cannot
 establish a production speed or submission-rate gain from #003 or this run.
+
+### Self-improvement #005 — 2026-09-30
+
+Tag: `self-improvement-005-2026-09-30`. The local annotated tag identifies the
+validated source checkpoint. Private Ubuntu deployment notes retain the matching
+run label, timestamp, file hashes, backups and synthetic validation evidence.
+
+Retained application screenshots show a visible consent choice while shared
+native activation returns `hidden_control`. Styled native checkboxes and radio
+buttons can expose a zero-size input and a separate visible label. Previously
+the pointer helper only used the input rectangle, returning routine work to the
+executor's model and visual recovery loop.
+
+The shared pointer helper now uses that input's own visible, uniquely associated
+native label when its rectangle has zero width or height. The semantic input
+remains the observed target. Activation uses trusted browser pointer events and
+fresh hit tests; interactive label children and overlays are not clicked as a
+substitute. The existing form operation verifies the committed checked state and
+does not toggle a correctly populated control again. No employer, hostname or ATS
+branch is added. Simplify order, ownership, credentials, frame checks, answer
+policy, deadlines and retry behavior are preserved; no new execution restriction
+or approval gate is introduced.
+
+Six synthetic regressions first reproduced the failure for checkboxes/radios on
+top-level, same-origin and cross-origin embedded forms. Coverage also checks
+trusted events, repeated checks, explicit unchecking, disabled controls, overlays,
+unrelated labels and interactive children. Relevant existing shared-form,
+embedded-frame, Workday authentication and native-pointer checks accompany the
+focused suite, followed by the standard managed suite. Exact final counts and
+Ubuntu deployment verification are retained in the private run record and tag.
+Windows validation passed all 70 focused checks; the final managed suite passed
+1,075 tests with 140 opt-in browser/Linux-only skips. An initial isolated Hermes
+startup timeout passed unchanged on focused recheck before the clean final run.
+
+The timing investigation also found costly model requests, large contexts,
+compression, repeated inspections and incorrect specialized-helper routing.
+This change fixes one reproduced shared handoff; it does not establish a
+ten-minute application duration or an unattended end-to-end speedup. Later
+ordinary applications must measure those outcomes with source and assistance
+provenance. Private application records and screenshots remain outside Git.

@@ -51,8 +51,20 @@
   if(!credentialCheck.credentials_verified_before_click)
    return {...credentialCheck,clicked:false,execution:'not_executed'};
  }
- if(args.prepare_pointer&&!args.recheck_pointer)el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
- const r=el.getBoundingClientRect();
+ // Styled native choices can retain a zero-size input while their associated
+ // label is the actual visible activation surface. Keep the observed input as
+ // the semantic target; resolve only its own native label for trusted input.
+ let pointerEl=el;
+ if(args.prepare_pointer&&el.tagName==='INPUT'&&['checkbox','radio'].includes(el.type)){
+  const bounds=el.getBoundingClientRect();
+  if(!bounds.width||!bounds.height){
+   const labels=[...(el.labels||[])].filter(label=>label.control===el&&label.isConnected&&
+    getComputedStyle(label).visibility!=='hidden'&&label.getBoundingClientRect().width&&label.getBoundingClientRect().height);
+   if(labels.length===1)pointerEl=labels[0];
+  }
+ }
+ if(args.prepare_pointer&&!args.recheck_pointer)pointerEl.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
+ const r=pointerEl.getBoundingClientRect();
  if(!r.width||!r.height)return {clicked:false,reason:'hidden_control'};
  if(args.prepare_pointer){
   const left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
@@ -76,6 +88,9 @@
   for(const [fx,fy] of points){
    const x=left+(right-left)*fx,y=top+(bottom-top)*fy,hit=(el.getRootNode().elementFromPoint?.(x,y)||document.elementFromPoint(x,y));
    if(hit&&(hit===el||el.contains(hit)))return {pointer_ready:true,x,y,...credentialCheck};
+   if(pointerEl!==el&&hit&&(hit===pointerEl||pointerEl.contains(hit))&&
+      !hit.closest('a,button,input,select,textarea,[role="button"],[role="link"],[contenteditable]:not([contenteditable="false"])'))
+    return {pointer_ready:true,x,y,control_resolution:'native_choice_label',...credentialCheck};
    if(hit&&authWrapperHit(hit))return {pointer_ready:true,x,y,control_resolution:'workday_auth_wrapper',...credentialCheck};
    if(!covering&&hit)covering={tag:hit.tagName,role:hit.getAttribute('role'),
      simplify:!!hit.closest('.simplify-jobs-shadow-root,[id*="simplify"]')};
