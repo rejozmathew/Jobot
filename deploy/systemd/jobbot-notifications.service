@@ -1,0 +1,19 @@
+[Unit]
+Description=JobBot confirmed-submission alerts through Hermes Discord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Set these paths to the existing authoritative checkout/configuration.
+WorkingDirectory=%h/git/auto-job-applier
+Environment=JOBBOT_CONFIG=%h/.config/jobbot/runtime.json
+EnvironmentFile=-%h/.config/jobbot/runtime.env
+ExecStart=%h/git/auto-job-applier/.venv/bin/python -m job_applier.hermes_notifications watch
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=40
+UMask=0077
+
+[Install]
+WantedBy=default.target
