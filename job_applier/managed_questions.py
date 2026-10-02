@@ -227,7 +227,8 @@ class QuestionServices:
                 except ProtocolError as exc:
                     if exc.code not in ('already_applied','job_canceled'):raise
                     historical=True
-                group['queue_section']='history' if historical or group['retry'] and group['retry']['state']=='queued' else 'inbox' if group['pending_count'] else 'ready'
+                group['queue_section']=('history' if historical else 'inbox' if group['pending_count'] else
+                    'history' if group['retry'] and group['retry']['state']=='queued' else 'ready')
                 groups.append(group)
             return groups
 

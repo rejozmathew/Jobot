@@ -215,3 +215,14 @@ def test_renamed_library_entry_does_not_restore_its_obsolete_form_journal(tmp_pa
         verified=True,question_key='old-key',answer_value='Old answer',answer_basis='answer_library:entry:1')],
         page='form',source='greenhouse_fast')
     assert reusable_answers(config,package,1,source='greenhouse_fast')=={}
+
+
+def test_retiring_knowledge_returns_a_queued_retry_question_to_the_inbox(tmp_path):
+    service,session,owner,_,_=connected(tmp_path)
+    request(service,owner)
+    entry=save(service)
+    service.queue_answer_retries(job_ids=[session['job_id']],identity_id='candidate')
+    service.set_library_answer_state(entry_id=entry['id'],state='retired',expected_revision=1)
+    queue=service.answer_queue()
+    assert len(queue['inbox'])==1 and queue['inbox'][0]['pending_count']==1
+    assert service.answer_retries()['requests']==[]
