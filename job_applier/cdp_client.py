@@ -38,6 +38,8 @@ Threading / lifecycle:
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
+import threading
 import base64
 import json
 import ipaddress
@@ -416,11 +418,39 @@ async def _press_key(session, key: str, vk: int = 0) -> None:
     await session.call('Input.dispatchKeyEvent',dict(params,type='keyUp'))
 
 
+_BROWSER_INPUT_LOCKS = {}
+
+
 class CDPPage:
     def __init__(self, session: _CDPSession, target_id: str, url: str):
         self._session = session
         self.target_id = target_id
         self.url = url
+
+    @asynccontextmanager
+    async def input_turn(self):
+        """Briefly foreground the owned tab for trusted pointer/key input.
+
+        Background Chromium tabs can acknowledge a mouse dispatch without running
+        its activation (including window.open). The workspace host has one process
+        per browser; its helper threads share this lock, not their entire call slice.
+        """
+        lock=getattr(self,'_input_lock',None)
+        if lock is None:
+            yield
+            return
+        while not lock.acquire(blocking=False):await asyncio.sleep(.02)
+        try:
+            await self._session.call('Page.bringToFront',{})
+            # An occluded/remote desktop can keep even the selected tab hidden.
+            # Scope Chromium's focus emulation to this input turn so real input
+            # is delivered; do not change profile data or automation indicators.
+            await self._session.call('Emulation.setFocusEmulationEnabled',{'enabled':True})
+            yield
+        finally:
+            try:await self._session.call('Emulation.setFocusEmulationEnabled',{'enabled':False})
+            except Exception:pass  # Navigation/closure may destroy this target.
+            finally:lock.release()
 
     async def evaluate(self, expression: str, arg: Any = None, timeout: float = 30.0) -> Any:
         # A top-level function expression (e.g. `() => {...}` or `(args) => {...}`)
@@ -501,15 +531,19 @@ class CDPPage:
                 'instruction':'Inspect the owned page; reload completion is unconfirmed. Use session restart if the page remains broken.'}
 
     async def press_key(self, key: str, vk: int = 0) -> None:
-        await _press_key(self._session,key,vk)
+        async with self.input_turn():await _press_key(self._session,key,vk)
 
     async def insert_text(self, text: str) -> None:
         """Trusted text insertion into the explicitly focused current input."""
         if not isinstance(text, str):raise ValueError('text_required')
-        await self._session.call('Input.insertText', {'text': text})
+        async with self.input_turn():await self._session.call('Input.insertText', {'text': text})
 
     async def click_observed(self, validator: str, args: dict) -> dict:
         """Activate a validated owned-page control through browser input events."""
+        async with self.input_turn():
+            return await self._click_observed(validator,args)
+
+    async def _click_observed(self, validator: str, args: dict) -> dict:
         prepared = dict(args, prepare_pointer=True)
         point = await self.evaluate_function(validator, prepared)
         if not isinstance(point, dict) or not point.get('pointer_ready'):
@@ -622,6 +656,7 @@ class CDPBrowser:
         self.base_url = base_url.rstrip("/")
         self._session = session
         self._page = page
+        page._input_lock = _BROWSER_INPUT_LOCKS.setdefault(self.base_url,threading.Lock())
         self.target_id = target_id
         self.observed_mode = observed_mode
 
@@ -699,11 +734,11 @@ class CDPBrowser:
     # ---- CDP Input domain (real user-level input; React-safe) ----
     async def type_text(self, text: str) -> None:
         """Insert text at the focused element via CDP Input.insertText."""
-        await self._session.call("Input.insertText", {"text": text})
+        await self._page.insert_text(text)
 
     async def press_key(self, key: str, vk: int = 0) -> None:
         """Send a keydown+keyup via CDP Input.dispatchKeyEvent."""
-        await _press_key(self._session,key,vk)
+        await self._page.press_key(key,vk)
 
     async def screenshot(self, path: str, full_page: bool = False) -> str:
         """Capture the current page to a PNG file via CDP Page.captureScreenshot."""

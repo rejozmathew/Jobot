@@ -125,6 +125,10 @@ class FramePage(CDPPage):
         return mapped
 
     async def click_observed(self, validator, args):
+        async with self.router.root.input_turn():
+            return await self._click_observed(validator,args)
+
+    async def _click_observed(self, validator, args):
         try:
             point = await self.evaluate_function(validator, dict(args, prepare_pointer=True))
             if not point.get('pointer_ready'):return dict(point, clicked=False, execution='not_executed')

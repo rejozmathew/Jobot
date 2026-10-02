@@ -57,7 +57,8 @@ def test_paused_worker_retains_each_manual_request_during_an_application(tmp_pat
     observed = []
     class Finished(Exception):
         pass
-    def dispatch(config, service):
+    def dispatch(config, service, *, wait):
+        assert wait is False  # Watch supervises executors without blocking pickup.
         item = service.queue_take()
         observed.append(item['job_id'])
         if len(observed) == 1:

@@ -79,10 +79,11 @@ class SessionServices:
             occupied=db.execute('SELECT workspace_id FROM application_sessions WHERE workspace_id IS NOT NULL AND ended_at IS NULL').fetchall()
             taken={x[0] for x in occupied}
             selected=None
-            if len(taken)<concurrency_limit:
+            if len(occupied)<concurrency_limit:
                 for wid in workspace_ids:
                     w=self._get(db,'browser_workspaces',wid)
-                    if wid not in taken and w['state'] not in ('failed','isolating'):
+                    shared=json.loads(w['config_json']).get('connection_mode')=='existing'
+                    if (shared or wid not in taken) and w['state'] not in ('failed','isolating'):
                         lease=db.execute("SELECT 1 FROM browser_leases l JOIN workspace_profile_aliases a ON a.profile=l.profile WHERE a.workspace_id=? AND l.state!='released'",(wid,)).fetchone()
                         if not lease:selected=wid;break
             now=self.now();sid=old['id'] if old else uid()

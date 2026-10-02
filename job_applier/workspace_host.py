@@ -4,7 +4,7 @@ Owns the profile lock and a Windows Job Object. Requests use a local named pipe
 and JSON bytes (never pickle); records and controls remain in the managed DB.
 """
 import asyncio
-from contextlib import closing
+from contextlib import closing, nullcontext
 from datetime import datetime
 import hashlib
 import json
@@ -136,15 +136,27 @@ class WorkspaceHost:
         self.retire=False;self.requests=0
         self.startup_timing={}
         self.attachment=None
+        self.session_locks={}
+        self.deadline_cleanups=set();self.native_bindings=set()
+        self.last_tab_checks={};self.last_native_bindings={}
 
     @property
     def existing_browser(self):
         return self.workspace.get('connection_mode')=='existing'
 
     def active_session(self):
+        sessions=self.active_sessions()
+        return sessions[0] if sessions else None
+
+    def active_sessions(self):
         with self.service.tx() as db:
-            row=db.execute('SELECT * FROM application_sessions WHERE workspace_id=? AND ended_at IS NULL',(self.workspace_id,)).fetchone()
-            return dict(row) if row else None
+            return [dict(row) for row in db.execute('SELECT * FROM application_sessions WHERE workspace_id=? AND ended_at IS NULL ORDER BY rowid',(self.workspace_id,))]
+
+    def operation_lock(self, session_id):
+        # CDP input, DOM reads and screenshots are target-scoped. Only calls for
+        # the same application serialize; another tab can keep making progress.
+        if not self.existing_browser:return self.busy
+        return self.session_locks.setdefault(session_id,threading.Lock())
 
     def session_deadline(self, session):
         from .application_deadline import Deadline
@@ -175,17 +187,17 @@ class WorkspaceHost:
                 elif self.browser:self.browser.stop()
                 return
             self.stop_session(session,REASON)
-            self.exit.set()  # Retire even if a cancelled helper has not unwound.
+            if not self.existing_browser:self.exit.set()
         except Exception as exc:
             with self.service.tx() as db:
                 db.execute('UPDATE browser_workspaces SET reason=? WHERE id=?',
                     ('Application time limit reached; cleanup pending: '+error_detail(exc)['code'],self.workspace_id))
-        finally:self.deadline_cleanup=False
+        finally:getattr(self,'deadline_cleanups',set()).discard(session['id'])
 
     def remember_native_driver(self, session):
         from .hermes_desktop import remember_driver
         try:remember_driver(self.config,self.service,session)
-        finally:self.native_binding=False
+        finally:self.native_bindings.discard(session['id'])
 
     def start_browser(self):
         w=self.workspace
@@ -237,7 +249,7 @@ class WorkspaceHost:
             # creation and saving its id can still reclaim this exact blank tab.
             attachment={**self.attachment,'marker':'about:blank#jobbot-'+uid(),'target_ids':[]}
             self.service.session_browser_attachment(session['id'],self.host_id,attachment)
-            target=(await browser_command(endpoint,'Target.createTarget',{'url':attachment['marker']}))['targetId']
+            target=(await browser_command(endpoint,'Target.createTarget',{'url':attachment['marker'],'background':True}))['targetId']
             attachment['target_ids']=[target]
             self.service.session_browser_attachment(session['id'],self.host_id,attachment,target)
         else:
@@ -336,7 +348,9 @@ class WorkspaceHost:
 
     def prepare(self, session):
         try:
-            with self.busy:
+            # Startup uses shared attachment metadata; keep preparation serialized
+            # without holding up already connected tabs and their executors.
+            with self.operation_lock(session['id']), (self.busy if self.existing_browser else nullcontext()):
                 session=self.service.session(session['id'])
                 with self.service.tx() as db:control=self.service._get(db,'runs',session['run_id'])['control']
                 if session['ended_at']:return
@@ -464,9 +478,11 @@ class WorkspaceHost:
                 if (request.get('instance_id')==self.config['instance_id'] and
                     session['workspace_id']==self.workspace_id and session['driver_id']==request.get('driver_id') and
                     session['attempt_id'] and not session['ended_at']):
-                    a=self.service.attempt(session['attempt_id']);detail=error_detail(exc)
-                    self.service.event(a['id'],worker_id=a['worker_id'],fence=a['fence'],event_id=uid(),
-                        event_type='recovery',observed_at=self.service.now(),payload={
+                    service=Service(self.config['db_path'],instance_id=self.config['instance_id'])
+                    service.session_authority=(session['id'],session['driver_id'],self.host_id)
+                    a=service.attempt(session['attempt_id']);detail=error_detail(exc)
+                    service.event(a['id'],worker_id=a['worker_id'],fence=a['fence'],event_id=uid(),
+                        event_type='recovery',observed_at=service.now(),payload={
                             'phase':'helper_exception','activity':str(request.get('operation','Helper'))+' returned an error',
                             'error_type':detail['code'],'evidence':detail['detail'],'source':'Workspace host','status':'error',
                             'next_step':'Executor inspects the error and submission state before choosing a recovery'})
@@ -563,42 +579,91 @@ class WorkspaceHost:
             service.coordinate_account(session['id'],release=True)
         return result
 
+    def serve_request(self,pipe):
+        try:
+            if not pipe.poll(5):return
+            request=json.loads(pipe.recv_bytes(65536))
+            with self.operation_lock(request.get('session_id')):
+                result=self.dispatch(request)
+            pipe.send_bytes(json.dumps({'result':result}).encode())
+        except Exception as exc:
+            try:pipe.send_bytes(json.dumps({'error':error_detail(exc)}).encode())
+            except (OSError,EOFError):pass
+        finally:
+            pipe.close();self.requests-=1
+
     def serve_requests(self,listener):
         while not self.exit.is_set():
             try:pipe=listener.accept()
             except (OSError,EOFError):return
             self.requests+=1
+            thread=threading.Thread(target=self.serve_request,args=(pipe,),daemon=True)
+            thread.start();self.threads.append(thread)
+
+    def supervise_session(self,session):
+        sid=session['id']
+        from .hermes_desktop import native_driver_id
+        if (isinstance(self.config.get('hermes_desktop'),dict) and
+            not native_driver_id(session) and sid not in self.native_bindings and
+            time.monotonic()-self.last_native_bindings.get(sid,0)>10):
+            self.native_bindings.add(sid);self.last_native_bindings[sid]=time.monotonic()
+            thread=threading.Thread(target=self.remember_native_driver,args=(session,),daemon=True)
+            thread.start();self.threads.append(thread)
+        with self.service.tx() as db:run=dict(self.service._get(db,'runs',session['run_id']))
+        if self.session_deadline(session).expired():
+            if sid not in self.deadline_cleanups:
+                self.deadline_cleanups.add(sid)
+                thread=threading.Thread(target=self.expire_session,args=(session,),daemon=True)
+                thread.start();self.threads.append(thread)
+            return
+        # Preparation owns the target until it observes a pending stop request.
+        if sid in self.preparing:return
+        lock=self.operation_lock(sid)
+        if session['state']=='finishing' or run['control'] in ('pause_requested','stop_requested'):
+            if lock.acquire(blocking=False):
+                try:self.stop_session(session,session['reason'] or run['control'],paused=run['control']=='pause_requested')
+                except Exception as exc:
+                    with self.service.tx() as db:
+                        db.execute('UPDATE browser_workspaces SET reason=? WHERE id=?',(error_detail(exc)['detail'],self.workspace_id))
+                finally:lock.release()
+        elif self.browser and not self.browser.alive() and session['state'] in ('connected','waiting'):
+            self.stop_session(session,'Owned browser exited; inspect exact submission state before retry')
+        elif session['state']=='preparing':
+            if time.monotonic()<getattr(self,'preparation_retry_at',{}).get(sid,0):return
+            self.preparing.add(sid)
+            thread=threading.Thread(target=self.prepare,args=(session,),daemon=True)
+            thread.start();self.threads.append(thread)
+        elif (self.existing_browser and session['state'] in ('connected','waiting') and
+              time.monotonic()-self.last_tab_checks.get(sid,0)>2 and lock.acquire(blocking=False)):
             try:
-                if not pipe.poll(5):continue
-                request=json.loads(pipe.recv_bytes(65536))
-                # Queue operations on this physical browser instead of rejecting
-                # the next call because preparation or another operation is busy.
-                self.busy.acquire()
-                try:result=self.dispatch(request)
-                finally:self.busy.release()
-                pipe.send_bytes(json.dumps({'result':result}).encode())
-            except Exception as exc:
-                try:pipe.send_bytes(json.dumps({'error':error_detail(exc)}).encode())
-                except (OSError,EOFError):pass
-            finally:
-                pipe.close();self.requests-=1
+                self.last_tab_checks[sid]=time.monotonic()
+                attachment=json.loads(session['metadata_json']).get('browser_attachment') or {}
+                try:
+                    info=endpoint_info(self.workspace['cdp_url'])
+                    targets=asyncio.run(browser_command(self.workspace['cdp_url'],'Target.getTargets'))['targetInfos']
+                    gone=info['webSocketDebuggerUrl']!=attachment.get('browser_id') or not any(t['targetId']==session['target_id'] for t in targets)
+                except (OSError,ValueError):
+                    gone=bool(attachment.get('process_identity') and not process_matches(attachment['process_identity']))
+                if gone:self.stop_session(session,'Application tab or shared browser was closed; retained submission evidence determines the outcome')
+            except Exception:pass  # Transient CDP loss does not establish closure.
+            finally:lock.release()
 
     def run(self):
         with FileLock(lock_path(self.workspace)):
             old=workspace_record(self.service,self.workspace_id)
             if not self.existing_browser and old['browser_identity_json'] and process_matches(json.loads(old['browser_identity_json'])):
                 raise ProtocolError('orphan_browser_still_running')
-            previous=self.active_session()
+            previous_sessions=self.active_sessions()
             self.service.host_registered(self.workspace_id,self.host_id,process_identity(os.getpid()))
-            restarting=bool(previous and previous['state']=='preparing' and json.loads(previous['metadata_json']).get('browser_restart'))
-            if self.existing_browser and previous and json.loads(previous['metadata_json']).get('browser_attachment') and not restarting:
-                # Recover even a pre-readiness target from a lost host. For a
-                # preparing session retain the request, then open a fresh tab.
-                asyncio.run(self.close_application_tabs(previous))
-                if previous['state'] not in ('preparing','paused','capacity_wait'):
-                    self.stop_session(previous,'Previous host died; application tabs closed. Lost command was not replayed.')
-            elif previous and previous['state'] not in ('preparing','paused','capacity_wait'):
-                self.service.session_stopped(previous['id'],reason='Previous host died; owned process identity is stopped. Lost command was not replayed.',browser_stopped=True)
+            for previous in previous_sessions:
+                restarting=bool(previous['state']=='preparing' and json.loads(previous['metadata_json']).get('browser_restart'))
+                if self.existing_browser and json.loads(previous['metadata_json']).get('browser_attachment') and not restarting:
+                    # Recover every owned tab, including pre-readiness targets.
+                    asyncio.run(self.close_application_tabs(previous))
+                    if previous['state'] not in ('preparing','paused','capacity_wait'):
+                        self.stop_session(previous,'Previous host died; application tabs closed. Lost command was not replayed.')
+                elif previous['state'] not in ('preparing','paused','capacity_wait'):
+                    self.service.session_stopped(previous['id'],reason='Previous host died; owned process identity is stopped. Lost command was not replayed.',browser_stopped=True)
             address=pipe_address(self.config,self.workspace_id,self.host_id)
             if os.name == 'nt':
                 listener_ctx = Listener(address, family='AF_PIPE', authkey=None)
@@ -608,15 +673,13 @@ class WorkspaceHost:
             with listener_ctx as listener:
                 server=threading.Thread(target=self.serve_requests,args=(listener,),daemon=True);server.start()
                 last_seen=0
-                last_tab_check=0
-                last_native_binding=0
                 idle_since=None
                 try:
                     while not self.exit.wait(.25):
-                        session=self.active_session()
+                        sessions=self.active_sessions()
                         if time.monotonic()-last_seen>5:
                             self.service.host_seen(self.workspace_id,self.host_id,self.browser.identity if self.browser else None);last_seen=time.monotonic()
-                        if not session:
+                        if not sessions:
                             idle_since=idle_since or time.monotonic()
                             if self.retire and not self.requests and not self.busy.locked():
                                 with FileLock(str(lock_path(self.workspace))+'.startup'):
@@ -624,64 +687,19 @@ class WorkspaceHost:
                                         with self.service.tx() as db:
                                             db.execute("UPDATE browser_workspaces SET state='offline' WHERE id=? AND host_id=?",(self.workspace_id,self.host_id))
                                         break
-                            if time.monotonic()-idle_since>60:break
+                            if time.monotonic()-idle_since>60 and not self.requests and not self.preparing:break
                             continue
                         idle_since=None
-                        # Read-only native identity capture runs beside browser work;
-                        # an unavailable backend must not delay startup or helpers.
-                        from .hermes_desktop import native_driver_id
-                        if (isinstance(self.config.get('hermes_desktop'),dict) and
-                            not native_driver_id(session) and
-                            not getattr(self,'native_binding',False) and time.monotonic()-last_native_binding>10):
-                            self.native_binding=True;last_native_binding=time.monotonic()
-                            thread=threading.Thread(target=self.remember_native_driver,args=(session,),daemon=True)
-                            thread.start();self.threads.append(thread)
-                        with self.service.tx() as db:run=dict(self.service._get(db,'runs',session['run_id']))
-                        expired=self.session_deadline(session).expired()
-                        if expired:
-                            if not getattr(self,'deadline_cleanup',False):
-                                self.deadline_cleanup=True
-                                thread=threading.Thread(target=self.expire_session,args=(session,),daemon=True)
-                                thread.start();self.threads.append(thread)
-                            continue
-                        # Startup owns the child reference until it observes the pending
-                        # control. Never acknowledge stop while a launch can still occur.
-                        if session['id'] in self.preparing:continue
-                        if session['state']=='finishing' or run['control'] in ('pause_requested','stop_requested'):
-                            if self.busy.acquire(blocking=False):
-                                try:
-                                    self.stop_session(session,session['reason'] or run['control'],paused=run['control']=='pause_requested')
-                                except Exception as exc:
-                                    with self.service.tx() as db:
-                                        db.execute('UPDATE browser_workspaces SET reason=? WHERE id=?',(error_detail(exc)['detail'],self.workspace_id))
-                                finally:self.busy.release()
-                        elif self.browser and not self.browser.alive() and session['state'] in ('connected','waiting'):
-                            self.stop_session(session,'Owned browser exited; inspect exact submission state before retry')
-                        elif session['state']=='preparing' and session['id'] not in self.preparing:
-                            if time.monotonic()<getattr(self,'preparation_retry_at',{}).get(session['id'],0):continue
-                            self.preparing.add(session['id'])
-                            thread=threading.Thread(target=self.prepare,args=(session,),daemon=True);thread.start();self.threads.append(thread)
-                        elif self.existing_browser and session['state'] in ('connected','waiting') and time.monotonic()-last_tab_check>2 and self.busy.acquire(blocking=False):
-                            try:
-                                last_tab_check=time.monotonic()
-                                attachment=json.loads(session['metadata_json']).get('browser_attachment') or {}
-                                try:
-                                    info=endpoint_info(self.workspace['cdp_url'])
-                                    targets=asyncio.run(browser_command(self.workspace['cdp_url'],'Target.getTargets'))['targetInfos']
-                                    gone=info['webSocketDebuggerUrl']!=attachment.get('browser_id') or not any(t['targetId']==session['target_id'] for t in targets)
-                                except (OSError,ValueError):
-                                    gone=bool(attachment.get('process_identity') and not process_matches(attachment['process_identity']))
-                                if gone:self.stop_session(session,'Application tab or shared browser was closed; retained submission evidence determines the outcome')
-                            except Exception:pass  # Transient CDP loss does not establish closure.
-                            finally:self.busy.release()
+                        for session in sessions:self.supervise_session(session)
+                        self.threads[:]=[thread for thread in self.threads if thread.is_alive()]
                 finally:
                     self.exit.set()
                     if self.browser:self.browser.stop()
                     if self.existing_browser:
-                        current=self.active_session()
-                        if current and current['state']!='paused':
-                            try:self.stop_session(current,'Host stopped; application tabs closed')
-                            except Exception:pass  # Durable tab ownership remains for the next host.
+                        for current in self.active_sessions():
+                            if current['state']!='paused':
+                                try:self.stop_session(current,'Host stopped; application tabs closed')
+                                except Exception:pass  # Durable ownership remains for the next host.
                     with self.service.tx() as db:
                         db.execute("UPDATE browser_workspaces SET state='offline',browser_identity_json=NULL,updated_at=? WHERE id=? AND host_id=?",(self.service.now(),self.workspace_id,self.host_id))
                     if os.name != 'nt':

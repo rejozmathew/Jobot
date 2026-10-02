@@ -130,7 +130,7 @@ function renderJobFilters(v){
   button.closest('th').setAttribute('aria-sort',active?(state.jobSort.direction==='asc'?'ascending':'descending'):'none');
  }
  const sortButton=document.querySelector(`[data-job-sort="${state.jobSort.key}"]`);
- $('queue-selection-order').textContent=`Selected jobs queue in table order: ${sortButton.dataset.label}, ${state.jobSort.direction==='asc'?'ascending':'descending'}. They run after the current application and earlier manual requests, ahead of automatic pickups.`;
+ $('queue-selection-order').textContent=`Selected jobs queue in table order: ${sortButton.dataset.label}, ${state.jobSort.direction==='asc'?'ascending':'descending'}. Available slots take earlier manual requests first, ahead of automatic pickups.`;
 }
 function selection(){
  const selected=(state.view?.jobs||[]).filter(j=>state.selected.has(j.id));
@@ -355,7 +355,7 @@ async function applyNow(job,button){
   const message=item.state==='dispatched'?'This application is already in progress.':
    q.automation_paused?'Request saved. Choose Resume JobBot to start queued applications.':
    !q.worker_online?'Request saved, but the queue worker is offline. It will start this job when the service is back online.':
-   q.counts?.dispatched?'Request saved. This job will run after the current application and any earlier Apply now requests.':
+   q.counts?.dispatched?(q.concurrency_limit||1)>1?'Request saved. This job will start when a slot is available, after earlier Apply now requests.':'Request saved. This job will run after the current application and any earlier Apply now requests.':
    'Request saved. The worker will start this job as soon as its browser is free, ahead of automatic jobs.';
   notice(postingLabel(job)+': '+message);
   await refresh();
@@ -367,7 +367,7 @@ function runNextMessage(q){
  if(!q.counts?.queued)return q.counts?.dispatched?'An application is already in progress. No other jobs are waiting.':'No eligible jobs are waiting. Active jobs are picked up automatically; check job reasons below.';
  if(!q.worker_online)return 'Request saved, but the queue worker is offline. Start the JobBot queue service to run queued jobs.';
  if(q.ready_count===0&&q.scheduled_count)return `Retries are scheduled for later. Next retry: ${stamp(q.next_job_at)}.`;
- return q.counts?.dispatched?'Request saved. The next queued job will wait for the current application to finish.':'Request saved. The worker will start the next queued job when its browser is free.';
+ return (q.concurrency_limit||1)>1?'Request saved. The worker will fill available application slots from the queue.':q.counts?.dispatched?'Request saved. The next queued job will wait for the current application to finish.':'Request saved. The worker will start the next queued job when its browser is free.';
 }
 function renderDispatcher(v){
  const q=v.dispatch_queue||{};
@@ -403,10 +403,10 @@ function renderDispatcher(v){
   choice('queue-resume',options,selected);
  }
  if($('dispatcher-status'))$('dispatcher-status').textContent=!q.installed?'Queue upgrade required: restart with the current queue dashboard launcher.':
-  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.counts?.dispatched||0} in progress · ${paused?'JobBot paused. Queued jobs are saved until you resume.':`Automatic queue ${q.enabled?'on':'paused'}. Active jobs are picked up automatically, one application at a time.`}`;
+  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.active_count??q.counts?.dispatched??0} of ${q.concurrency_limit||1} applications active · ${paused?'JobBot paused. Queued jobs are saved until you resume.':`Automatic queue ${q.enabled?'on':'paused'}. Available application slots fill automatically from the queue.`}`;
  if($('application-schedule'))$('application-schedule').textContent=
   paused?'New applications are paused, including Queue selected, Apply now and Wake existing queue requests. Current work finishes normally.':
-  `${q.counts?.dispatched?'An application is running. The next ready job follows after it finishes. ':''}`+
+  `${q.counts?.dispatched?'Applications are running. Ready jobs start as slots become available. ':''}`+
   `${q.enabled?`Next application check: ${q.next_automatic_at?stamp(q.next_automatic_at):'worker’s next check'}.`:'Automatic applications are paused; Queue selected or Apply now can request work immediately.'}`+
   `${q.ready_count===0&&q.next_job_at?` Next scheduled retry: ${stamp(q.next_job_at)}.`:''} Up to 6 attempts: 4 in the first 24 hours, then 2 the next day. Targets: 0, 2, 4, 6, 24 and 28 hours; busy or long runs move later. After 6 attempts, review the failure reason.`;
  if($('queue-toggle'))$('queue-toggle').textContent=q.enabled?'Pause automatic queue':'Enable automatic queue';
@@ -621,6 +621,7 @@ function renderSettings(s){
  $('settings-time-limit-enabled').checked=limit>0;
  $('settings-time-limit-minutes').value=limit||30;
  $('settings-time-limit-minutes').disabled=limit===0;
+ $('settings-concurrency').value=s.values.application_concurrency??1;
  state.modelDraft={provider:s.values.reasoning_provider,model:s.values.reasoning_model,
   effort:s.values.reasoning_effort,override:s.values.application_model_override};
  choice('settings-worker',(s.supported?.worker||['external','hermes']).map(x=>[x,x]),s.values.worker);
@@ -640,7 +641,7 @@ function renderSettings(s){
  const box=$('setting-fields');box.replaceChildren();const discoveryBox=$('discovery-setting-fields');discoveryBox?.replaceChildren();
  const discoveryLabels={discovery_batch_size:'Maximum jobs per discovery run',discovery_interval_hours:'Discover jobs every (hours)'};
  for(const [key,value]of Object.entries(s.values)){const label=el('label',discoveryLabels[key]||key.replaceAll('_',' '));let input;
-  if(['worker','reasoning_provider','reasoning_model','reasoning_effort','application_model_override','application_time_limit_minutes'].includes(key))continue;
+  if(['worker','reasoning_provider','reasoning_model','reasoning_effort','application_model_override','application_time_limit_minutes','application_concurrency'].includes(key))continue;
   if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const o=el('option',x);o.value=x;input.append(o);}input.value=value;}
   else {input=el('input');if(typeof value==='boolean'){input.type='checkbox';input.checked=value;}else if(typeof value==='number'){input.type='number';input.value=value;const range=s.budget_ranges?.[key];if(range){input.min=range[0];input.max=range[1];}}else{input.type='text';input.value=Array.isArray(value)?value.join(', '):(value??'');}}
   if(key==='discovery_batch_size'){input.min=1;input.max=100;input.step=1;}
@@ -810,7 +811,7 @@ if($('start-application-btn')){$('start-application-btn').onclick=async()=>{
   const submission_mode=$('main-submission-mode').value;
   if(submission_mode!==state.view.settings.values.submission_mode)await api('configure',{changes:{submission_mode,mode:submission_mode==='submit'?'pilot':'development'},expected_version:state.settingsVersion});
   const result=await api('queue_enqueue',{job_ids:orderedIds,identity_id,resume_asset_id:asset.id,request_id:newRequestId(),retry:true,start_now:true,producer:'dashboard',enqueue_origin:'manual_enqueue'});
-  state.selected.clear();notice(`${result.items.length} selected job(s) requested in table order. ${result.queue?.automation_paused?'Requests are saved until you choose Resume JobBot.':result.queue?.worker_online===false?'The worker is offline; requests are saved until it returns.':'The worker runs them one at a time after the current application and earlier manual requests, ahead of automatic pickups.'}`);await refresh();return;
+  state.selected.clear();notice(`${result.items.length} selected job(s) requested in table order. ${result.queue?.automation_paused?'Requests are saved until you choose Resume JobBot.':result.queue?.worker_online===false?'The worker is offline; requests are saved until it returns.':'The worker fills available application slots after earlier manual requests, ahead of automatic pickups.'}`);await refresh();return;
  }
  if(!state.selected.size)throw Error('Please select at least one job from the queue.');
  const candidateId=$('candidate').value;if(!candidateId)throw Error('Please select a candidate.');

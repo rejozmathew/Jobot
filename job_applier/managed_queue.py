@@ -1,4 +1,4 @@
-"""Sequential dispatch, automatic active-job pickup, and durable delayed retries."""
+"""Capacity-aware dispatch, automatic active-job pickup, and durable delayed retries."""
 import json
 from datetime import datetime, timedelta
 from .managed_shared import ProtocolError, dumps, uid
@@ -40,7 +40,7 @@ class QueueServices:
             (attempt['job_id'],'Successful reconciliation of attempt '+str(attempt['id']),self.now(),attempt['identity_id'])).rowcount
 
     def queue_reconcile(self, *, identity_id, resume_asset_id):
-        """Pick up active intake and schedule recovery; the serial worker executes it."""
+        """Pick up active intake and schedule recovery; the dispatcher executes it."""
         added = []
         with self.tx() as db:
             candidate = self._get(db, 'candidates', identity_id)
@@ -151,6 +151,8 @@ class QueueServices:
                 FROM dispatch_queue WHERE rowid IN (SELECT MAX(rowid) FROM dispatch_queue GROUP BY job_id)''')}
             schedule=attempt_schedule([dict(r) for r in db.execute('SELECT * FROM dispatch_queue ORDER BY rowid')])
             waiting=[dict(r) for r in db.execute("SELECT * FROM dispatch_queue WHERE state='queued'")]
+            concurrency=self._settings_record(db)['values']['application_concurrency']
+            active_items=[dict(r) for r in db.execute("SELECT id,job_id,started_at,session_id FROM dispatch_queue WHERE state='dispatched' ORDER BY started_at,rowid")]
         now=datetime.fromisoformat(self.now())
         for item in [*items,*latest.values()]:
             item.update(schedule[item['id']])
@@ -168,6 +170,7 @@ class QueueServices:
                 'counts':counts,'ready_count':ready,'scheduled_count':len(waiting)-ready,'next_job_at':next_job,
                 'immediate_count':sum(bool(r['immediate_requested_at']) for r in waiting),
                 'automatic_attempt_limit':AUTOMATIC_ATTEMPTS,
+                'concurrency_limit':concurrency,'active_count':len(active_items),'active_items':active_items,
                 'items':items,'latest_by_job':latest,'selection':getattr(self,'dispatch_selection',None)}
 
     def queue_control(self, *, command):
@@ -181,11 +184,13 @@ class QueueServices:
             else:db.execute('UPDATE dispatch_control SET enabled=? WHERE id=1',(int(command=='resume'),))
         return self.queue_status()
 
-    def queue_take(self):
+    def queue_take(self, *, concurrency_limit=None):
         """Only the dispatcher calls this, under its OS lock; no model in Service."""
         with self.tx() as db:
             if db.execute('SELECT automation_paused FROM dispatch_control WHERE id=1').fetchone()[0]:return None
-            if db.execute("SELECT 1 FROM dispatch_queue WHERE state='dispatched'").fetchone():return None
+            limit=self._settings_record(db)['values']['application_concurrency']
+            if concurrency_limit is not None:limit=min(limit,concurrency_limit)
+            if db.execute("SELECT COUNT(*) FROM dispatch_queue WHERE state='dispatched'").fetchone()[0]>=limit:return None
             schedule=attempt_schedule([dict(r) for r in db.execute('SELECT * FROM dispatch_queue ORDER BY rowid')])
             for row in db.execute("""SELECT * FROM dispatch_queue WHERE state='queued'
                     ORDER BY immediate_requested_at IS NULL,immediate_requested_at,

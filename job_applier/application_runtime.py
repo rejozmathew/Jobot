@@ -134,7 +134,7 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     if not request_id and (metadata or {}).get('request_turn_id'):
         request_id=hashlib.sha256(json.dumps([driver,identity_id,job['id'],metadata['request_turn_id']]).encode()).hexdigest()
     # Reuse this request, not every other application for the same posting.
-    # Distinct requests can use distinct configured browser workspaces.
+    # Distinct requests own distinct tabs in a shared browser, or managed workspaces.
     from .managed_identity import RELATED
     with service.tx() as db:
         replay=db.execute('SELECT id FROM application_sessions WHERE request_id=?',(request_id,)).fetchone() if request_id else None
@@ -157,7 +157,8 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
             raise ProtocolError('application_runtime_model_mismatch')
     workspaces=validate_workspaces(config['workspaces'])
     limit=config.get('concurrency_limit',len(workspaces))
-    if type(limit) is not int or not 1<=limit<=len(workspaces):raise ProtocolError('invalid_concurrency_limit')
+    capacity=max(5,len(workspaces)) if any(w.get('connection_mode')=='existing' for w in workspaces) else len(workspaces)
+    if type(limit) is not int or not 1<=limit<=capacity:raise ProtocolError('invalid_concurrency_limit')
     meta['startup_timing']={'runtime_entered_at':entered_at,'preflight_seconds':round(time.monotonic()-entered_clock,3)}
     meta['application_deadline']=config['application_deadline']
     session=service.reserve_session(request_id=requested,job_id=job['id'],identity_id=identity_id,driver_id=driver,

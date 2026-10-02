@@ -1,4 +1,25 @@
-# Single-job queue and existing Ubuntu VM rollout
+# Application queue and existing Ubuntu VM rollout
+
+## Concurrent applications in the existing profile
+
+Under **Settings → Application model**, **Simultaneous applications** selects
+1, 2, 3, 4 or 5. Save settings to update queue capacity. Default is 1; choose 1
+when using a local model and a larger value when desired for another executor.
+This is a saved operator choice, not an automatic model-dependent restriction.
+
+The existing-mode JobBot browser opens a separate owned tab for each application.
+Its profile, logins, history and Simplify installation stay in place; no additional
+profiles are required. Each application gets its own model conversation, deadline,
+progress and outcome. Clicks and keyboard input briefly take turns in the foreground;
+reasoning and other tab work overlap. The queue displays active/selected capacity and refills a
+slot after its executor and application-tab cleanup finish. Lowering capacity
+lets existing work finish. Pause JobBot drains all current applications without
+starting new ones. Individual Stop and Restart affect only their owned tabs.
+
+Parallel input and lifecycle behavior are tested against synthetic localhost forms
+at 2 and 5 tabs. Official Simplify autofill and employer-specific simultaneous
+login/verification behavior require ordinary application evidence. Tabs on one
+employer origin share its login state, just as in manual browsing.
 
 The existing Ubuntu deployment was updated on September 15, 2026. The queue
 feedback and four-hour discovery settings were validated in Windows and deployed
@@ -7,7 +28,7 @@ home, authenticated providers, Himalaya account and browser extension setup.
 
 ## What runs where
 
-`Hermes discovery -> active intake -> automatic dispatch queue -> one fresh Hermes application -> recorded attempt/evidence`.
+`Hermes discovery -> active intake -> automatic dispatch queue -> up to the selected number of fresh application sessions -> recorded attempt/evidence`.
 
 JobBot owns the selected managed database, deduplication, queue, submission mode,
 history, browser ownership, controls and reports. Hermes is a replaceable external
@@ -75,7 +96,7 @@ and starts the oldest ready job after any explicit **Apply now** requests, as so
 as the configured browser is free. It does not choose a selected table row.
 **Apply now** on a job requests that specific job immediately, ahead of automatic
 jobs, and bypasses its scheduled retry wait. If another application is running,
-the job follows it and any earlier Apply now requests. These requests survive
+the job starts when a slot is available, after earlier Apply now requests. These requests survive
 worker restarts and remain runnable while automatic pickup is paused. An offline
 worker is reported explicitly; the saved request runs when it returns. Candidate,
 resume and submission mode come from the dashboard's application options.

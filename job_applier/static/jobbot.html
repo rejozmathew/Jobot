@@ -321,10 +321,14 @@
           <label id="settings-custom-provider-label" hidden>Custom provider<input id="settings-custom-provider" type="text" placeholder="Provider ID configured in your worker"></label>
           <label id="settings-custom-model-label" hidden>Model ID<input id="settings-custom-model" type="text" placeholder="Exact model ID"></label>
           <label id="settings-effort-label">Reasoning effort<select id="settings-effort"></select></label>
+          <label>Simultaneous applications<select id="settings-concurrency" data-setting="application_concurrency" data-kind="number" aria-describedby="application-concurrency-help">
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+          </select></label>
         </div>
         <p id="model-catalog-status" role="status"></p>
         <button id="refresh-models" type="button">Refresh models</button>
         <p>Save settings to use this selection for the next application. Running applications keep their model. Discovery uses its own executor configuration.</p>
+        <p id="application-concurrency-help">Use 1 for your local model, or choose up to 5. Applications use separate tabs in your existing JobBot browser, keeping its profile and logins. Lowering this number lets current applications finish before starting more.</p>
           <h3>Application time limit</h3>
           <div class="settings-grid">
             <label><input id="settings-time-limit-enabled" type="checkbox"> Stop applications at the time limit (uncheck for Off)</label>

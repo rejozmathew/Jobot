@@ -72,6 +72,7 @@ def test_host_records_helper_error_without_closing_session(tmp_path,monkeypatch)
     from job_applier.workspace_host import WorkspaceHost
     s,asset,jobs,ws,cfg=setup(tmp_path);session=connect(s,reserve(s,asset,jobs))
     host=object.__new__(WorkspaceHost);host.service=s;host.config=cfg;host.workspace_id=session['workspace_id']
+    host.host_id='host-'+session['workspace_id']
     def fail(request):raise ProtocolError('observed_control_changed','Refresh the actual employer controls')
     monkeypatch.setattr(host,'_dispatch',fail)
     request={'instance_id':s.instance_id,'session_id':session['id'],'driver_id':session['driver_id'],'operation':'browser'}
