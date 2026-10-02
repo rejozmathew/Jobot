@@ -33,6 +33,22 @@ def test_existing_profile_accepts_independent_sessions_and_counts_tabs(tmp_path)
     assert len(service.sessions_view()['workspaces']) == 2  # No new profile created.
 
 
+def test_existing_application_opens_own_visible_window(tmp_path, monkeypatch):
+    import asyncio
+    from test_existing_browser import fixture_host
+    from job_applier import workspace_host
+    host, service, session = fixture_host(tmp_path)
+    host.attachment = {'browser_id': 'ws://shared'}
+    class Created(Exception):pass
+    async def command(endpoint, method, params=None):
+        assert method == 'Target.createTarget'
+        assert params.get('newWindow') is True
+        assert params.get('background') is False
+        raise Created
+    monkeypatch.setattr(workspace_host, 'browser_command', command)
+    with pytest.raises(Created):asyncio.run(host.prepare_target(session))
+
+
 def test_queue_refills_independent_slots_and_lowering_does_not_cancel(tmp_path):
     service, asset, jobs, _, _ = shared_fixture(tmp_path, 2)
     enqueue(service, asset, jobs)
@@ -132,6 +148,45 @@ def test_timeout_closes_only_its_tabs_and_keeps_other_application_running(tmp_pa
     assert service.session(sessions[1]['id'])['state'] == 'connected'
     assert {t['targetId'] for t in tabs} == {'mail', sessions[1]['target_id']}
     assert [s['id'] for s in host.active_sessions()] == [sessions[1]['id']]
+
+
+def test_window_layout_preserves_foreign_windows_and_keeps_all_apps_visible(tmp_path, monkeypatch):
+    import asyncio
+    from contextlib import asynccontextmanager
+    from job_applier import workspace_host
+    host, service, sessions = connected_shared(tmp_path, 3)
+    host.attachment = {'browser_id': 'ws://shared'}
+    for index, session in enumerate(sessions):
+        service.session_browser_attachment(session['id'], host.host_id,
+            {'browser_id': 'ws://shared', 'target_ids': [session['target_id']], 'window_id': index+10})
+    calls = [];input_active = False
+    class Page:
+        async def evaluate(self, expression):return {'left': -1920, 'top': 30, 'width': 1920, 'height': 1050}
+        @asynccontextmanager
+        async def input_turn(self):
+            nonlocal input_active
+            input_active = True
+            try:yield
+            finally:input_active = False
+    async def command(endpoint, method, params=None):
+        if method == 'Browser.getWindowForTarget':return {'windowId': int(params['targetId'].rsplit('-', 1)[1])+10}
+        assert input_active and method == 'Browser.setWindowBounds'
+        assert params['windowId'] in (10, 11, 12)
+        calls.append(params)
+        return {}
+    monkeypatch.setattr(workspace_host, 'browser_command', command)
+    assert asyncio.run(host.arrange_application_windows(Page())) == 'tiled'
+    rectangles = [c['bounds'] for c in calls if 'width' in c['bounds']]
+    assert rectangles == [
+        {'left': -1920, 'top': 30, 'width': 960, 'height': 525},
+        {'left': -960, 'top': 30, 'width': 960, 'height': 525},
+        {'left': -1920, 'top': 555, 'width': 960, 'height': 525}]
+    # Moving a tab to a personal window does not grant window ownership.
+    async def moved(endpoint, method, params=None):
+        if method == 'Browser.getWindowForTarget':return {'windowId': 99}
+        pytest.fail('Resized a window that JobBot did not create')
+    monkeypatch.setattr(workspace_host, 'browser_command', moved)
+    assert asyncio.run(host.arrange_application_windows(Page())) == 'layout_unconfirmed'
 
 
 def test_host_requests_for_different_tabs_overlap_without_sharing_authority(tmp_path, monkeypatch):

@@ -1,4 +1,4 @@
-"""Opt-in localhost proof of parallel tabs in one disposable retained profile."""
+"""Opt-in proof of visible application windows in one disposable retained profile."""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,8 +13,8 @@ import pytest
 
 from job_applier.application_runtime import resolve_config, session_call, start
 from job_applier.cdp_client import CDPBrowser
-from job_applier.workspace_host import browser_command, ensure_host, workspace_record
-from job_applier.workspace_process import process_matches
+from job_applier.workspace_host import browser_command, ensure_host, lock_path, workspace_record
+from job_applier.workspace_process import FileLock, process_matches
 from test_dispatch_queue import runtime_fixture
 from test_local_browser_lifecycle import free_port, wait_for
 
@@ -23,12 +23,31 @@ pytestmark = pytest.mark.skipif(not os.environ.get('JOBBOT_BROWSER_TEST_EXE'),
     reason='Explicit browser needed for disposable parallel-tab fixture')
 
 
-@pytest.mark.parametrize('count', [2, 5])
+@pytest.mark.parametrize('count', [3, 5])
 def test_shared_cookies_parallel_input_restart_stop_and_host_recovery(tmp_path, count):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             data = b'''<title>Concurrent fixture</title><label>Answer<input id="answer"></label>
-                <button id="popup" onclick="window.open('/popup'+location.pathname,'_blank')">Open popup</button>'''
+                <label>Autofill result<input id="autofill-result"></label>
+                <button id="autofill" onclick="fillVisible()">Autofill</button>
+                <button id="popup" onclick="window.open('/popup'+location.pathname,'_blank')">Open popup</button>
+                <script>
+                async function fillVisible(){
+                  window.fillState='filling';
+                  for(let i=0;i<4;i++){
+                    await new Promise(resolve=>setTimeout(resolve,250));
+                    // Simplify 3.1.8 waits for visibility before each field fill.
+                    if(document.visibilityState==='hidden')await new Promise(resolve=>{
+                      const resume=()=>{if(document.visibilityState!=='hidden'){
+                        document.removeEventListener('visibilitychange',resume);resolve();
+                      }};
+                      document.addEventListener('visibilitychange',resume);
+                    });
+                    document.querySelector('#autofill-result').value='filled-'+i;
+                  }
+                  window.fillState='complete';
+                }
+                </script>'''
             self.send_response(200);self.send_header('Content-Type', 'text/html');self.end_headers();self.wfile.write(data)
         def log_message(self, *args):pass
     web = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -70,16 +89,27 @@ def test_shared_cookies_parallel_input_restart_stop_and_host_recovery(tmp_path, 
     try:
         wait_for(available)
         dashboard = next(t['targetId'] for t in pages() if t['url'] == base+'/dashboard')
+        wait_for(lambda: evaluate(dashboard, 'document.title') == 'Concurrent fixture')
         evaluate(dashboard, "document.cookie='fixture=retained; path=/'")
         requests = [apply(i) for i in range(count)]
         wait_for(lambda: all(service.session(r['session_id'])['state'] == 'connected' for r in requests), timeout=90)
         active = [service.session(r['session_id']) for r in requests]
         assert len({s['target_id'] for s in active}) == count
+        windows = [command('Browser.getWindowForTarget', {'targetId': s['target_id']})['windowId'] for s in active]
+        assert len(set(windows)) == count
+        assert command('Browser.getWindowForTarget', {'targetId': dashboard})['windowId'] not in windows
         assert {s['workspace_id'] for s in active} == {workspace['id']}
         assert len(pages()) == count+1 and process.poll() is None
         for session in active:
             assert evaluate(session['target_id'], 'document.cookie') == 'fixture=retained'
             assert evaluate(session['target_id'], 'navigator.webdriver') is False
+        # Check after the input connection and temporary focus emulation end.
+        # All applications must keep progressing between clicks in other windows.
+        with ThreadPoolExecutor(max_workers=count) as pool:
+            list(pool.map(lambda s: call(s, 'browser', {'method': 'click', 'selector': '#autofill'}), active))
+        wait_for(lambda: all(evaluate(s['target_id'], 'window.fillState') == 'complete' for s in active), timeout=20)
+        assert all(evaluate(s['target_id'], 'document.visibilityState') == 'visible' for s in active)
+        assert all(evaluate(s['target_id'], 'document.querySelector("#autofill-result").value') == 'filled-3' for s in active)
         barrier = threading.Barrier(count)
         def fill(pair):
             index, session = pair;barrier.wait(timeout=10)
@@ -114,7 +144,9 @@ def test_shared_cookies_parallel_input_restart_stop_and_host_recovery(tmp_path, 
         # Lost host recovery cleans every abandoned owned tab, preserving the profile.
         host = json.loads(workspace_record(service, workspace['id'])['host_identity_json'])
         os.kill(host['pid'], signal.SIGTERM)
-        wait_for(lambda: not process_matches(host))
+        # Linux can expose a zombie leader while its other threads are still
+        # releasing shared descriptors. Recovery also requires the profile lock.
+        wait_for(lambda: not process_matches(host) and not FileLock.is_locked(lock_path(workspace)))
         assert process.poll() is None
         ensure_host(cfg, workspace['id'])
         wait_for(lambda: all(service.session(sid)['ended_at'] for sid in sessions), timeout=60)

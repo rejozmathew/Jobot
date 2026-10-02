@@ -8,6 +8,7 @@ from contextlib import closing, nullcontext
 from datetime import datetime
 import hashlib
 import json
+import math
 from multiprocessing.connection import Client as PipeClient, Listener
 import os
 from pathlib import Path
@@ -240,6 +241,46 @@ class WorkspaceHost:
             except (OSError,ValueError):time.sleep(.2)
         raise ProtocolError('browser_endpoint_not_ready',w['cdp_url'])
 
+    async def arrange_application_windows(self, page):
+        """Keep retained-profile applications visible without moving personal windows.
+
+        Simplify waits between field fills while a document is hidden. Each owned
+        window therefore keeps its selected application tab visible after input
+        focus is released. Preparation already holds the shared startup lock.
+        """
+        area=await page.evaluate('({left:screen.availLeft??0,top:screen.availTop??0,width:screen.availWidth,height:screen.availHeight})')
+        width,height=int(area['width']),int(area['height'])
+        if width<=0 or height<=0:return 'layout_unconfirmed'
+        endpoint=self.workspace['cdp_url'];windows=[]
+        for current in self.active_sessions():
+            attachment=json.loads(current['metadata_json']).get('browser_attachment') or {}
+            if (not current.get('target_id') or attachment.get('window_id') is None or
+                attachment.get('browser_id')!=self.attachment['browser_id']):continue
+            try:
+                window=await browser_command(endpoint,'Browser.getWindowForTarget',{'targetId':current['target_id']})
+                # A user may move an application into another window. Do not
+                # resize that unrelated window based on stale creation metadata.
+                if window['windowId']==attachment['window_id'] and window['windowId'] not in windows:
+                    windows.append(window['windowId'])
+            except Exception:continue  # A peer may finish while this one prepares.
+        if not windows:return 'layout_unconfirmed'
+        columns=math.ceil(math.sqrt(len(windows)));rows=math.ceil(len(windows)/columns)
+        arranged=0
+        async with page.input_turn():
+            for index,window_id in enumerate(windows):
+                column,row=index%columns,index//columns
+                bounds={'left':int(area['left'])+column*width//columns,
+                        'top':int(area['top'])+row*height//rows,
+                        'width':(column+1)*width//columns-column*width//columns,
+                        'height':(row+1)*height//rows-row*height//rows}
+                try:
+                    # Chromium requires state restoration separately from sizing.
+                    await browser_command(endpoint,'Browser.setWindowBounds',{'windowId':window_id,'bounds':{'windowState':'normal'}})
+                    await browser_command(endpoint,'Browser.setWindowBounds',{'windowId':window_id,'bounds':bounds})
+                    arranged+=1
+                except Exception:continue
+        return 'tiled' if arranged==len(windows) else 'layout_unconfirmed'
+
     async def prepare_target(self, session):
         if self.session_deadline(session).expired():raise ProtocolError('application_time_limit')
         w=self.workspace;endpoint=w['cdp_url']
@@ -249,7 +290,7 @@ class WorkspaceHost:
             # creation and saving its id can still reclaim this exact blank tab.
             attachment={**self.attachment,'marker':'about:blank#jobbot-'+uid(),'target_ids':[]}
             self.service.session_browser_attachment(session['id'],self.host_id,attachment)
-            target=(await browser_command(endpoint,'Target.createTarget',{'url':attachment['marker'],'background':True}))['targetId']
+            target=(await browser_command(endpoint,'Target.createTarget',{'url':attachment['marker'],'newWindow':True,'background':False}))['targetId']
             attachment['target_ids']=[target]
             self.service.session_browser_attachment(session['id'],self.host_id,attachment,target)
         else:
@@ -283,6 +324,13 @@ class WorkspaceHost:
                     raise ProtocolError('employer_storage_cleanup_failed','Retry did not open the employer page; its prior browser data could not be cleared') from exc
                 employer_storage={'status':'cleared','origin':origin}
             window_state='retained' if self.existing_browser and mode=='headed' else 'headless'
+            if mode=='headed' and self.existing_browser:
+                try:
+                    window=await browser_command(endpoint,'Browser.getWindowForTarget',{'targetId':target})
+                    attachment['window_id']=window['windowId']
+                    self.service.session_browser_attachment(session['id'],self.host_id,attachment,target)
+                    window_state=await self.arrange_application_windows(page)
+                except Exception:window_state='layout_unconfirmed'
             if mode=='headed' and not self.existing_browser:
                 try:
                     window=await browser_command(endpoint,'Browser.getWindowForTarget',{'targetId':target})

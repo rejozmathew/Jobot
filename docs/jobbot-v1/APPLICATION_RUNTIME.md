@@ -1,6 +1,6 @@
 # Application runtime: ownership, helper map, and rationale
 
-## October 2: concurrent application tabs in the retained browser
+## October 2: concurrent application windows in the retained browser
 
 Settings `application_concurrency` selects 1–5 simultaneous queued applications,
 defaulting to 1. The selected model/provider remains a per-dispatch snapshot;
@@ -25,8 +25,17 @@ existing JobBot browser retains cookies, extension setup, history and personal t
 `workspace_host` retains one profile lock and supervises every session in that
 browser. Separate request connections and per-session operation locks allow
 target-scoped helpers to progress concurrently; calls within one application still
-serialize. Startup attachment work is serialized, and new tabs open in the
-background. `CDPPage.input_turn` briefly foregrounds the owned tab and serializes
+serialize. Startup attachment work is serialized. Each application opens a normal
+window in the same profile, with its own selected tab. The installed Simplify 3.1.8
+field filler waits for `visibilitychange` when the document is hidden; briefly
+foregrounding a background tab for a click is insufficient for an entire fill.
+`prepare_target` records the created window ID in the durable browser attachment,
+then `arrange_application_windows` tiles only active application windows within
+the screen's available area. Personal windows are not resized, and a tab moved
+to a different window does not transfer window ownership. Layout and input share
+the short input lock, preventing a resize midway through a trusted click. Layout
+failure remains diagnostic and does not end or prohibit application recovery.
+`CDPPage.input_turn` briefly foregrounds the owned tab and serializes
 trusted pointer/key input across that browser. Embedded-frame clicks use the same
 root-page turn. Focus emulation is enabled only for that turn and disabled afterward
 so occluded desktop pages receive trusted input as well. This prevents acknowledged background clicks from losing popup
@@ -39,6 +48,8 @@ sessions. Existing target, driver, writer and submission ownership checks remain
 Tests use synthetic databases and localhost forms with disposable profiles. They
 exercise atomic capacity, queue refill/pause, settings, target ownership, concurrent
 input, retained cookies, popup cleanup and same-attempt restart/host recovery.
+The real-browser fixtures run at 3 and 5 windows and include delayed field fills
+that wait while hidden, matching the installed extension's visibility behavior.
 These fixtures do not establish live ATS acceptance or the official Simplify
 extension's behavior during simultaneous autofill. Shared employer login state
 continues to be shared across tabs, as it is during ordinary manual browsing.
@@ -871,7 +882,7 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | harvest_runtime.py / managed_settings.py / jobbot-harvest.timer | Minute schedule checks launch fresh Hermes discovery only when the saved interval is due; dashboard settings own batch size and interval; the existing harvest lock prevents overlapping discovery; optional harvest_hermes_command selects a discovery profile, and unfinished private checkpoints carry verified leads into the next run for revalidation |
 | application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, pre-click external Apply and authentication target observation/handoff, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
 | managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed. The host-only target handoff atomically retains the prior owned tab and changes the session target after correlated Apply or authentication navigation; the latter retains the verified employer account URL. |
-| workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, durable same-attempt restart preparation through verified close/reopen, employer-origin cleanup for managed-process retries only, concurrent JSON dispatch per owned session in shared browsers; no model or five-second busy veto |
+| workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, durable same-attempt restart preparation through verified close/reopen, employer-origin cleanup for managed-process retries only, concurrent JSON dispatch per owned session in shared browsers. prepare_target creates a visible window per application and calls arrange_application_windows to tile only its owned windows for Simplify's visibility-dependent filling; no model or five-second busy veto. |
 | workspace_attachment.py / workspace_host.py / managed_sessions.session_browser_attachment | Optional existing-browser launcher and verified attachment; durable application-tab ownership, tab-only cleanup/recovery, and observed navigator.webdriver. Called by the manual launcher and local host; managed process lifecycle remains available. |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | static/jobbot.js / managed_api.py / managed.py.update_job_url | Operator URL corrections retain the job number, added date, outcomes, source references and old identity aliases; save normalized replacement aliases and an audit trail on the same job. Sorting and filters use existing job data in the dashboard. |

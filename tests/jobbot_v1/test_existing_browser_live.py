@@ -14,8 +14,8 @@ import pytest
 from job_applier.application_runtime import resolve_config, session_call, start
 from job_applier.cdp_client import CDPBrowser
 from job_applier.managed import Service
-from job_applier.workspace_host import browser_command, endpoint_info, ensure_host, workspace_record
-from job_applier.workspace_process import process_matches
+from job_applier.workspace_host import browser_command, endpoint_info, ensure_host, lock_path, workspace_record
+from job_applier.workspace_process import FileLock, process_matches
 from tests.jobbot_v1.test_local_browser_lifecycle import free_port, wait_for
 
 
@@ -115,7 +115,7 @@ def test_real_existing_browser_flag_tabs_retry_restart_and_crash(tmp_path):
         # the durably recorded abandoned application tab before releasing it.
         host=json.loads(workspace_record(service,'shared')['host_identity_json'])
         os.kill(host['pid'],signal.SIGTERM)
-        wait_for(lambda:not process_matches(host))
+        wait_for(lambda:not process_matches(host) and not FileLock.is_locked(lock_path(workspace)))
         assert process.poll() is None
         ensure_host(cfg,'shared')
         wait_for(lambda:service.session(b['session_id'])['ended_at'])

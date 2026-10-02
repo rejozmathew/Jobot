@@ -7,7 +7,10 @@ Under **Settings → Application model**, **Simultaneous applications** selects
 when using a local model and a larger value when desired for another executor.
 This is a saved operator choice, not an automatic model-dependent restriction.
 
-The existing-mode JobBot browser opens a separate owned tab for each application.
+The existing-mode JobBot browser opens a separate window for each application,
+with its application tab selected. JobBot tiles its application windows so each
+page stays visible between input actions; Simplify waits before filling fields
+when a document is hidden. Personal windows are not rearranged.
 Its profile, logins, history and Simplify installation stay in place; no additional
 profiles are required. Each application gets its own model conversation, deadline,
 progress and outcome. Clicks and keyboard input briefly take turns in the foreground;
@@ -16,8 +19,8 @@ slot after its executor and application-tab cleanup finish. Lowering capacity
 lets existing work finish. Pause JobBot drains all current applications without
 starting new ones. Individual Stop and Restart affect only their owned tabs.
 
-Parallel input and lifecycle behavior are tested against synthetic localhost forms
-at 2 and 5 tabs. Official Simplify autofill and employer-specific simultaneous
+Parallel input, visibility-dependent autofill and lifecycle behavior are tested
+against synthetic localhost forms at 3 and 5 windows. Official Simplify autofill and employer-specific simultaneous
 login/verification behavior require ordinary application evidence. Tabs on one
 employer origin share its login state, just as in manual browsing.
 
