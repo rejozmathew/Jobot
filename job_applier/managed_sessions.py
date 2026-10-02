@@ -23,13 +23,13 @@ def application_job(db, attempt, job):
     """Project the host-verified route for every helper without rewriting intake."""
     session=local_session(db,attempt['id'])
     if not session:return dict(job)
-    route=json.loads(session['metadata_json']).get('application_route_url')
+    metadata=json.loads(session['metadata_json']);route=metadata.get('application_route_url')
     if not route:return dict(job)
     from .managed_identity import job_key
     owned=db.execute("SELECT identity_key FROM owned_targets WHERE attempt_id=? AND target_id=? AND state='open'",
                      (attempt['id'],session['target_id'])).fetchone()
     if not owned or owned['identity_key']!=job_key(route):return dict(job)
-    return dict(job,posting_url=job['url'],url=route)
+    return dict(job,posting_url=job['url'],url=route,account_url=metadata.get('application_account_url') or route)
 
 
 class SessionServices:
@@ -222,6 +222,7 @@ class SessionServices:
                 asset_id=json.loads(s['request_key'])[3]
                 db.execute('INSERT INTO document_selections VALUES (?,?,?,?,?,?)',(uid(),asset_id,job['id'],attempt_id,'selected',now))
             meta=json.loads(s['metadata_json']);meta['readiness']=readiness
+            meta.pop('browser_restart',None)
             db.execute("UPDATE application_sessions SET attempt_id=?,target_id=?,state='connected',reason=NULL,connected_at=COALESCE(connected_at,?),driver_seen_at=?,metadata_json=? WHERE id=?",
                        (attempt_id,target_id,now,now,dumps(meta),s['id']))
             db.execute("UPDATE jobs SET status='running',started_at=COALESCE(started_at,?),updated_at=? WHERE id=?",(now,now,job['id']))
@@ -252,9 +253,39 @@ class SessionServices:
             db.execute('UPDATE application_sessions SET metadata_json=?,target_id=COALESCE(?,target_id) WHERE id=?',
                        (dumps(meta),target_id,session_id))
 
+    def request_session_restart(self, session_id, host_id):
+        """Persist host-owned replacement before requesting asynchronous closure."""
+        with self.tx() as db:
+            s=self._get(db,'application_sessions',session_id)
+            if self._get(db,'browser_workspaces',s['workspace_id'])['host_id']!=host_id:raise ProtocolError('stale_host')
+            meta=json.loads(s['metadata_json'])
+            if s['ended_at'] or self._get(db,'runs',s['run_id'])['control']!='running':return dict(s)
+            if meta.get('browser_restart'):return dict(s)
+            meta['browser_restart']={'phase':'closing','requested_at':self.now()}
+            db.execute("UPDATE application_sessions SET state='preparing',reason='Replacing owned application target',metadata_json=? WHERE id=?",
+                       (dumps(meta),session_id))
+            return dict(self._get(db,'application_sessions',session_id))
+
+    def session_restart_closed(self, session_id, host_id):
+        """Host calls only after verified tab/process closure; keep the same attempt."""
+        with self.tx() as db:
+            s=self._get(db,'application_sessions',session_id)
+            if self._get(db,'browser_workspaces',s['workspace_id'])['host_id']!=host_id:raise ProtocolError('stale_host')
+            meta=json.loads(s['metadata_json'])
+            if s['ended_at'] or self._get(db,'runs',s['run_id'])['control']!='running':return False
+            if not meta.get('browser_restart'):return False
+            now=self.now()
+            db.execute("UPDATE managed_actions SET ended_at=?,status='aborted',uncertainty=1 WHERE attempt_id=? AND ended_at IS NULL",(now,s['attempt_id']))
+            db.execute("UPDATE application_attempts SET writer_state='idle' WHERE id=?",(s['attempt_id'],))
+            db.execute("UPDATE owned_targets SET state='closed',evidence='Owned target closed for restart',updated_at=? WHERE attempt_id=? AND state!='closed'",(now,s['attempt_id']))
+            db.execute('DELETE FROM account_coordination WHERE session_id=?',(session_id,))
+            meta['browser_restart']={'phase':'opening','requested_at':meta['browser_restart']['requested_at']}
+            db.execute("UPDATE application_sessions SET target_id=NULL,reason='Reopening owned application target',metadata_json=? WHERE id=?",(dumps(meta),session_id))
+            return True
+
     def handoff_target(self, attempt_id, *, worker_id, fence, current_target_id,
                        new_target_id, url, evidence, expected_url=None, source_url=None, navigation_chain=None,
-                       _history_proof=None):
+                       authentication=False, _history_proof=None):
         """Atomically move one local session to a correlated application target."""
         from .managed_identity import canonical_url,job_key,RELATED,is_same_application_scope
         from urllib.parse import urlsplit,urlunsplit
@@ -332,6 +363,10 @@ class SessionServices:
                            (safe,now,current['id']))
                 db.execute('INSERT INTO target_history VALUES (?,?,?,?,?)',(uid(),current['id'],'preserved',safe,now))
             meta=json.loads(session['metadata_json']);attachment=meta.get('browser_attachment')
+            if authentication and correlated:
+                meta.setdefault('application_account_url',meta.get('application_route_url') or job['url'])
+            elif source_url is None or (navigation_chain and urlsplit(anchor).netloc!=urlsplit(canonical).netloc):
+                meta.pop('application_account_url',None)
             meta['application_route_url']=canonical
             if _history_proof is not None:meta['route_history_anchor']=_history_proof['replacement']
             if source_url is None or (navigation_chain and urlsplit(anchor).netloc!=urlsplit(canonical).netloc):
@@ -366,7 +401,8 @@ class SessionServices:
                     self._complete(db,a,outcome,reason,quiescent=True,finish_key=hashlib.sha256(dumps([outcome,reason]).encode()).hexdigest(),reconciled=True)
                 if a['completed_at']:paused=False
             state='paused' if paused else 'finished' if s['state']=='finishing' else 'failed' if not s['attempt_id'] else 'stopped'
-            db.execute('UPDATE application_sessions SET state=?,reason=?,ended_at=?,target_id=NULL WHERE id=?',(state,reason,None if paused else now,s['id']))
+            meta=json.loads(s['metadata_json']);meta.pop('browser_restart',None)
+            db.execute('UPDATE application_sessions SET state=?,reason=?,ended_at=?,target_id=NULL,metadata_json=? WHERE id=?',(state,reason,None if paused else now,dumps(meta),s['id']))
             db.execute('DELETE FROM account_coordination WHERE session_id=?',(s['id'],))
             if s['run_id']:
                 db.execute('UPDATE runs SET control=?,state=?,ended_at=? WHERE id=?',('paused' if paused else 'stopped','active' if paused else 'completed',None if paused else now,s['run_id']))

@@ -238,3 +238,47 @@ This change fixes one reproduced shared handoff; it does not establish a
 ten-minute application duration or an unattended end-to-end speedup. Later
 ordinary applications must measure those outcomes with source and assistance
 provenance. Private application records and screenshots remain outside Git.
+
+
+### Self-improvement #006 — 2026-10-02
+
+Tag: `self-improvement-006-2026-10-02`. The annotated tag identifies the validated,
+deployed source checkpoint and exact test counts. Matching private Ubuntu notes
+retain deployment time, source hashes, backups and synthetic validation logs.
+
+Recent attempts exposed delayed owned-tab closure being treated as an interrupted
+application, unknown writer state persisting without an actual writer, and an
+observed authentication redirect losing application identity. The existing
+persistence instructions were present; adding more generic persistence language
+would not repair these runtime failures. Completed attempts also included genuine
+closed postings, a missing required answer, and an accepted submission. The runs
+used differing model effort and unmatched jobs, so they do not establish a model
+quality ranking.
+
+Owned restart now persists through delayed closure and reopening failures in the
+same session and attempt. It survives host reconstruction and preserves submission
+evidence and the original deadline; pause, stop and expiry retain their existing
+cleanup behavior. Stable explicit receipts showing no participating writer can
+clear a stale unknown state without bypassing active writers or unresolved frames.
+Observed authentication continuations use shared navigation correlation and retain
+the employer account reference while projecting the current login route. The
+shared browser and iCIMS continuation paths use this behavior. Unobserved unrelated
+login navigation does not establish ownership.
+
+The execution brief and canonical skill make user corrections actionable in the
+current turn and explain pending restart status. No new execution restriction,
+retry limit, approval requirement or model configuration change is introduced.
+
+Synthetic regressions first reproduced five restart/writer failures and two
+login-continuity failures. Validation includes actual isolated-browser navigation,
+existing target handoffs, lifecycle/deadline/account checks and the full managed
+suite, delegated to authenticated Antigravity with independently inspected logs.
+These fixes do not establish an end-to-end submission-rate or speed improvement;
+that requires subsequent application evidence with source and assistance context.
+
+Windows validation: 1,100 passed and 143 skipped in the final managed suite.
+The explicit browser navigation suite passed 27 tests. Combined recovery checks
+passed 116 tests with one incorrect new timeout-label assertion; correcting that
+assertion to the existing interrupted outcome with a distinct timeout reason
+passed in the subsequent 44-test account/restart suite and final managed suite.
+Ubuntu validation and deployment verification are recorded in the annotated tag.

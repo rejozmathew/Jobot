@@ -255,7 +255,7 @@ class IcimsRunner:
                         async def activate_entry():return await click_control(self.page,target)
                         async with self.batch('advance'):
                             result=await click_and_follow_external_apply(None,self.page,entry,activate_entry,
-                                self,self.owner,self.target,cdp_url=self.config['cdp_url'])
+                                self,self.owner,self.target,cdp_url=self.config['cdp_url'],control_target=target)
                             self.actions['stage_advance']+=int(result.get('clicked'));self.trace.append('open_application')
                         if not result.get('clicked'):return self.result('inspection_required',result.get('reason','advance_unconfirmed'))
                         handoff=result.get('target_handoff')
@@ -296,14 +296,28 @@ class IcimsRunner:
                     return self.result('inspection_required','unassociated_validation')
                 control=native.get('apply') or native.get('continue')
                 if control and control.get('enabled'):
+                    from .application_runtime import click_and_follow_external_apply
+                    target={'ref':control['ref']}
+                    entry=await inspect_control(self.page,target)
+                    async def activate_continue():return await click_control(self.page,target)
                     async with self.batch('advance'):
                         await self.advance_receipt(signature=fingerprint)
-                        result=await click_control(self.page,{'ref':control['ref']})
+                        result=await click_and_follow_external_apply(None,self.page,entry,activate_continue,
+                            self,self.owner,self.target,cdp_url=self.config['cdp_url'],control_target=target)
                         if not result.get('clicked') and result.get('execution')=='not_executed':
                             await self.advance_receipt(clear=True)
                         self.actions['stage_advance']+=int(result.get('clicked'));self.trace.append('stage_advance:'+stage)
                         await self.control()
                     if not result.get('clicked'):return self.result('inspection_required',result.get('reason','advance_unconfirmed'))
+                    if result.get('target_handoff'):
+                        handoff=result['target_handoff']
+                        if handoff['target_id']!=self.target:
+                            result=self.result('continue','application_target_handoff',target_handoff=handoff)
+                            result['next_operation']={'operation':'browser','parameters':{'method':'snapshot'}}
+                            return result
+                        self.set_package(await asyncio.to_thread(self.call,'application_context',
+                            attempt_id=self.owner['attempt_id'],worker_id=self.owner['worker_id']))
+                        prior=None
                     await asyncio.sleep(.15);await self.control();continue
                 control=native.get('submit',{})
                 if control.get('enabled') or stage=='confirmation':

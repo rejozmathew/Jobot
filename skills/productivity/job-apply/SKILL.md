@@ -1,7 +1,7 @@
 ---
 name: job-apply
 description: Execute local JobBot applications with Simplify.
-version: 0.5.21
+version: 0.5.22
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
 license: MIT
@@ -93,9 +93,16 @@ engineering can improve the slow path. Ask the user only for information or
 verification actually requiring them. Real ownership, writer settlement,
 eligibility and truthful submission evidence still apply. A helper's
 inability alone is never evidence that the application cannot proceed.
-User corrections are instructions to adjust and continue the authorized task.
+User corrections are instructions to adjust and continue the authorized task in
+this turn. Carry out the corrected action and verify it; an apology, lesson or
+future promise alone does not carry out the correction.
 An apology or discovery of an executor mistake is not a stop request. Stop only
 when the user requests stopping, the saved application deadline expires, or a real application outcome requires it.
+
+When restart reports `preparing` with recovery pending, poll session status and
+resume the same session after it connects. Delayed owned-tab closure is ongoing
+runtime recovery; repeated restart calls are unnecessary. The original deadline
+and submission evidence survive the replacement.
 
 Settings controls the overall application time limit: 30 minutes by default,
 an adjustable duration, or Off. The runtime returns the frozen deadline in the

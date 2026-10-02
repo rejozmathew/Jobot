@@ -59,9 +59,10 @@ class AccountServices:
     def _job_account_namespace(self,db,job,requested=None):
         # Only verified job identity or an operator-verified alias confers scope.
         # Free-form account_namespace metadata is a request, never its own proof.
-        expected=urlsplit(job['url']).hostname
+        account_url=dict(job).get('account_url') or job['url']
+        expected=urlsplit(account_url).hostname
         if job['namespace'] and job['requisition_id']:
-            key=job_key(job['url'],job['namespace'],job['requisition_id'])
+            key=job_key(account_url,job['namespace'],job['requisition_id'])
             if db.execute('SELECT 1 FROM job_identity_keys WHERE job_id=? AND identity_key=?',(job['id'],key)).fetchone():
                 expected=valid_namespace(job['namespace'])
         expected=self._namespace(db,expected)

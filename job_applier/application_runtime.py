@@ -228,6 +228,10 @@ def handle(service, session_id, *, include_context=True):
                 (service.attempt(state['attempt_id'])['settings_json'] if state['attempt_id'] else service.settings_view()['values'])))
     else:
         result['next_operation']={'operation':'status','parameters':{},'instruction':'Wait for session readiness while reading the detected ATS reference.'}
+    if state['metadata'].get('browser_restart'):
+        result['recovery']=dict(state['metadata']['browser_restart'],operation='restart',status='pending')
+        result['next_operation']={'operation':'status','parameters':{},
+            'instruction':'Owned browser recovery is continuing within the original deadline. Read status until connected, then inspect and resume this same attempt. Delayed tab closure is not an application outcome.'}
     if state['metadata'].get('readiness',{}).get('recovery'):
         result['startup_recovery']=state['metadata']['readiness']['recovery']
     return result
@@ -328,15 +332,23 @@ def external_apply_destination(control,current_url):
     return href if _public_destination(href) else None
 
 
-async def click_and_follow_external_apply(browser,page,control,activate,client,ownership,target_id,*,cdp_url=None):
-    """Arm before Apply, then hand one correlated destination to the owned session."""
+async def click_and_follow_external_apply(browser,page,control,activate,client,ownership,target_id,*,cdp_url=None,control_target=None):
+    """Follow observed Apply or authentication navigation in the owned session."""
     import asyncio
     from .cdp_client import arm_target_observation,wait_for_apply_target,NavigationTrace
     current=await page.evaluate('location.href')
     destination=external_apply_destination(control,current)
     label=str(control.get('text') or control.get('label') or '')
     apply_control=not control.get('submission_control') and bool(re.match(r'^apply\b',label,re.I))
-    navigation=await NavigationTrace.start(page,current) if apply_control else None
+    authentication=False
+    if not control.get('submission_control') and re.fullmatch(r'\s*(?:next|continue|sign\s*in|log\s*in|create\s+account)\s*',label,re.I):
+        from .browser_controls import FORM
+        from .browser_frames import resolve_control
+        locator=control_target or ({'ref':control['ref']} if control.get('ref') else {})
+        document,_=await resolve_control(page,locator) if locator else (page,{})
+        state=await document.evaluate_function(FORM,{'method':'observe'})
+        authentication=(state.get('stage') or {}).get('name') in ('email_entry','sign_in','create_account','verification')
+    navigation=await NavigationTrace.start(page,current) if apply_control or authentication else None
     observation=await asyncio.to_thread(arm_target_observation,cdp_url or browser.base_url,target_id,destination or current) if destination or navigation else None
     try:
         result=await activate()
@@ -349,8 +361,8 @@ async def click_and_follow_external_apply(browser,page,control,activate,client,o
         if found.get('navigation_chain'):
             proof={'source_url':current,'navigation_chain':found['navigation_chain']}
         handoff=client.call('handoff_target',**ownership,current_target_id=target_id,
-            new_target_id=found['target_id'],url=found['url'],**proof,
-            evidence='Observed Apply '+found['kind']+' from the owned document and correlated navigation')
+            new_target_id=found['target_id'],url=found['url'],authentication=authentication,**proof,
+            evidence='Observed '+('authentication' if authentication else 'Apply')+' '+found['kind']+' from the owned document and correlated navigation')
         return dict(result,target_handoff=handoff)
     finally:
         if navigation:navigation.close()
@@ -695,7 +707,7 @@ def browser_action(config,client,ownership,package,target_id,params):
                     click_info=await inspect_control(page,{'ref':params['ref']})
                     async def activate_native_ref():
                         return await click_control(page,{'ref':params['ref']},step=observed['step'],page_signature=observed['page_signature'])
-                    result=await click_and_follow_external_apply(browser,page,click_info,activate_native_ref,client,ownership,target_id)
+                    result=await click_and_follow_external_apply(browser,page,click_info,activate_native_ref,client,ownership,target_id,control_target={'ref':params['ref']})
                 succeeded=bool(result.get('clicked') or result.get('status')=='clicked')
                 if succeeded and params.get('source')!='simplify' and not observed.get('auth'):
                     result.update(await remember_answers(page_name=observed.get('step','form'),source='executor_click'))
@@ -716,7 +728,7 @@ def browser_action(config,client,ownership,package,target_id,params):
                 await remember_answers()
                 click_info=await inspect_control(page,{'selector':selector})
                 async def activate_native_selector():return await click_control(page,{'selector':selector})
-                result=await click_and_follow_external_apply(browser,page,click_info,activate_native_selector,client,ownership,target_id)
+                result=await click_and_follow_external_apply(browser,page,click_info,activate_native_selector,client,ownership,target_id,control_target={'selector':selector})
                 succeeded=result.get('clicked') is True
                 if succeeded:result.update(await remember_answers(source='executor_click'))
                 return result

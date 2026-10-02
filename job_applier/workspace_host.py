@@ -337,7 +337,28 @@ class WorkspaceHost:
     def prepare(self, session):
         try:
             with self.busy:
+                session=self.service.session(session['id'])
+                with self.service.tx() as db:control=self.service._get(db,'runs',session['run_id'])['control']
+                if session['ended_at']:return
+                if control!='running':
+                    self.stop_session(session,session['reason'] or control,paused=control in ('pause_requested','paused'))
+                    return
                 if self.session_deadline(session).expired():raise ProtocolError('application_time_limit')
+                recovery=json.loads(session['metadata_json']).get('browser_restart')
+                if recovery:
+                    # Close acknowledgements and browser readiness can span helper
+                    # calls. The durable preparing state prevents the monitor from
+                    # mistaking our own delayed close for an external interruption.
+                    if self.existing_browser:asyncio.run(self.close_application_tabs(session))
+                    elif self.browser:
+                        self.browser.stop()
+                        if process_matches(self.browser.identity):raise ProtocolError('owned_browser_stop_unconfirmed')
+                        self.browser=None
+                    if not self.service.session_restart_closed(session['id'],self.host_id):
+                        with self.service.tx() as db:control=self.service._get(db,'runs',session['run_id'])['control']
+                        self.stop_session(session,control,paused=control in ('pause_requested','paused'))
+                        return
+                    session=self.service.session(session['id'])
                 self.start_browser()
                 target,ready=asyncio.run(self.prepare_target(session))
                 current=self.service.session(session['id'])
@@ -347,7 +368,23 @@ class WorkspaceHost:
                 self.service.session_connected(session['id'],self.host_id,target,ready)
         except Exception as exc:
             detail=error_detail(exc)
-            self.stop_session(session,detail['code']+': '+detail['detail'])
+            current=self.service.session(session['id'])
+            meta=json.loads(current['metadata_json'])
+            with self.service.tx() as db:control=self.service._get(db,'runs',current['run_id'])['control']
+            if meta.get('browser_restart') and not current['ended_at'] and control=='running' and not self.session_deadline(current).expired():
+                # Retry only owned browser preparation, never replay form or Submit
+                # actions. The saved application deadline still ends recovery.
+                with self.service.tx() as db:
+                    latest=self.service._get(db,'application_sessions',current['id'])
+                    meta=json.loads(latest['metadata_json'])
+                    if meta.get('browser_restart') and not latest['ended_at']:
+                        meta['browser_restart']['last_error']=detail['code']
+                        db.execute('UPDATE application_sessions SET metadata_json=?,reason=? WHERE id=?',
+                            (json.dumps(meta),'Browser recovery pending: '+detail['code'],current['id']))
+                if not hasattr(self,'preparation_retry_at'):self.preparation_retry_at={}
+                self.preparation_retry_at[current['id']]=time.monotonic()+1
+            else:
+                self.stop_session(current,detail['code']+': '+detail['detail'],paused=control in ('pause_requested','paused'))
         finally:self.preparing.discard(session['id'])
 
     async def close_application_tabs(self,session):
@@ -444,6 +481,8 @@ class WorkspaceHost:
         if request.get('operation')=='shutdown':
             if self.active_session():raise ProtocolError('workspace_still_occupied')
             self.exit.set();return {'host_shutdown_requested':True}
+        if request.get('operation')=='restart' and session['state']=='preparing' and json.loads(session['metadata_json']).get('browser_restart'):
+            return handle(self.service,session['id'],include_context=False)
         if session['state'] not in ('connected','waiting'):raise ProtocolError('local_session_not_connected')
         if self.session_deadline(session).expired():
             from .application_deadline import request_stop
@@ -460,20 +499,14 @@ class WorkspaceHost:
         if op in ('context','report'):
             return client.call('application_context' if op=='context' else 'attempt_report',attempt_id=attempt['id'])
         if op=='restart':
-            # Reuse pause/attach: termination proves cancellation, then the host
-            # opens a new target with the same account/profile/session/attempt.
-            # Mark preparing first so the monitor cannot mistake this for a crash.
-            self.preparing.add(session['id'])
-            try:
-                client.call('event',**own,event_id=uid(),event_type='recovery',observed_at=service.now(),
-                    payload={'operation':'restart','evidence':'Executor requested recovery of the owned browser',
-                             'next_step':'Reopen the assigned job in the same attempt and continue'})
-                self.stop_session(session,'Executor requested browser recovery',paused=True)
-                resumed=self.service.attach_session(session['id'],session['driver_id'])
+            client.call('event',**own,event_id=uid(),event_type='recovery',observed_at=service.now(),
+                payload={'operation':'restart','evidence':'Executor requested recovery of the owned browser',
+                         'next_step':'Reopen the assigned job in the same attempt and continue'})
+            resumed=self.service.request_session_restart(session['id'],self.host_id)
+            if resumed['state']=='preparing':
+                self.preparing.add(session['id'])
                 thread=threading.Thread(target=self.prepare,args=(resumed,),daemon=True)
                 thread.start();self.threads.append(thread)
-            except Exception:
-                self.preparing.discard(session['id']);raise
             return {**handle(service,session['id'],include_context=False),
                     'instruction':('The application tab is reopening; the shared browser and your other tabs stay open. '
                         if self.existing_browser else 'The owned browser is restarting. ')+
@@ -557,7 +590,8 @@ class WorkspaceHost:
                 raise ProtocolError('orphan_browser_still_running')
             previous=self.active_session()
             self.service.host_registered(self.workspace_id,self.host_id,process_identity(os.getpid()))
-            if self.existing_browser and previous and json.loads(previous['metadata_json']).get('browser_attachment'):
+            restarting=bool(previous and previous['state']=='preparing' and json.loads(previous['metadata_json']).get('browser_restart'))
+            if self.existing_browser and previous and json.loads(previous['metadata_json']).get('browser_attachment') and not restarting:
                 # Recover even a pre-readiness target from a lost host. For a
                 # preparing session retain the request, then open a fresh tab.
                 asyncio.run(self.close_application_tabs(previous))
@@ -624,6 +658,7 @@ class WorkspaceHost:
                         elif self.browser and not self.browser.alive() and session['state'] in ('connected','waiting'):
                             self.stop_session(session,'Owned browser exited; inspect exact submission state before retry')
                         elif session['state']=='preparing' and session['id'] not in self.preparing:
+                            if time.monotonic()<getattr(self,'preparation_retry_at',{}).get(session['id'],0):continue
                             self.preparing.add(session['id'])
                             thread=threading.Thread(target=self.prepare,args=(session,),daemon=True);thread.start();self.threads.append(thread)
                         elif self.existing_browser and session['state'] in ('connected','waiting') and time.monotonic()-last_tab_check>2 and self.busy.acquire(blocking=False):

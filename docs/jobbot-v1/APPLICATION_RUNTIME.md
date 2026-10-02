@@ -1,5 +1,27 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 2: recovery continuity
+
+`workspace_host` persists an owned restart as `preparing` before requesting tab
+closure. Delayed closure and reopening errors remain resumable preparation;
+ordinary supervision retries while the saved deadline and operator control allow
+it. Verified closure releases writer state, then the same session/attempt reopens.
+A host restart can resume that durable state. Status exposes the recovery phase
+and latest error. Submission evidence and the original deadline survive.
+
+`managed_runtime.browser_observe` can settle a prior unknown writer when stable
+receipts explicitly show that every accepted document is a nonparticipant, with
+no pending activity, unresolved frames or unfinished managed action. Unknown
+participation and actual pending writers still need their existing settlement.
+
+The shared `application_runtime.click_and_follow_external_apply` also observes
+Next/Continue/sign-in navigation from an inspected authentication stage. Its
+callers are shared browser ref/selector activation and iCIMS entry/continuation.
+The existing navigation trace and handoff checks establish the current route;
+`managed_sessions.application_job` retains the verified employer account URL for
+account namespace selection across this authentication transition. Intake URLs
+remain unchanged. Unobserved login navigation does not establish ownership.
+
 ## September 28: delayed same-origin form navigation
 
 `managed_runtime.browser_observe` uses `route_history.reconcile_history` before
@@ -15,7 +37,7 @@ well as the latest source. Anchor comparison and route promotion are atomic.
 Writer settlement, selected autofill strategy, saved deadline, account principal
 and submission evidence retain their existing responsibilities. Missing history
 leaves ordinary recovery available. Cross-host Apply correlation remains in its
-existing helper; shared SSO account identity is a separate outstanding issue.
+existing helper; observed authentication continuity is described above.
 The iCIMS runner refreshes the projected context before reading an embedded form
 after an observed route change, including within the same helper call.
 Its posting Apply path also uses `application_runtime.click_and_follow_external_apply`
@@ -799,14 +821,14 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | Component | Scope and consumer |
 |---|---|
 | email_routing.py | Optional private Greenhouse route resolution, copied profile/contact-email answers and mailbox guidance; application_brief, managed_context, greenhouse_fast and hermes_gmail call it. No mailbox access or persistent writes; absent/disabled configuration preserves default behavior. |
-| managed.py / migration 21 / managed_redaction.provenance_text / managed_views.py | Optional per-source process/run observations and per-queue-entry origin; numeric run identifiers remain intact, secret-bearing labels are redacted, and missing attribution does not affect eligibility. Dashboard/manual CLI/application startup and discovery supply process identities at their own boundary; rediscovery retains prior observations. See SOURCE_PROCESS_ATTRIBUTION.md. |
+| managed.py / migration 21 / managed_redaction.provenance_text / managed_views.py | Optional per-source process/run observations and per-queue-entry origin; numeric run identifiers remain intact, secret-bearing labels are redacted, and missing attribution does not affect eligibility. Dashboard/manual CLI/application startup and discovery supply process identities at their own boundary; rediscovery retains prior observations. Operator `reconcile_job_route` validates a bridge source/evidence before adding an external application alias and changing only a safe, non-running job's future execution URL; Easy Apply retains the posting URL. See SOURCE_PROCESS_ATTRIBUTION.md. |
 | managed_queue.py / queue_runtime.py / migration 22 | Automatic active-intake pickup from worker and Run next; serial execution and six-attempt retry lineage. Dashboard queue_enqueue(start_now=True) atomically promotes the chosen job and wakes the worker, bypassing its retry delay; durable immediate requests run in request order even with automatic scheduling paused, without interrupting active applications or rewriting attempt history. |
 | hermes_desktop.py / application_brief.py | Optional application dispatcher transport creates a native session in the existing Hermes desktop backend; desktop resume and correction use that same owner. A private receipt reconnects the monitor without replaying the prompt; queue recovery checks the native turn after a monitor crash. The brief exposes the exact selected candidate email for comparison with observed form values. |
 | managed_discovery.py / migration 20 | Selected-instance discovery run/check history and last/next-run reporting for the dashboard and harvest scheduler; no application dispatch or browser ownership |
 | harvest_runtime.py / managed_settings.py / jobbot-harvest.timer | Minute schedule checks launch fresh Hermes discovery only when the saved interval is due; dashboard settings own batch size and interval; the existing harvest lock prevents overlapping discovery; optional harvest_hermes_command selects a discovery profile, and unfinished private checkpoints carry verified leads into the next run for revalidation |
-| application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
-| managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed |
-| workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, same-attempt restart through pause/attach, employer-origin cleanup before retry navigation, queued JSON dispatch on the physical browser; no model or five-second busy veto |
+| application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, pre-click external Apply and authentication target observation/handoff, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
+| managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed. The host-only target handoff atomically retains the prior owned tab and changes the session target after correlated Apply or authentication navigation; the latter retains the verified employer account URL. |
+| workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, durable same-attempt restart preparation through verified close/reopen, employer-origin cleanup before retry navigation, queued JSON dispatch on the physical browser; no model or five-second busy veto |
 | workspace_attachment.py / workspace_host.py / managed_sessions.session_browser_attachment | Optional existing-browser launcher and verified attachment; durable application-tab ownership, tab-only cleanup/recovery, and observed navigator.webdriver. Called by the manual launcher and local host; managed process lifecycle remains available. |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | static/jobbot.js / managed_api.py / managed.py.update_job_url | Operator URL corrections retain the job number, added date, outcomes, source references and old identity aliases; save normalized replacement aliases and an audit trail on the same job. Sorting and filters use existing job data in the dashboard. |
@@ -820,7 +842,7 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | form_audit.py | Pure compact projection of the shared inventory; `browser(method="audit")`, post-Simplify handoffs, snapshots and iCIMS use the same required/invalid/private/optional classification. No independent scanner, writer permission or outcome authority. |
 | workday_fast.py | Bounded Workday supervisor, direct application entry and source-choice recovery; native and CLI call the same advance function |
 | workday_auth.py | Workday account decisions inside the supervisor; shared account record/coordination and private filler, no model or password storage duplication |
-| cdp_client.py | Exact-target connection, verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
+| cdp_client.py | Exact-target connection, correlated same-tab/popup observation for an armed external Apply destination (including about:blank transition), verified document reload, structured evaluate_function arguments, and validated native pointer activation shared by the runner and local browser recovery |
 | browser_controls.py / browser_helpers/form_controls.js | Shared form reader including Apply, committed-selection verification, posting metadata, private code groups and remaining_submission_work; iCIMS entry guidance; used by submission, browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_queue._settle_reconciled_queue | Called inside successful manual reconciliation; atomically settles only queued rows for the related job and same identity. Existing stopped-session/newer-attempt checks and dispatched/history rows remain intact. |

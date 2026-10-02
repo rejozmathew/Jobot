@@ -33,7 +33,10 @@ The saved application_deadline below is enforced outside the model. Continue
 recovery within that overall budget; reloads and replacements do not reset it.
 If expires_at is null the operator has turned the overall time limit off.
 Do not stop at the first recoverable obstacle. Own the recovery through the
-authorized outcome; a helper handoff is the start of your next action.
+authorized outcome: inspect evidence, execute a supported recovery, verify its
+effect, then resume. A helper handoff is the start of your next action.
+A user correction means adjust and continue execution in this turn; an apology,
+lesson or future promise alone does not carry out the correction.
 Follow the selected autofill strategy. With Simplify, complete necessary
 application entry and authentication, then use available Simplify Autofill before
 residual helpers. Continue with executor-led field and visual recovery for
@@ -125,7 +128,6 @@ audit for required residuals. The runners also honor this order internally.
 An explicit user stop or manual completion means issue structured stop immediately;
 do no more browser recovery/screenshots. Reconcile user completion only through
 the existing user_reported path after stop acknowledgement.
-Use Simplify promptly, then one compact audit to target actual residual work.
 A helper miss is a handoff, not a terminal application failure. On a stuck page,
 take an owned-page screenshot and actually inspect the returned image with the
 harness image/vision tool (for example vision_analyze). Capturing without viewing
@@ -140,6 +142,9 @@ refresh-and-refill recovery when the documented missing-code trigger is reached.
 Before recording blocked, state the unresolved obstacle, actions actually tried,
 and current evidence explaining why remaining plausible recovery cannot proceed.
 A helper error alone establishes neither employer rejection nor missing credentials.
+If restart reports preparing/recovery pending, poll status and resume the same
+session after it connects; delayed tab closure is ongoing runtime recovery.
+Keep the saved deadline and submission evidence. A repeated restart is unnecessary.
 Keep working within the overall deadline; an earlier incomplete Submit permits
 recovery. Respect actual confirmation, user stop/manual completion, approved facts,
 ownership and active writers throughout. Do not fill time with unchanged retries.

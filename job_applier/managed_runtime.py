@@ -234,13 +234,19 @@ class RuntimeServices:
                 prior_writer=a['writer_state']
                 has_active_autofill=(prior_writer in ('active','unknown') or bool(unended_writer))
                 documents=obs.get('writer_documents') or ([{'document_id':obs['writer_document_id'],
-                    'pending':bool(obs.get('writer_pending'))}] if obs.get('writer_document_id') else [])
+                    'pending':bool(obs.get('writer_pending')),'participant':obs.get('writer_participant')}] if obs.get('writer_document_id') else [])
                 previous=db.execute("SELECT payload_json FROM managed_events WHERE attempt_id=? AND json_extract(payload_json,'$.operation')='writer_documents' ORDER BY rowid DESC LIMIT 1",(attempt_id,)).fetchone()
                 prior_documents=json.loads(previous[0]).get('writer_documents',[]) if previous else []
                 old_ids={d.get('document_id') for d in prior_documents if d.get('pending')} or {d.get('document_id') for d in prior_documents}
                 new_ids={d.get('document_id') for d in documents}
                 document_cancelled=bool(old_ids and new_ids and None not in old_ids|new_ids and not old_ids&new_ids and
                     not obs.get('frame_diagnostics') and not obs.get('writer_pending'))
+                # Unknown can originate from an unstable read or a failed Stop
+                # lookup, not an actual autofill dispatch. The document receipt
+                # explicitly records whether a writer ever participated.
+                nonparticipant=bool(documents and all(d.get('document_id') and d.get('participant') is False and not d.get('pending') for d in documents)
+                    and not obs.get('frame_diagnostics') and not any(obs.get('activity',{}).values())
+                    and (document_cancelled or not any(d.get('pending') for d in prior_documents)))
 
                 if unended_writer:
                     new_writer='active'
@@ -257,7 +263,7 @@ class RuntimeServices:
                         for k in ('create_account_autofill','create_account','sign_in')))
                     explicit_settlement=status=='unsupported' and obs.get('writer_safe') and not any(
                         obs.get('activity',{}).get(k) for k in ('busy_indicator','explicit_writer'))
-                    if stable and (document_cancelled or obs.get('settled_evidence') or obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready or explicit_settlement)):
+                    if stable and (document_cancelled or nonparticipant or obs.get('settled_evidence') or obs.get('panel') and (status in ('complete','needs_review','ready') or known_account_ready or explicit_settlement)):
                         new_writer='idle'
                         quiescent=True
                     else:
