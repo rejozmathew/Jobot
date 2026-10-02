@@ -401,7 +401,9 @@ class WorkspaceHost:
             with self.operation_lock(session['id']), (self.busy if self.existing_browser else nullcontext()):
                 session=self.service.session(session['id'])
                 with self.service.tx() as db:control=self.service._get(db,'runs',session['run_id'])['control']
-                if session['ended_at']:return
+                # Another preparation can finish after the monitor's snapshot.
+                # Recheck under the operation lock before creating another window.
+                if session['ended_at'] or session['state']!='preparing':return
                 if control!='running':
                     self.stop_session(session,session['reason'] or control,paused=control in ('pause_requested','paused'))
                     return

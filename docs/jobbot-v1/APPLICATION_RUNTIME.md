@@ -45,6 +45,13 @@ durably owned targets/popups. An expired shared-browser application does not ret
 the host of other active applications. Host-crash recovery visits all retained
 sessions. Existing target, driver, writer and submission ownership checks remain.
 
+Preparation rechecks the durable session state under its operation lock before
+creating a window, so an old monitor snapshot cannot reopen a connected attempt.
+Attachment refreshes retain all owned target IDs within the same browser
+incarnation. Terminal cleanup therefore closes earlier pages and their popups for
+failed, blocked, successful and interrupted attempts before releasing capacity.
+Target history does not transfer to a replacement browser incarnation.
+
 Tests use synthetic databases and localhost forms with disposable profiles. They
 exercise atomic capacity, queue refill/pause, settings, target ownership, concurrent
 input, retained cookies, popup cleanup and same-attempt restart/host recovery.

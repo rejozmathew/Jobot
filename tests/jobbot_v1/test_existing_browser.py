@@ -74,6 +74,55 @@ def test_failed_tab_closure_keeps_cleanup_pending(tmp_path, monkeypatch):
     assert not service.session(session['id'])['ended_at']
 
 
+def test_stale_preparation_does_not_replace_connected_application(tmp_path, monkeypatch):
+    host, service, pending = fixture_host(tmp_path)
+    connected = connect(service, pending, 'original')
+    launches = []
+    monkeypatch.setattr(host, 'start_browser', lambda: launches.append('launch'))
+    async def prepare_target(session):return 'duplicate', {'synthetic': True}
+    monkeypatch.setattr(host, 'prepare_target', prepare_target)
+    monkeypatch.setattr(host, 'stop_session', lambda *a, **kw: launches.append('stop'))
+    # The monitor captured preparing while another thread completed readiness.
+    host.prepare(pending)
+    assert launches == []
+    assert service.session(pending['id']) == connected
+
+
+@pytest.mark.parametrize('outcome', ['failed', 'blocked', 'applied'])
+def test_terminal_cleanup_retains_all_targets_after_attachment_refresh(tmp_path, monkeypatch, outcome):
+    host, service, session = fixture_host(tmp_path)
+    session = connect(service, session, 'original')
+    service.session_browser_attachment(session['id'], host.host_id,
+        {'browser_id': 'ws://existing', 'target_ids': ['original']})
+    service.session_browser_attachment(session['id'], host.host_id,
+        {'browser_id': 'ws://existing', 'target_ids': ['replacement']}, 'replacement')
+    tabs = [{'type': 'page', 'targetId': target} for target in ('original', 'replacement', 'personal', 'peer')]
+    tabs.append({'type': 'page', 'targetId': 'popup', 'openerId': 'original'})
+    monkeypatch.setattr(wh, 'endpoint_info', lambda _: {'webSocketDebuggerUrl': 'ws://existing'})
+    async def command(endpoint, method, params=None):
+        if method == 'Target.getTargets':return {'targetInfos': list(tabs)}
+        assert method == 'Target.closeTarget'
+        tabs[:] = [t for t in tabs if t['targetId'] != params['targetId']]
+        return {'success': True}
+    monkeypatch.setattr(wh, 'browser_command', command)
+    if outcome == 'applied':service.submission_intent(**own(service, session), evidence='Synthetic submission', fixture=True)
+    service.finish(**own(service, session), outcome=outcome, evidence='Synthetic terminal outcome', quiescent=True)
+    host.supervise_session(service.session(session['id']))
+    assert {t['targetId'] for t in tabs} == {'personal', 'peer'}
+    assert service.session(session['id'])['ended_at']
+    assert service.attempt(session['attempt_id'])['outcome'] == outcome
+
+
+def test_attachment_target_history_does_not_cross_browser_incarnations(tmp_path):
+    host, service, session = fixture_host(tmp_path)
+    service.session_browser_attachment(session['id'], host.host_id,
+        {'browser_id': 'ws://old', 'target_ids': ['old-target']}, 'old-target')
+    service.session_browser_attachment(session['id'], host.host_id,
+        {'browser_id': 'ws://new', 'target_ids': ['new-target']}, 'new-target')
+    attachment = json.loads(service.session(session['id'])['metadata_json'])['browser_attachment']
+    assert attachment['target_ids'] == ['new-target']
+
+
 @pytest.mark.parametrize('outcome',['blocked','failed','applied'])
 def test_session_accepts_tab_quiescence_without_claiming_browser_killed(tmp_path,outcome):
     host, service, session = fixture_host(tmp_path)

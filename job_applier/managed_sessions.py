@@ -250,7 +250,14 @@ class SessionServices:
             s=self._get(db,'application_sessions',session_id)
             w=self._get(db,'browser_workspaces',s['workspace_id'])
             if w['host_id']!=host_id:raise ProtocolError('stale_host')
-            meta=json.loads(s['metadata_json']);meta['browser_attachment']=attachment
+            meta=json.loads(s['metadata_json']);previous=meta.get('browser_attachment') or {}
+            if previous.get('browser_id') and previous['browser_id']==attachment.get('browser_id'):
+                # Refreshing attachment metadata must not lose an earlier owned
+                # page. Cleanup retains every target in this browser incarnation.
+                targets=set(previous.get('target_ids',[]))|set(attachment.get('target_ids',[]))
+                if s['target_id']:targets.add(s['target_id'])
+                attachment=dict(attachment,target_ids=sorted(targets))
+            meta['browser_attachment']=attachment
             db.execute('UPDATE application_sessions SET metadata_json=?,target_id=COALESCE(?,target_id) WHERE id=?',
                        (dumps(meta),target_id,session_id))
 
