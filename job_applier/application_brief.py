@@ -64,7 +64,11 @@ facts, selected resume, retained account strategy, saved answers and relevant
 lessons. Do not invent facts, choose another mailbox, or reconstruct the resume.
 
 ## Missing required answers
-Use approved facts, policy and exact saved answers first. For genuinely missing
+Use approved facts, policy, current scoped answer_library entries and saved answers first.
+The editable library is current knowledge; old response journals are historical
+evidence. Keep country, employer, compensation and sponsorship-time distinctions.
+Shared request_answers also resolves current library/profile knowledge before
+capturing questions. A library miss remains ordinary executor recovery. For genuinely missing
 required facts, call browser with
 {{"method":"request_answers","refs":["<fresh observed required field ref>"]}}.
 This applies known answers before capturing unresolved questions and their actual
@@ -80,8 +84,11 @@ An interactive desktop clarify dialog can wait while retaining the only workspac
 For this unattended queue, prefer the durable answer queue when a reply must wait.
 When pending questions require a later reply, use park_questions with empty
 parameters and follow its cleanup acknowledgement so the workspace is released.
-Ordinary pause retains the slot. The dashboard's Needs your answer view supports
-Save and queue retry; an authorized retry uses the saved answers on a fresh attempt.
+Ordinary pause retains the slot. The dashboard's Needs your answer view groups
+repeated questions, offers
+an editable Answer library, and separates Ready to retry from searchable History.
+Ready to retry supports Save and queue retry. An authorized retry uses current
+answers on a fresh attempt.
 Waiting or timeout never supplies an answer or permission to guess.
 
 ## ATS reminders — read the applicable reference while the browser prepares

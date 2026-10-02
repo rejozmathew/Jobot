@@ -30,6 +30,12 @@ def reusable_answers(config,package,attempt_id,*,source):
             elif not (history.get('job_url')==job['url'] or job.get('id') and history.get('job_id')==job['id']
                       and history.get('identity_id')==attempt.get('identity_id')):continue
             for row in history['answers']:
+                # Library snapshots are audit evidence; resolve their current entry.
+                if str(row.get('answer_basis','')).startswith('answer_library:'):continue
+                # Editable knowledge supersedes old form values, including retirement.
+                from .managed_answer_library import matches
+                if any(matches(e,{'question':row.get('question','')},job) for e in package.get('answer_library',[])):
+                    continue
                 if (row.get('source')==source and row.get('verified') is True and row.get('question_key')
                     and row.get('answer_basis') not in (None,'','not_recorded') and 'answer_value' in row):
                     from .managed_redaction import reject_secrets
@@ -308,5 +314,21 @@ def saved_answer(question,package):
             options=[{k:o[k] for k in ('value','label')} for o in question['options']])
     except ValueError:return None
     key=question_key(data)
-    return next((q['answer'] for q in package.get('saved_questions',[]) if q.get('question_key')==key
+    exact=next((q for q in package.get('saved_questions',[]) if q.get('question_key')==key
                  and q.get('state')!='superseded' and q.get('answer') is not None),None)
+    if exact and exact.get('answer_source') in ('user_dashboard','user_reply'):return exact['answer']
+    from .managed_answer_library import resolve_library
+    library=resolve_library(question,package.get('job',{}),package.get('answer_library',[]))
+    if library.get('matched'):return library['answer']
+    return exact['answer'] if exact and not exact.get('library_entry_id') else None
+
+
+def saved_answer_basis(question,package):
+    from .managed_answer_library import resolve_library
+    from .managed_questions import question_key,question_data
+    try:key=question_key(question_data(**{k:question[k] for k in ('field','question','kind','required','context')},
+        options=[{k:o[k] for k in ('value','label')} for o in question.get('options',[])]))
+    except (KeyError,ValueError):return None
+    if any(q.get('question_key')==key and q.get('state')!='superseded' and q.get('answer') is not None
+           and q.get('answer_source') in ('user_dashboard','user_reply') for q in package.get('saved_questions',[])):return None
+    return resolve_library(question,package.get('job',{}),package.get('answer_library',[])).get('basis')

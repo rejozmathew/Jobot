@@ -451,6 +451,15 @@ footer {
 .answer-field > span { font-weight: 600; line-height: 1.5; }
 .answer-field select, .answer-field textarea { width: 100%; }
 .answer-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0 10px; }
+.answer-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.answer-toolbar label { margin: 0; flex: 1; min-width: 180px; }
+.answer-toolbar button { margin-bottom: 0; }
+.answer-request-list { margin: 10px 0; color: var(--text-muted); }
+.answer-request-list > div { margin: 8px 0; }
+.answer-library-history { margin: 12px 0; }
+.answer-library-history p { white-space: pre-wrap; overflow-wrap: anywhere; }
+#library-error { color: #b91c1c; }
+#library-dialog textarea { width: 100%; }
 
 @media (max-width: 850px) {
   body { padding: 14px; }

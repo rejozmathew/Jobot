@@ -1,0 +1,288 @@
+"""Current operator-owned answer knowledge; historical responses remain snapshots.
+
+Matching is deterministic. Known narrow intents and operator-entered aliases can
+travel between forms; field IDs, option values and document URLs cannot.
+"""
+import hashlib
+import json
+import re
+import unicodedata
+
+from .managed_shared import ProtocolError, dumps, uid
+from .managed_redaction import reject_secrets
+
+
+def normalized(text):
+    text = unicodedata.normalize('NFKC', str(text)).casefold()
+    return ' '.join(re.findall(r'\w+|[$€£¥%+<>=]', text))
+
+
+def company_key(value):
+    return ' '.join(unicodedata.normalize('NFKC', str(value)).casefold().split())
+
+
+def country_key(value):
+    value = normalized(value)
+    return {'united states':'us', 'united states of america':'us', 'u s':'us', 'usa':'us',
+            'u s a':'us', 'united kingdom':'uk', 'great britain':'uk'}.get(value, value)
+
+
+def question_identity(question):
+    """Only harmless typography and narrowly recognized wording are generalized."""
+    text = normalized(question)
+    # Never discard negation, qualifiers or a compound employer question.
+    if re.search(r'\b(not|without|never|except|unless)\b', text):return 'exact:' + text
+    country = 'us' if re.search(r'\b(united states(?: of america)?|usa|u s(?: a)?)\b', text) else ''
+    sponsorship = re.fullmatch(
+        r'(?:do you|will you|would you|are you going to) (?:currently |now )?(?:require|need) '
+        r'(?:visa |employment |work visa )?sponsorship(?: (?:now|currently|in the future|in future|now or in the future|now or in future))?\??', text)
+    if sponsorship:
+        when = 'now_or_future' if 'now or' in text else 'future' if 'future' in text else 'current'
+        return 'intent:sponsorship:' + when
+    if country and re.fullmatch(
+        r'are you (?:currently )?(?:legally )?(?:authorized|authorised|eligible) to work in (?:the )?'
+        r'(?:united states(?: of america)?|usa|u s(?: a)?)', text):
+        return 'intent:authorization:us'
+    if text in ('when can you start', 'when could you start', 'when are you available to start',
+                'when would you be available to start'):
+        return 'intent:start_availability'
+    return 'exact:' + text
+
+
+def recommended_scope(question):
+    return 'company' if re.search(r'\b(this company|our company|our organization|for us|with us|here)\b', normalized(question)) else 'global'
+
+
+def applicability(question, job):
+    text = question.get('question', '')
+    try:metadata = json.loads(job.get('metadata_json') or '{}')
+    except (TypeError, ValueError):metadata = {}
+    result = {}
+    for pattern, value in ((r'\bUnited States\b|\bU\.S\.?\b|\bUSA\b', 'us'),
+                           (r'\bUnited Kingdom\b|\bUK\b', 'uk'), (r'\bCanada\b', 'canada')):
+        if re.search(pattern, text, re.I):result['country'] = value;break
+    if re.search(r'\bUS\b',text):result['country']='us'
+    if 'country' not in result and isinstance(metadata.get('country'), str):
+        result['country'] = country_key(metadata['country'])
+    currencies = re.findall(r'\b(USD|CAD|AUD|EUR|GBP)\b', text.upper())
+    if len(set(currencies)) == 1:result['currency'] = currencies[0]
+    periods = [('hour', r'\b(hourly|per hour)\b'), ('year', r'\b(annual|annually|yearly|per year)\b'),
+               ('month', r'\b(monthly|per month)\b')]
+    found = [value for value, pattern in periods if re.search(pattern, text, re.I)]
+    if len(found) == 1:result['period'] = found[0]
+    return result
+
+
+def matches(entry, question, job):
+    identities = {question_identity(entry['question']), *(question_identity(q) for q in entry.get('aliases', []))}
+    if question_identity(question['question']) not in identities:return False
+    if entry['scope'] == 'job' and entry['scope_key'] != job.get('id'):return False
+    if entry['scope'] == 'company' and entry['scope_key'] != company_key(job.get('company') or ''):return False
+    context = applicability(question, job)
+    return all(context.get(key) == value for key, value in entry.get('conditions', {}).items())
+
+
+def option_answer(question, answer):
+    """Map an approved meaning to this form's current option labels and values."""
+    from .application_answers import match_answer_to_option
+    if question['kind'] == 'check':
+        if type(answer) is bool:return answer
+        return {'yes':True, 'no':False}.get(str(answer).casefold())
+    if question['kind'] in ('select', 'radio'):
+        choices = question.get('options', [])
+        index = match_answer_to_option(answer, [o['label'] for o in choices])
+        return {k:choices[index][k] for k in ('value', 'label')} if index is not None else None
+    return ('Yes' if answer else 'No') if type(answer) is bool else str(answer)
+
+
+def resolve_library(question, job, entries):
+    applicable = [e for e in entries if matches(e, question, job)]
+    active = [e for e in applicable if e['state'] == 'active']
+    if not active:return {'matched':bool(applicable), 'retired':bool(applicable), 'answer':None}
+    priority = lambda e:({'global':0, 'company':1, 'job':2}[e['scope']], len(e.get('conditions', {})))
+    best = max(priority(e) for e in active)
+    selected = [e for e in active if priority(e) == best]
+    if len({dumps(e['answer']) for e in selected}) != 1:
+        return {'matched':True, 'answer':None, 'reason':'conflicting_library_answers'}
+    entry = sorted(selected, key=lambda e:e['id'])[0]
+    return {'matched':True, 'answer':option_answer(question, entry['answer']),
+            'entry_id':entry['id'], 'revision':entry['revision'],
+            'basis':'answer_library:' + entry['id'] + ':' + str(entry['revision'])}
+
+
+class AnswerLibraryServices:
+    @staticmethod
+    def _has_library_schema(db):
+        return bool(db.execute("SELECT 1 FROM sqlite_master WHERE name='answer_library_entries'").fetchone())
+
+    @staticmethod
+    def _library_entry(row):
+        value = dict(row)
+        for key in ('answer', 'aliases', 'conditions'):
+            value[key] = json.loads(value.pop(key + '_json'))
+        return value
+
+    def _library_entries(self, db, identity_id):
+        if not self._has_library_schema(db):return []
+        return [self._library_entry(r) for r in db.execute(
+            'SELECT * FROM answer_library_entries WHERE identity_id=? ORDER BY updated_at DESC,id', (identity_id,))]
+
+    def _record_question_answer(self, db, question, answer, source, *, entry_id=None, library_revision=None, evidence=''):
+        """Append a response version, including invalidation, without editing history."""
+        if (question['answer'] == answer and question.get('answer_source') == source
+                and question.get('library_entry_id') == entry_id and question.get('library_revision') == library_revision):return False
+        revision = question['revision'] + 1;now = self.now()
+        db.execute('''INSERT INTO application_question_answers
+            (question_id,revision,answer_json,source,evidence,created_at,library_entry_id,library_revision)
+            VALUES (?,?,?,?,?,?,?,?)''', (question['id'], revision, dumps(answer), source, evidence, now, entry_id, library_revision))
+        db.execute('''UPDATE application_questions SET state=?,answer_json=?,answer_source=?,answered_at=?,revision=?,
+            library_entry_id=?,library_revision=? WHERE id=?''',
+            ('answered' if answer is not None else 'pending', dumps(answer) if answer is not None else None,
+             source, now if answer is not None else None, revision, entry_id, library_revision, question['id']))
+        return True
+
+    def _reconcile_answers(self, db, identity_id=None):
+        if not self._has_library_schema(db):return {'resolved':0, 'updated':0, 'invalidated':0}
+        rows = db.execute('''SELECT q.* FROM application_questions q JOIN jobs j ON j.id=q.job_id
+            WHERE q.state!='superseded' AND (q.state='pending' OR q.answer_source IN ('answer_library','approved_profile','knowledge_changed'))
+            AND j.disposition!='canceled' AND j.status NOT IN ('applied','already_applied')
+            AND NOT EXISTS (SELECT 1 FROM job_archives a WHERE a.job_id=j.id)'''
+            + (' AND q.identity_id=?' if identity_id else ''), (identity_id,) if identity_id else ()).fetchall()
+        entries = {};profiles = {};jobs = {};result = {'resolved':0, 'updated':0, 'invalidated':0}
+        from .application_answers import approved_answer
+        for row in rows:
+            question = self._question(row);identity = question['identity_id'];job_id = question['job_id']
+            if identity not in entries:
+                entries[identity] = self._library_entries(db, identity)
+                profiles[identity] = json.loads(self._get(db, 'candidates', identity)['profile_json'])
+            if job_id not in jobs:jobs[job_id] = dict(self._get(db, 'jobs', job_id))
+            resolved = resolve_library(question, jobs[job_id], entries[identity]);answer = resolved['answer']
+            source = 'answer_library';entry_id = resolved.get('entry_id');version = resolved.get('revision')
+            if answer is None and (not resolved.get('matched') or resolved.get('retired')):
+                approved = approved_answer(question['question'], profiles[identity])
+                answer = option_answer(question, approved) if approved is not None else None
+                source = 'approved_profile';entry_id = None;version = None
+            if answer is None and question['answer'] is None:continue
+            changed = self._record_question_answer(db, question, answer,
+                source if answer is not None else 'knowledge_changed', entry_id=entry_id, library_revision=version,
+                evidence='Current editable answer knowledge')
+            if changed:result['invalidated' if answer is None else 'resolved' if question['answer'] is None else 'updated'] += 1
+        return result
+
+    def reconcile_answers(self, identity_id=None):
+        with self.tx() as db:return self._reconcile_answers(db, identity_id)
+
+    def save_library_answer(self, *, identity_id, question, answer, aliases=None, scope='global', scope_key='',
+                            conditions=None, entry_id=None, expected_revision=0):
+        from .managed_questions import PRIVATE
+        if not isinstance(question, str) or not 1 <= len(question.strip()) <= 4000 or PRIVATE.search(question):
+            raise ProtocolError('invalid_library_question')
+        if not (type(answer) is bool or isinstance(answer, str) and 1 <= len(answer.strip()) <= 4000):
+            raise ProtocolError('answer_required')
+        aliases = aliases or [];conditions = conditions or {}
+        if not isinstance(aliases, list) or len(aliases)>100 or any(
+                not isinstance(a, str) or not 1 <= len(a.strip()) <= 4000 or PRIVATE.search(a) for a in aliases):
+            raise ProtocolError('invalid_question_aliases')
+        if scope not in ('global','company','job') or not isinstance(scope_key, str):raise ProtocolError('invalid_answer_scope')
+        if scope == 'global':scope_key = ''
+        if scope == 'company':scope_key = company_key(scope_key)
+        if scope != 'global' and not scope_key:raise ProtocolError('answer_scope_required')
+        if not isinstance(conditions, dict) or set(conditions)-{'country','currency','period'} or any(
+                not isinstance(v, str) or not 1 <= len(v.strip()) <= 100 for v in conditions.values()):
+            raise ProtocolError('invalid_answer_conditions')
+        conditions = {k:country_key(v) if k=='country' else v.upper() if k=='currency' else normalized(v) for k,v in conditions.items()}
+        if type(expected_revision) is not int:raise ProtocolError('answer_revision_conflict')
+        question = question.strip();answer = answer.strip() if isinstance(answer, str) else answer
+        aliases = list(dict.fromkeys(a.strip() for a in aliases))
+        reject_secrets(dict(question=question, answer=answer, aliases=aliases, scope_key=scope_key, conditions=conditions))
+        with self.tx() as db:
+            self._get(db, 'candidates', identity_id)
+            if scope == 'job':self._get(db, 'jobs', scope_key)
+            old = self._library_entry(self._get(db, 'answer_library_entries', entry_id)) if entry_id else None
+            if not old:
+                duplicate=next((e for e in self._library_entries(db,identity_id)
+                    if e['state']=='active' and e['scope']==scope and e['scope_key']==scope_key and e['conditions']==conditions
+                    and question_identity(e['question'])==question_identity(question)),None)
+                if duplicate:
+                    if duplicate['answer']==answer and duplicate['aliases']==aliases:return duplicate
+                    raise ProtocolError('library_answer_exists')
+            if old and old['identity_id'] != identity_id:raise ProtocolError('asset_identity_mismatch')
+            if expected_revision != (old['revision'] if old else 0):raise ProtocolError('answer_revision_conflict')
+            identifier = entry_id or uid();revision = expected_revision + 1;now = self.now()
+            entry = dict(id=identifier, identity_id=identity_id, question=question, answer=answer, aliases=aliases,
+                         scope=scope, scope_key=scope_key, conditions=conditions, state='active', revision=revision,
+                         created_at=old['created_at'] if old else now, updated_at=now)
+            db.execute('''INSERT INTO answer_library_entries
+                (id,identity_id,question,answer_json,aliases_json,scope,scope_key,conditions_json,state,revision,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET question=excluded.question,answer_json=excluded.answer_json,
+                aliases_json=excluded.aliases_json,scope=excluded.scope,scope_key=excluded.scope_key,conditions_json=excluded.conditions_json,
+                state=excluded.state,revision=excluded.revision,updated_at=excluded.updated_at''',
+                (identifier, identity_id, question, dumps(answer), dumps(aliases), scope, scope_key, dumps(conditions), 'active', revision, entry['created_at'], now))
+            db.execute('INSERT INTO answer_library_versions VALUES (?,?,?,?)', (identifier, revision, dumps(entry), now))
+            self._reconcile_answers(db, identity_id)
+            return entry
+
+    def set_library_answer_state(self, *, entry_id, state, expected_revision):
+        if state not in ('active','retired'):raise ProtocolError('invalid_answer_state')
+        with self.tx() as db:
+            entry = self._library_entry(self._get(db, 'answer_library_entries', entry_id))
+            if type(expected_revision) is not int or expected_revision != entry['revision']:raise ProtocolError('answer_revision_conflict')
+            entry.update(state=state, revision=expected_revision+1, updated_at=self.now())
+            db.execute('UPDATE answer_library_entries SET state=?,revision=?,updated_at=? WHERE id=?',
+                       (state, entry['revision'], entry['updated_at'], entry_id))
+            db.execute('INSERT INTO answer_library_versions VALUES (?,?,?,?)', (entry_id, entry['revision'], dumps(entry), entry['updated_at']))
+            self._reconcile_answers(db, entry['identity_id'])
+            return entry
+
+    def answer_library(self, identity_id=None, include_history=True):
+        with self.tx() as db:
+            if not self._has_library_schema(db):return {'entries':[], 'suggestions':[]}
+            identities = [identity_id] if identity_id else [r[0] for r in db.execute('SELECT id FROM candidates')]
+            entries = []
+            for identity in identities:entries.extend(self._library_entries(db, identity))
+            for entry in entries if include_history else []:
+                entry['history'] = [json.loads(r[0]) for r in db.execute(
+                    'SELECT snapshot_json FROM answer_library_versions WHERE entry_id=? ORDER BY revision DESC', (entry['id'],))]
+            if not include_history:return {'entries':entries, 'suggestions':[]}
+            # Human history supplies proposals, never becomes active knowledge by itself.
+            rows = db.execute('''SELECT q.*,j.company,a.answer_json AS historical_answer_json FROM application_questions q
+                JOIN jobs j ON j.id=q.job_id JOIN application_question_answers a ON a.question_id=q.id
+                WHERE a.source IN ('user_dashboard','user_reply') AND a.answer_json IS NOT NULL'''
+                + (' AND q.identity_id=?' if identity_id else '') + ' ORDER BY q.last_seen_at DESC',
+                (identity_id,) if identity_id else ()).fetchall()
+            proposals = {}
+            for row in rows:
+                q = self._question(row);scope = recommended_scope(q['question'])
+                key = (q['identity_id'], question_identity(q['question']), company_key(row['company'] or '') if scope=='company' else '')
+                if scope=='company' and not key[2]:scope='job';key=(*key[:2],q['job_id'])
+                if any(e['state']=='active' and matches(e,q,dict(id=q['job_id'],company=row['company'])) for e in entries if e['identity_id']==q['identity_id']):continue
+                item = proposals.setdefault(key, dict(identity_id=q['identity_id'], question=q['question'], aliases=[], scope=scope,
+                    scope_key=key[2], answers=[], request_count=0, question_ids=[]))
+                historical = json.loads(row['historical_answer_json'])
+                answer = historical['label'] if isinstance(historical, dict) else historical
+                if answer not in item['answers']:item['answers'].append(answer)
+                if q['question']!=item['question'] and q['question'] not in item['aliases']:item['aliases'].append(q['question'])
+                item['request_count'] += 1;item['question_ids'].append(q['id'])
+            return {'entries':entries, 'suggestions':list(proposals.values())[:50]}
+
+    @staticmethod
+    def _answer_clusters(groups):
+        clusters = {}
+        for group in groups:
+            for question in group['questions']:
+                if question['state'] != 'pending':continue
+                scope = recommended_scope(question['question'])
+                key = (group['identity_id'],question_identity(question['question']),
+                       company_key(group['company'] or '') if scope=='company' else '')
+                # Unknown choices retain their meaning; equivalent yes/no values can vary.
+                labels = tuple(sorted(normalized(o['label']) for o in question['options']))
+                key = (*key, question['kind'], labels)
+                identifier = hashlib.sha256(dumps(key).encode()).hexdigest()
+                item = clusters.setdefault(key, dict(id=identifier, identity_id=group['identity_id'], email=group['email'],
+                    question=question['question'], kind=question['kind'], options=question['options'], aliases=[],
+                    scope=scope, scope_key=key[2], requests=[], request_count=0))
+                if question['question']!=item['question'] and question['question'] not in item['aliases']:item['aliases'].append(question['question'])
+                item['requests'].append(dict(question_id=question['id'], revision=question['revision'], job_id=group['job_id'],
+                    company=group['company'], title=group['title'], url=group['url'], question=question['question']))
+                item['request_count'] += 1
+        return list(clusters.values())

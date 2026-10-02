@@ -226,8 +226,12 @@ def watch(config, service, *, once=False):
     with FileLock(str(service.db_path)+'.dispatcher.lock'):
         service.desktop_dispatch_spool=config['spool_dir']
         service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}
+        next_answer_review=0
         while True:
             service.queue_heartbeat(process_identity(os.getpid()))
+            if time.monotonic()>=next_answer_review:
+                service.reconcile_answers(identity_id=config['identity_id'])
+                next_answer_review=time.monotonic()+60
             import_answer_retries(config,service)
             service.queue_reconcile(**service.dispatch_selection)
             status=service.queue_status()

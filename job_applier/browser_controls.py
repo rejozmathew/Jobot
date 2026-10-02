@@ -233,7 +233,7 @@ def inventory(observed, package):
     result['instruction']=(strategy+'Use helpers for residual work, followed by field-by-field assessment and actual screenshot inspection/recovery. '
         'Use observed refs with browser select, check, fill, press or click. Values come from approved facts or explicit user choices. '
         'Use browser repair with fields:[{method:fill|select|check,ref,value}] to fix routine fields together and return verified results plus a fresh screen. '
-        'Upload uses method:upload,ref,asset_id from selected_documents. Complete required questions using answer_context.standard_answers, answer_context.identity, approved profile facts and saved answers before requesting human input. '
+        'Upload uses method:upload,ref,asset_id from selected_documents. Complete required questions using answer_context.standard_answers, answer_context.identity, approved profile facts, current scoped answer_library and saved answers before requesting human input. Shared request_answers checks current knowledge against fresh choices.  '
         'A helper mismatch or failed selection is a recovery handoff, not an application outcome. Inspect actual options, refresh stale controls, '
         'if an expected control is missing, take and visually inspect an owned screenshot immediately, inspect embedded frames and scroll containers, then try another supported interaction. '
         'Before concluding that recovery is exhausted, inspect a fresh screenshot and attempt the remaining plausible actions. Keep the session open and continue after progress. '
@@ -258,6 +258,7 @@ def inventory(observed, package):
         'upload':{'method':'upload','ref':'<observed file ref>','asset_id':'<selected asset id>'},
         'snapshot':{'method':'snapshot'}}
     result['selected_documents']=[{k:asset.get(k) for k in ('id','kind','version')} for asset in package.get('documents',{}).get('assets',[])]
+    result['answer_library']=package.get('answer_library',[])
     result['answer_policy']=profile.get('application_answer_policy',{})
     if 'application_frames' in observed:result['application_frames']=observed['application_frames']
     return result

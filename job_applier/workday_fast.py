@@ -117,6 +117,7 @@ def screen_inventory(observed,package):
     return {'screen_key':key,'page_signature':observed.get('page_signature'),'url':observed.get('url'),
         'step':observed.get('step'),'auth':observed.get('auth'),'auth_ui':observed.get('auth_ui'),
         'native':observed.get('inventory',[]),'audit':audit(observed),
+        'answer_library':package.get('answer_library',[]),
         'errors':observed.get('blocking_errors',[]),'refresh_error':observed.get('refresh_error',False),
         'browser_recovery':{'available':True,
             'screenshot':{'operation':'browser','parameters':{'method':'screenshot'}},
@@ -130,7 +131,7 @@ def screen_inventory(observed,package):
         'answer_context':{'standard_answers':profile.get('standard_answers',{}),
             'work_authorization':profile.get('work_authorization',{}),
             'work_preferences':profile.get('work_preferences',{}),
-            'instruction':'Use these approved facts/defaults and saved answers to complete the actual questions. Interpret the complete wording and offered choices. Attempt the answers and recover control failures before requesting human input. Other approved facts remain in the application context.'},
+            'instruction':'Use these approved facts/defaults, current scoped answer_library and saved answers to complete the actual questions. Shared browser request_answers resolves current knowledge against fresh choices. Interpret the complete wording and offered choices. Attempt the answers and recover control failures before requesting human input. Other approved facts remain in the application context.'},
         'instruction':'Map the required fields and next action together. Call fast_forward with recovery:{screen_key, credentials:{email_ref,password_ref,confirmation_ref?}, fields:[{ref,value}], action:{source:native|simplify,ref}, account_mode:sign_in|create_account if submitting auth}. Workday authentication always uses native controls and the private retained credential filler; resume Simplify after the application form opens. Different observed controls can support further recovery on this screen. Omit unused fields. All refs come from this inventory. Never send secrets or use recovery for final Submit.'}
 
 

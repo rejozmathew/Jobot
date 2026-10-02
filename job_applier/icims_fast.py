@@ -182,6 +182,9 @@ class IcimsRunner:
                     plan=next((p for p in plans if p.get('ref')==q['ref'] and p.get('question_key')==key),None)
                     basis=plan['basis'] if plan else 'approved_profile_or_exact_saved_answer'
                     answer=plan['answer'] if plan else saved_answer(q,self.package)
+                    if not plan and answer is not None:
+                        from .application_answers import saved_answer_basis
+                        basis=saved_answer_basis(q,self.package) or basis
                     if answer is None:answer=approved_answer(q['question'],self.profile)
                     if answer is None and key in restored:answer=restored[key]['answer_value'];basis=restored[key]['answer_basis']
                     if answer is None and self.audit['stage']['name']=='email_entry' and field.get('type')=='email':answer=self.profile.get('identity',{}).get('email')

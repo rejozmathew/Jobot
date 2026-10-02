@@ -28,6 +28,7 @@ from .managed_context import ContextServices
 from .managed_archive import ArchiveServices
 from .managed_sessions import SessionServices, local_session
 from .managed_questions import QuestionServices
+from .managed_answer_library import AnswerLibraryServices
 from .managed_queue import QueueServices
 from .managed_discovery import DiscoveryServices
 from .managed_versions import code_evidence
@@ -41,7 +42,7 @@ def utc_now():
 from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity, linkedin_identity, ats_posting_key
 
 
-class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices, QueueServices, DiscoveryServices):
+class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices, AnswerLibraryServices, QueueServices, DiscoveryServices):
     def __init__(self, db_path, *, instance_id=None, now_fn=utc_now):
         p=Path(db_path)
         if not p.is_absolute(): raise ProtocolError('absolute_db_path_required')
@@ -308,6 +309,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             if previous and (previous['email'].casefold()!=email.casefold() or previous['person_key']!=person_key):
                 raise ProtocolError('identity_immutable')
             db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,profile_json=excluded.profile_json,profile_hash=excluded.profile_hash', (identity_id,person_key,email,state,encoded,hashlib.sha256(encoded.encode()).hexdigest()))
+            self._reconcile_answers(db, identity_id)
             return dict(self._get(db,'candidates',identity_id))
 
     def candidate(self, identity_id):

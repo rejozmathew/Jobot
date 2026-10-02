@@ -48,13 +48,20 @@ def test_dashboard_saves_drafts_and_queues_answered_applications(tmp_path):
                 field.value=args.value;field.dispatchEvent(new Event('input',{bubbles:true}));}''',{'id':second['id'],'value':'After two weeks notice'})
             await page.evaluate('refresh()')
             assert await page.evaluate_function('id=>document.getElementById("answer-"+id).value',second['id'])=='After two weeks notice'
-            await page.evaluate("document.querySelector('.answer-actions button').click()")
+            await page.evaluate("document.querySelector('#answer-groups form').requestSubmit()")
+            deadline=time.monotonic()+5
+            while service.questions_for_attempt(owner['attempt_id'])['questions'][0]['state']=='pending':
+                assert time.monotonic()<deadline
+                await asyncio.sleep(.05)
+            await page.evaluate('refresh()')
+            await page.evaluate("document.querySelector('#answer-groups form').requestSubmit()")
             deadline=time.monotonic()+5
             while service.answer_queue()['groups'][0]['pending_count']:
                 assert time.monotonic()<deadline,await page.evaluate("document.getElementById('notice').textContent")
                 await asyncio.sleep(.05)
             assert service.answer_retries(identity_id='candidate')['requests']==[],'Save must not launch or queue work'
             await page.evaluate('refresh()')
+            await page.evaluate("document.getElementById('answer-view').value='ready';document.getElementById('answer-view').onchange()")
             await page.evaluate_function('''id=>{const field=document.getElementById('answer-'+id);
                 field.value=JSON.stringify(['no','No']);field.dispatchEvent(new Event('input',{bubbles:true}));}''',first['id'])
             service.answer_questions(answers=[{'question_id':first['id'],'answer':'yes','expected_revision':1}])

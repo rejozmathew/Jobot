@@ -630,9 +630,9 @@ def browser_action(config,client,ownership,package,target_id,params):
                     if method=='request_answers' and item['ref'] in policy_failures:
                         result['skipped'].append({'ref':item['ref'],'reason':'configured_answer_control_unconfirmed'});continue
                     question=by_key.get(question_key(data))
-                    if method=='request_answers' and (not question or question.get('answer') is None):
+                    if not question or question.get('answer') is None:
                         question=client.call('request_question',**ownership,**data)
-                        if question.get('answer') is None:
+                        if method=='request_answers' and question.get('answer') is None:
                             result['questions'].append(question);continue
                     if not question or question.get('answer') is None:
                         result['skipped'].append({'ref':item['ref'],'reason':'no_exact_saved_answer'});continue
@@ -659,7 +659,9 @@ def browser_action(config,client,ownership,package,target_id,params):
                     if applied.get('committed'):
                         text=answer['label'] if isinstance(answer,dict) else ('Yes' if answer else 'No') if type(answer) is bool else answer
                         history=save_answer_history(config,package,ownership['attempt_id'],[{'field':data['field'],'question':data['question'],'answer':text}],
-                            page=data['context'].get('page','form'),source='human_answer_queue',basis=question['id']+':'+str(question['revision']))
+                            page=data['context'].get('page','form'),source='human_answer_queue',
+                            basis=('answer_library:'+question['library_entry_id']+':'+str(question['library_revision']))
+                                if question.get('library_entry_id') else question['id']+':'+str(question['revision']))
                         if history.get('answer_history_error'):result['fields'][-1]['answer_history_error']=history['answer_history_error']
                 succeeded=True
                 if method=='request_answers':

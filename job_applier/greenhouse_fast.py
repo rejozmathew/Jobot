@@ -393,6 +393,9 @@ class GreenhouseRunner:
                         self.failures.append({'ref':q['ref'],'reason':'answer_type_mismatch'});continue
                 else:
                     answer=saved_answer(q,self.package)
+                    if answer is not None:
+                        from .application_answers import saved_answer_basis
+                        basis=saved_answer_basis(q,self.package) or basis
                     if answer is None:answer=greenhouse_answer(q,self.profile)
                     restored=self.restored.get(q['question_key'])
                     if answer is None and restored:answer=restored['answer_value'];basis=restored['answer_basis']

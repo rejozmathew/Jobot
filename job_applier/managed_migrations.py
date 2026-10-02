@@ -285,7 +285,23 @@ def migration_25(db):
     db.execute('CREATE INDEX active_workspace_sessions ON application_sessions(workspace_id) WHERE ended_at IS NULL')
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23), (24, migration_24), (25, migration_25)]
+def migration_26(db):
+    db.execute('''CREATE TABLE answer_library_entries (
+        id TEXT PRIMARY KEY,identity_id TEXT NOT NULL REFERENCES candidates(id),question TEXT NOT NULL,
+        answer_json TEXT NOT NULL,aliases_json TEXT NOT NULL,scope TEXT NOT NULL,scope_key TEXT NOT NULL,
+        conditions_json TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,
+        created_at TEXT NOT NULL,updated_at TEXT NOT NULL)''')
+    db.execute('CREATE INDEX library_by_candidate ON answer_library_entries(identity_id)')
+    db.execute('''CREATE TABLE answer_library_versions (
+        entry_id TEXT NOT NULL REFERENCES answer_library_entries(id),revision INTEGER NOT NULL,
+        snapshot_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(entry_id,revision))''')
+    for action in ('UPDATE','DELETE'):
+        db.execute(f"CREATE TRIGGER immutable_library_{action.lower()} BEFORE {action} ON answer_library_versions BEGIN SELECT RAISE(ABORT,'immutable answer library history'); END")
+    for table in ('application_questions','application_question_answers'):
+        add_columns(db, table, {'library_entry_id':'TEXT', 'library_revision':'INTEGER'})
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23), (24, migration_24), (25, migration_25), (26, migration_26)]
 
 
 def migrate(path):

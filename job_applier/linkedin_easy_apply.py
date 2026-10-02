@@ -64,12 +64,14 @@ class EasyApplyRunner:
             self.owned('action_end',action_id=aid,status='success' if result.get('committed') or result.get('clicked') else 'failed',duration_seconds=time.monotonic()-started)
 
     async def fill(self,observed):
-        from .application_answers import apply_policy,capture_answers
+        from .application_answers import apply_policy,capture_answers,saved_answer_basis,save_answer_history
         unfilled={q['ref'] for q in observed['linkedin']['questions'] if not q['answered']}
         result=await apply_policy(self.page,self.package,dict(observed,inventory=[f for f in observed['inventory'] if f['ref'] in unfilled]))
         failures=[f for f in result['fields'] if not f.get('committed')]
+        from .managed_answer_library import resolve_library
         for question in observed['linkedin']['questions']:
-            if question['answered'] or not question.get('enabled'):continue
+            current_library=resolve_library(question,self.package['job'],self.package.get('answer_library',[]))['answer'] is not None
+            if not question.get('enabled') or question['answered'] and not current_library:continue
             answer=saved_answer(question,self.package)
             if answer is None:answer=approved_answer(question['question'],self.profile)
             if answer is None:continue
@@ -80,13 +82,20 @@ class EasyApplyRunner:
             current=next((q for q in fresh['linkedin']['questions'] if q['ref']==question['ref'] and q['question']==question['question']),None)
             if fresh['page_signature']!=observed['page_signature'] or not current:
                 failures.append({'ref':question['ref'],'reason':'step_changed'});break
-            if current['answered']:continue
+            if current['answered'] and not current_library:continue
             # Recheck extension state within the batch without treating our own
             # serialized native action as a competing writer.
             if fresh.get('status') in ('active','unknown'):
                 failures.append({'ref':question['ref'],'reason':'writer_settlement_required'});break
             written=await form_action(self.page,action)
             if not written.get('committed'):failures.append({'ref':question['ref'],'reason':written.get('reason','value_unconfirmed')})
+            else:
+                basis=saved_answer_basis(question,self.package)
+                if basis:
+                    value=answer['label'] if isinstance(answer,dict) else ('Yes' if answer else 'No') if type(answer) is bool else str(answer)
+                    save_answer_history(self.config,self.package,self.owner['attempt_id'],
+                        [dict(field=question['field'],question=question['question'],answer=value)],
+                        page='easy_apply',source='linkedin_easy_apply',basis=basis)
         await capture_answers(self.page,self.config,self.package,self.owner,page='easy_apply',source='linkedin_easy_apply',basis='approved_profile_or_saved_answer',call=self.call)
         return {'committed':not failures,'failures':failures}
 

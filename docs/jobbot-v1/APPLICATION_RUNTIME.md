@@ -1,5 +1,46 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 2: current reusable answers and an actionable inbox
+
+Migration 26 adds an operator-owned Answer library in the authoritative database.
+Entries are candidate-scoped, versioned and editable, with global, company or
+application scope, accepted question aliases and optional country/currency/pay
+period context. Known narrow wording variants share an intent; negation,
+sponsorship now versus future, currency symbols and offered option meanings are
+retained. Company scope uses the company the operator selects, not a shared ATS
+hostname. More specific entries take precedence. Conflicting applicable entries
+are exposed for operator repair rather than resolved by frequency or age.
+
+Existing profile facts remain a source: saving/importing a profile and saving,
+editing or retiring library knowledge reevaluate outstanding questions. Profile
+facts do not get copied into another permanent library record. Explicit human
+answers for one application remain overrides. Submitted/canceled/archived
+requests keep their snapshots; they are not rewritten by reconciliation. Every
+library revision and derived response revision is append-only. Retiring a library
+entry preserves history and removes its current reuse; an old journal cannot
+silently restore it. Ordinary executor facts, interpretation and control recovery
+remain available when a library match is absent or unsuitable. This introduces no
+application deadline, retry limit, finish condition or additional approval gate.
+
+`application_context` supplies current entries without their full edit history.
+Shared `saved_answer` supplies Greenhouse, iCIMS and LinkedIn residual handling;
+Workday receives the same library in its screen context and can use shared
+`request_answers` / `apply_answers`. Those operations resolve current knowledge
+against freshly observed choices before asking a person. Private response journals
+retain the selected library ID/revision as provenance. Simplify order, browser
+ownership, writer checks and submission evidence remain unchanged.
+
+The dashboard groups repeated outstanding requests and can save one scoped answer
+for them. Its Needs an answer, Ready to retry, Answer library and History views
+separate action from records. Submitted, canceled, archived and explicitly queued
+answer retries leave the inbox without asserting that an unanswered question was
+answered. History is searchable and paginated, including response revisions.
+Human response history supplies library proposals; conflicting historical answers
+are shown together and proposals are not silently promoted into current facts.
+The existing dispatcher reevaluates current knowledge once per minute, including
+while automation is paused; it performs no browser work or model calls. Existing
+queue policy still controls whether and when an answered application retries.
+
 ## October 2: concurrent application windows in the retained browser
 
 Settings `application_concurrency` selects 1–5 simultaneous queued applications,
@@ -907,7 +948,8 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | browser_controls.py / browser_helpers/form_controls.js | Shared form reader including Apply, committed-selection verification, posting metadata, private code groups and remaining_submission_work; iCIMS entry guidance; used by submission, browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_queue._settle_reconciled_queue | Called inside successful manual reconciliation; atomically settles only queued rows for the related job and same identity. Existing stopped-session/newer-attempt checks and dispatched/history rows remain intact. |
-| managed_questions.py / migration 16 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
+| managed_answer_library.py / migration 26 | Current candidate-scoped knowledge, aliases, applicability, append-only revisions and historical proposals; called by profile writes, question capture, operator APIs, application context, shared saved_answer and the dispatcher minute reconciliation. No browser/helper outcome authority. |
+| managed_questions.py / migrations 16 and 26 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
 | application_answers.py | Shared label_has, match_answer_to_option, approved_answer, answer_action and saved_answer (re-exported by LinkedIn); approved Greenhouse plan journal restoration; interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | One activation per explicit call, current incomplete-form continuation, retained dispatch evidence and native/Simplify confirmation; local browser and Workday callers |
 | hermes_notifications.py / jobbot-notifications.service | Independent read-only submission-ledger observer; calls the installed Hermes send CLI for confirmed applied company/role alerts, with private durable delivery receipts and retries. No application/helper or answer-reply ownership. See SUBMISSION_ALERTS.md. |

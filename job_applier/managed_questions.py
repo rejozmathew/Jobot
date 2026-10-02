@@ -98,6 +98,7 @@ class QuestionServices:
             if existing:
                 db.execute('UPDATE application_questions SET last_attempt_id=?,last_seen_at=?,state=? WHERE id=?',
                     (attempt_id,self.now(),'answered' if existing['answer'] is not None else 'pending',existing['id']))
+                self._reconcile_answers(db, attempt['identity_id'])
                 return self._question(self._get(db,'application_questions',existing['id']))
             identifier=uid();now=self.now()
             db.execute('''INSERT INTO application_questions(id,job_id,identity_id,first_attempt_id,last_attempt_id,
@@ -105,12 +106,14 @@ class QuestionServices:
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',0,?,?)''',
                 (identifier,attempt['job_id'],attempt['identity_id'],attempt_id,attempt_id,key,field,data['question'],
                  kind,dumps(data['options']),dumps(data['context']),now,now))
+            self._reconcile_answers(db, attempt['identity_id'])
             return self._question(self._get(db,'application_questions',identifier))
 
     def questions_for_attempt(self,attempt_id,worker_id=None):
         with self.tx() as db:
             attempt=self._get(db,'application_attempts',attempt_id)
             if worker_id is not None and attempt['worker_id']!=worker_id:raise ProtocolError('attempt_forbidden')
+            self._reconcile_answers(db, attempt['identity_id'])
             return {'questions':self._questions(db,attempt['job_id'],attempt['identity_id'])}
 
     def park_questions(self,attempt_id,*,worker_id,fence):
@@ -159,7 +162,7 @@ class QuestionServices:
                 revision=question['revision']+1;now=self.now()
                 db.execute('''INSERT INTO application_question_answers(question_id,revision,answer_json,source,evidence,created_at)
                     VALUES (?,?,?,?,?,?)''',(question['id'],revision,dumps(value),source,(reply_evidence or '')[:1000],now))
-                db.execute("UPDATE application_questions SET state='answered',answer_json=?,answer_source=?,answered_at=?,revision=? WHERE id=?",
+                db.execute("UPDATE application_questions SET state='answered',answer_json=?,answer_source=?,answered_at=?,revision=?,library_entry_id=NULL,library_revision=NULL WHERE id=?",
                     (dumps(value),source,now,revision,question['id']))
                 saved.append(self._question(self._get(db,'application_questions',question['id'])))
             return {'questions':saved}
@@ -174,15 +177,42 @@ class QuestionServices:
         return self.answer_questions(answers=answers,source='user_reply',reply_evidence=reply_evidence)
 
     def answer_queue(self,identity_id=None):
+        groups=self._answer_queue_groups(identity_id)
+        inbox=[g for g in groups if g['queue_section']=='inbox']
+        ready=[g for g in groups if g['queue_section']=='ready']
+        return {'groups':inbox+ready,'inbox':inbox,'ready':ready,'clusters':self._answer_clusters(inbox),
+                'history_count':sum(g['queue_section']=='history' for g in groups),'available':True}
+
+    def answer_queue_history(self,identity_id=None,search='',offset=0,limit=25):
+        if not isinstance(search,str) or type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=100:
+            raise ProtocolError('invalid_history_page')
+        groups=[g for g in self._answer_queue_groups(identity_id) if g['queue_section']=='history']
+        if search.strip():
+            term=search.casefold().strip()
+            groups=[g for g in groups if term in ' '.join([g.get('company') or '',g.get('title') or '',g['email'],
+                *(q['question']+' '+str(q['answer']) for q in g['questions'])]).casefold()]
+        selected=groups[offset:offset+limit]
         with self.tx() as db:
-            if not self._has_question_schema(db):return {'groups':[],'available':False}
+            for group in selected:
+                for question in group['questions']:
+                    question['answer_history']=[dict(r,answer=json.loads(r['answer_json'])) for r in db.execute(
+                        'SELECT * FROM application_question_answers WHERE question_id=? ORDER BY revision DESC',(question['id'],))]
+                    for response in question['answer_history']:response.pop('answer_json',None)
+        return {'groups':selected,'total':len(groups),'offset':offset,'limit':limit}
+
+    def _answer_queue_groups(self,identity_id=None):
+        with self.tx() as db:
+            if not self._has_question_schema(db):return []
             where='WHERE q.identity_id=?' if identity_id else ''
             rows=db.execute('''SELECT DISTINCT q.job_id,q.identity_id,j.url,j.company,j.title,j.status,j.disposition,c.email
                 FROM application_questions q JOIN jobs j ON j.id=q.job_id JOIN candidates c ON c.id=q.identity_id
                 '''+where+' ORDER BY q.last_seen_at DESC', (identity_id,) if identity_id else ()).fetchall()
-            groups=[]
+            groups=[];seen=set()
             for row in rows:
                 group=dict(row);questions=self._questions(db,row['job_id'],row['identity_id'])
+                signature=(row['identity_id'],tuple(sorted(q['id'] for q in questions)))
+                if signature in seen:continue
+                seen.add(signature)
                 group.update(questions=questions,pending_count=sum(q['state']=='pending' for q in questions))
                 queued=db.execute("SELECT id,state,requested_at FROM answer_retry_requests WHERE job_id=? AND identity_id=? ORDER BY requested_at DESC LIMIT 1",
                     (row['job_id'],row['identity_id'])).fetchone()
@@ -191,8 +221,15 @@ class QuestionServices:
                     (row['job_id'],row['identity_id'])).fetchone()
                 group['session_id']=session['id'] if session else None
                 group['browser_stopped']=not session or bool(session['ended_at'])
+                group['archived']=bool(db.execute('SELECT 1 FROM job_archives WHERE job_id=?',(row['job_id'],)).fetchone())
+                historical=group['disposition']=='canceled' or group['archived'] or group['status'] in ('applied','already_applied')
+                try:self._assert_not_suppressed(db,row['job_id'])
+                except ProtocolError as exc:
+                    if exc.code not in ('already_applied','job_canceled'):raise
+                    historical=True
+                group['queue_section']='history' if historical or group['retry'] and group['retry']['state']=='queued' else 'inbox' if group['pending_count'] else 'ready'
                 groups.append(group)
-            return {'groups':groups,'available':True}
+            return groups
 
     def queue_answer_retries(self,*,job_ids,identity_id):
         if not isinstance(job_ids,list) or not 1<=len(job_ids)<=100 or len(set(job_ids))!=len(job_ids):

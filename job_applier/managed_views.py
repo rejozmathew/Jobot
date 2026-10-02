@@ -249,4 +249,5 @@ class ViewServices:
             'lessons':lessons,'helpers':helpers,'assets':assets,'assessments':assessments,
             'document_selections':selections,'document_uploads':uploads,
             'local_runtime':self.sessions_view(),'answer_queue':self.answer_queue(),'dispatch_queue':self.queue_status(),
+            'answer_library':self.answer_library(),
             'discovery':self.discovery_status()}

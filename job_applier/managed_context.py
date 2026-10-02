@@ -91,6 +91,7 @@ class ContextServices:
             'prior_attempts':self.prior_application_history(job['id'],attempt['identity_id'],exclude_attempt=attempt_id),
             **({'email_route':route} if route else {}),
             'human_input':human_input,'saved_questions':self.questions_for_attempt(attempt_id)['questions'],
+            'answer_library':self.answer_library(identity_id=attempt['identity_id'],include_history=False)['entries'],
             'helpers':self.helpers_for_context(selected_platform,verified_namespace),
             'lessons':self.lessons_for_context(selected_platform,verified_namespace),
             'account':account,'platform':selected_platform,'namespace':verified_namespace,

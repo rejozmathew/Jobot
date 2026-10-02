@@ -196,13 +196,41 @@
   <section id="tab-answers" class="tab" hidden>
     <section class="card">
       <div class="section-title">
-        <h2>Application questions</h2>
+        <h2>Application answers</h2>
         <button id="queue-answered-batch" type="button">Queue all answered applications</button>
       </div>
-      <p>Answer the required questions that held up an application. Save for later, or queue it for the next application batch.</p>
+      <p>Answer once for matching applications. Edit your reusable answers as your circumstances change; earlier responses stay in history.</p>
+      <div class="answer-toolbar">
+        <label>Show<select id="answer-view"><option value="inbox">Needs an answer</option><option value="ready">Ready to retry</option><option value="library">Answer library</option><option value="history">History</option></select></label>
+        <label>Search<input id="answer-search" type="search" placeholder="Question, company or answer"></label>
+        <button id="add-library-answer" type="button">Add reusable answer</button>
+        <button id="reconcile-answers" type="button">Check saved knowledge</button>
+      </div>
+      <p id="answer-summary" class="answer-meta"></p>
       <div id="answer-groups"></div>
+      <div id="answer-pagination" class="answer-actions"></div>
     </section>
   </section>
+
+  <dialog id="library-dialog">
+    <form id="library-form">
+      <h2 id="library-editor-title">Reusable answer</h2>
+      <label>Candidate<select id="library-candidate" required></select></label>
+      <label>General question<textarea id="library-question" rows="2" maxlength="4000" required></textarea></label>
+      <label>Current answer<textarea id="library-answer" rows="3" maxlength="4000" required></textarea></label>
+      <label>Other wording this answer covers (one question per line)<textarea id="library-aliases" rows="3"></textarea></label>
+      <label>Use for<select id="library-scope"><option value="global">All matching applications</option><option value="company">This company</option><option value="job">This application</option></select></label>
+      <label id="library-company-label" hidden>Company<input id="library-company"></label>
+      <label id="library-job-label" hidden>Application<select id="library-job"></select></label>
+      <details><summary>Country and compensation context (optional)</summary>
+        <label>Country<input id="library-country" placeholder="For example, United States"></label>
+        <label>Currency<select id="library-currency"><option value="">Any / not applicable</option><option>USD</option><option>CAD</option><option>AUD</option><option>EUR</option><option>GBP</option></select></label>
+        <label>Pay period<select id="library-period"><option value="">Any / not applicable</option><option value="hour">Hourly</option><option value="month">Monthly</option><option value="year">Annual</option></select></label>
+      </details>
+      <p id="library-error" role="alert"></p>
+      <div class="answer-actions"><button type="submit" class="primary">Save reusable answer</button><button id="library-cancel" type="button">Cancel</button></div>
+    </form>
+  </dialog>
 
   <!-- TAB: ACTIVITY (RUN & TIMELINE) -->
   <section id="tab-run" class="tab" hidden>

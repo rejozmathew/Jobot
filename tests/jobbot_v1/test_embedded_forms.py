@@ -346,7 +346,8 @@ def test_embedded_credentials_use_private_helper_and_one_document(tmp_path):
     asyncio.run(check())
 
 
-def test_runtime_captures_missing_question_then_applies_exact_human_answer(tmp_path):
+@pytest.mark.parametrize('answer_origin', ['human','library'])
+def test_runtime_captures_missing_question_then_applies_exact_human_answer(tmp_path,answer_origin):
     async def check():
         from job_applier.application_runtime import browser_action
         from job_applier.managed_client import LocalClient
@@ -367,8 +368,17 @@ def test_runtime_captures_missing_question_then_applies_exact_human_answer(tmp_p
             client=LocalClient(cfg,service=service)
             screen=await observe(page,package)
             refs=[c['ref'] for c in screen['inventory'] if c['name'] in ('privacy','pronouns') or c['role']=='combobox']
+            if answer_origin=='library':
+                entry=service.save_library_answer(identity_id='candidate',question='Technology team leadership experience?',
+                    aliases=['Do you have experience leading technology teams?'],answer='No')
             result=await asyncio.to_thread(browser_action,cfg,client,owner,package,page.target_id,
                 {'method':'request_answers','refs':refs})
+            if answer_origin=='library':
+                assert result['questions']==[] and result['fields'][0]['committed'],result
+                assert submissions==[]
+                history=json.loads((tmp_path/'spool/answers'/f"attempt-{owner['attempt_id']}.json").read_text())
+                assert any(a['answer_basis']==f"answer_library:{entry['id']}:1" for a in history['answers'])
+                return
             assert len(result['questions'])==1,result
             question=result['questions'][0]
             assert question['options']==[{'value':'yes','label':'Yes'},{'value':'no','label':'No'}]
