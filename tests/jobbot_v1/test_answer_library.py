@@ -226,3 +226,24 @@ def test_retiring_knowledge_returns_a_queued_retry_question_to_the_inbox(tmp_pat
     queue=service.answer_queue()
     assert len(queue['inbox'])==1 and queue['inbox'][0]['pending_count']==1
     assert service.answer_retries()['requests']==[]
+
+
+def test_historical_suggestions_include_the_company_and_position_they_came_from(tmp_path):
+    service,session,owner,_,_=connected(tmp_path)
+    with service.tx() as db:
+        db.execute('UPDATE jobs SET company=?,title=? WHERE id=?',('Example Systems','Engineering Manager',session['job_id']))
+    q=request(service,owner,question='What interests you about this position?',kind='text',options=[])
+    service.answer_questions(answers=[{'question_id':q['id'],'answer':'The team leadership scope','expected_revision':0}])
+    suggestion=service.answer_library()['suggestions'][0]
+    assert suggestion['applications']==[dict(job_id=session['job_id'],company='Example Systems',
+        title='Engineering Manager',url=service.job(session['job_id'])['url'])]
+
+
+def test_application_scoped_library_projects_the_company_and_position(tmp_path):
+    service,session,_,_,_=connected(tmp_path)
+    with service.tx() as db:
+        db.execute('UPDATE jobs SET company=?,title=? WHERE id=?',('Example Systems','Engineering Manager',session['job_id']))
+    save(service,scope='job',scope_key=session['job_id'])
+    entry=service.answer_library()['entries'][0]
+    assert entry['application']==dict(id=session['job_id'],company='Example Systems',title='Engineering Manager',url=service.job(session['job_id'])['url'])
+    assert 'application' not in service.answer_library(include_history=False)['entries'][0]

@@ -44,7 +44,7 @@ function sanitizeLegacyClient(data){
  }
  return {clean,skipped:skipped.sort()};
 }
-function showLogin(){if($('library-dialog')?.open)$('library-dialog').close();state.libraryEditing=null;state.answerPage=0;state.answerDrafts.clear();state.answerKey=null;$('answer-groups')?.replaceChildren();if($('answer-count'))$('answer-count').textContent='';state.instance=null;state.view=null;state.run=null;state.attempt=null;state.queueKey=null;state.settingsVersion=null;state.profileCandidate=null;state.selected.clear();for(const id of ['queue-rows','account-rows','history','attempts','events','health','instance','run-owner','focused-context','target-list','extension-list','lesson-list','helper-list','asset-list','assessment-list','profile-import-skipped'])$(id)?.replaceChildren();for(const f of document.querySelectorAll('form'))f.reset();$('console').hidden=true;$('login-panel').hidden=false;$('refresh').hidden=true;$('mode').textContent='Disconnected';if($('profile-hash'))$('profile-hash').textContent='';if($('profile-id'))$('profile-id').textContent='';if($('profile-person-key'))$('profile-person-key').textContent='';if($('profile-resume'))$('profile-resume').textContent='None';if($('main-resume-filename'))$('main-resume-filename').textContent='None registered';}
+function showLogin(){if($('library-dialog')?.open)$('library-dialog').close();state.libraryEditing=null;state.answerPage=0;state.learnedPage=0;state.answerSelections={};state.answerMode='inbox';state.learnedMode='current';state.answerHistory=null;state.answerHistoryRequest=null;state.answerReceipt=null;state.learnedKey=null;state.answerDrafts.clear();state.answerKey=null;for(const id of ['answer-groups','answer-list','answer-pagination','learned-list','learned-detail','learned-pagination','answer-receipt'])$(id)?.replaceChildren();if($('answer-receipt'))$('answer-receipt').hidden=true;if($('answer-count'))$('answer-count').textContent='';state.instance=null;state.view=null;state.run=null;state.attempt=null;state.queueKey=null;state.settingsVersion=null;state.profileCandidate=null;state.selected.clear();for(const id of ['queue-rows','account-rows','history','attempts','events','health','instance','run-owner','focused-context','target-list','extension-list','lesson-list','helper-list','asset-list','assessment-list','profile-import-skipped'])$(id)?.replaceChildren();for(const f of document.querySelectorAll('form'))f.reset();$('console').hidden=true;$('login-panel').hidden=false;$('refresh').hidden=true;$('mode').textContent='Disconnected';if($('profile-hash'))$('profile-hash').textContent='';if($('profile-id'))$('profile-id').textContent='';if($('profile-person-key'))$('profile-person-key').textContent='';if($('profile-resume'))$('profile-resume').textContent='None';if($('main-resume-filename'))$('main-resume-filename').textContent='None registered';}
 function showConsole(){state.profileDirty=false;$('console').hidden=false;$('login-panel').hidden=true;$('refresh').hidden=false;}
 function choice(id,items,value){const select=$(id),before=value??select.value;select.replaceChildren();for(const [v,label]of items){const option=el('option',label);option.value=v;select.append(option);}if(items.some(x=>x[0]===before))select.value=before;}
 function submitted(job){return ['applied','already_applied'].includes(job.status);}
@@ -417,7 +417,7 @@ function renderDispatcher(v){
  }
 }
 function canQueueAnswers(group){return group.disposition!=='canceled'&&!group.pending_count&&!['applied','already_applied'].includes(group.status)&&group.retry?.state!=='queued';}
-function answerError(error){return ({library_answer_exists:'A reusable answer already covers this question. Edit it in Answer library.',unanswered_questions:'Answer every required question before queueing a retry.',answer_revision_conflict:'This answer changed elsewhere. Refresh and review the latest saved answer.',question_changed:'The employer changed this question. Review its current choices.',owned_elsewhere:'Save your answers now; queue a retry after the current application closes.',reconciliation_required:'The previous browser must finish closing before another attempt can start.',already_applied:'This application was already submitted.'})[error.message]||error.message;}
+function answerError(error){return ({library_answer_exists:'A reusable answer already covers this question. Edit it in Learned answers.',unanswered_questions:'Answer every required question before queueing a retry.',answer_revision_conflict:'This answer changed elsewhere. Refresh and review the latest saved answer.',question_changed:'The employer changed this question. Review its current choices.',owned_elsewhere:'Save your answers now; queue a retry after the current application closes.',reconciliation_required:'The previous browser must finish closing before another attempt can start.',already_applied:'This application was already submitted.'})[error.message]||error.message;}
 async function saveAnswerGroup(group,queue){
  const changes=group.questions.filter(q=>state.answerDrafts.has(q.id)).map(q=>{const draft=state.answerDrafts.get(q.id);return {question_id:q.id,answer:draft.value,expected_revision:draft.revision};});
  let saved=false;
@@ -431,155 +431,214 @@ async function saveAnswerGroup(group,queue){
   }
  state.answerKey=null;await refresh();
 }
+state.answerMode='inbox';state.answerSelections={};state.learnedMode='current';state.learnedPage=0;
+const ANSWER_PAGE_SIZE=12;
+function answerText(value){return value==null?'No answer recorded':typeof value==='object'?value.label:String(value);}
+function applicationContext(requests){
+ const context=el('section',undefined,'answer-context');context.setAttribute('aria-label','Companies and positions asking this question');
+ const applications=[...new Map(requests.map(r=>[r.job_id||r.id,r])).values()];
+ context.append(el('p',applications.length===1?'APPLICATION':'APPLICATIONS ASKING THIS QUESTION','eyebrow'));
+ const rows=el('div',undefined,'answer-context-rows');
+ for(const job of applications){const row=el('div',undefined,'answer-context-row');const title=el('div');
+  title.append(el('strong',job.company||'Company not recorded'),el('span',job.title||job.job_title||'Position not recorded'));row.append(title,link(job.url,'Open job posting'));rows.append(row);}
+ context.append(rows);return context;
+}
+function learnedScope(entry,v){
+ if(entry.scope==='global')return 'All matching applications';
+ if(entry.scope==='company'){const job=v.jobs?.find(j=>(j.company||'').normalize('NFKC').trim().toLowerCase()===entry.scope_key);return 'Company: '+(job?.company||entry.scope_key);}
+ const job=entry.application||v.jobs?.find(j=>j.id===entry.scope_key);return job?postingLabel(job):'One application';
+}
+function workspaceList(prefix,items,selected,renderDetail,total=items.length,serverPaged=false){
+ const learned=prefix==='learned',mode=learned?state.learnedMode:state.answerMode;
+ const selectionKey=prefix+':'+mode,old=state.answerSelections[selectionKey];
+ let page=learned?state.learnedPage:state.answerPage||0;
+ let index=items.findIndex(item=>item.id===old?.id);
+ if(index<0)index=Math.min(old?.index??(serverPaged?0:page),Math.max(0,items.length-1));
+ if(!serverPaged){page=Math.floor(index/ANSWER_PAGE_SIZE)*ANSWER_PAGE_SIZE;if(learned)state.learnedPage=page;else state.answerPage=page;}
+ const chosen=items[index];state.answerSelections[selectionKey]=chosen?{id:chosen.id,index}:null;
+ const list=$(prefix+'-list'),detail=$(learned?'learned-detail':'answer-groups');
+ const same=chosen?.id===old?.id,listScroll=list.scrollTop,detailScroll=detail.scrollTop;
+ const focused=document.activeElement,focusId=same&&detail.contains(focused)?focused.id:null;
+ const caret=focusId&&typeof focused.selectionStart==='number'?[focused.selectionStart,focused.selectionEnd]:null;
+ list.replaceChildren();detail.replaceChildren();detail.classList.remove('answer-editor-host');$(prefix+'-pagination').replaceChildren();
+ const shown=serverPaged?items:items.slice(page,page+ANSWER_PAGE_SIZE);
+ for(const item of shown){const row=el('button',undefined,'answer-list-item');row.type='button';row.dataset.answerId=item.id;row.setAttribute('aria-pressed',String(item===chosen));
+  row.append(el('strong',item.company),el('span',item.role,'answer-list-role'),el('span',item.question,'answer-list-question'));
+  if(item.meta)row.append(el('small',item.meta));
+  row.onclick=()=>{state.answerSelections[selectionKey]={id:item.id,index:items.indexOf(item)};if(learned)state.learnedKey=null;else state.answerKey=null;renderAnswers(state.view);};list.append(row);}
+ if(chosen)renderDetail(chosen.value,detail);
+ else{list.append(el('p','No matching items.','answer-empty'));detail.append(el('h3',mode==='inbox'?'You’re caught up.':'Nothing selected'),el('p',mode==='inbox'?'Saved answers are in Learned answers. Applications with all answers saved are in Ready to retry.':'Try another view or search.','answer-empty'));}
+ const pager=$(prefix+'-pagination');
+ for(const [direction,label,disabled,next] of [['previous','Previous',page===0,Math.max(0,page-ANSWER_PAGE_SIZE)],['next','Next',page+ANSWER_PAGE_SIZE>=total,page+ANSWER_PAGE_SIZE]]){
+  const button=el('button',label);button.type='button';button.dataset.page=direction;button.disabled=disabled;
+  button.onclick=()=>{state.answerSelections[selectionKey]={index:serverPaged?0:next};if(learned){state.learnedPage=next;state.learnedKey=null;}else{state.answerPage=next;state.answerKey=null;}renderAnswers(state.view);};pager.append(button);}
+ pager.insertBefore(el('span',`${total?page+1:0}–${Math.min(page+ANSWER_PAGE_SIZE,total)} of ${total}`),pager.lastChild);
+ const picker=$(prefix+'-picker');picker.replaceChildren();for(const item of shown){const option=el('option',[item.company,item.role,item.question].join(' · '));option.value=item.id;picker.append(option);}picker.value=chosen?.id||'';picker.disabled=!chosen;
+ picker.onchange=()=>{const item=items.find(i=>i.id===picker.value);state.answerSelections[selectionKey]={id:item.id,index:items.indexOf(item)};if(learned)state.learnedKey=null;else state.answerKey=null;renderAnswers(state.view);};
+ list.scrollTop=listScroll;if(same)detail.scrollTop=detailScroll;fitAnswerWorkspace();
+ if(focusId&&$(focusId)){const input=$(focusId);input.focus({preventScroll:true});if(caret)input.setSelectionRange(...caret);}
+}
+function fitAnswerWorkspace(){
+ for(const workspace of document.querySelectorAll('.answer-workspace')){const rect=workspace.getBoundingClientRect();if(window.innerWidth<=850)workspace.style.height='';else if(rect.width)workspace.style.height=Math.max(380,Math.min(820,window.innerHeight-rect.top-62))+'px';}
+}
+globalThis.addEventListener?.('resize',fitAnswerWorkspace);
+function renderAnswerReceipt(){
+ const receipt=$('answer-receipt');receipt.replaceChildren();receipt.hidden=!state.answerReceipt;if(!state.answerReceipt)return;
+ receipt.append(el('span','Saved to Learned answers. Matching questions have been checked.'));
+ const view=el('button','View saved answer');view.type='button';view.onclick=()=>openLearnedAnswer(state.answerReceipt.id);receipt.append(view);
+ const dismiss=el('button','Dismiss');dismiss.type='button';dismiss.onclick=()=>{state.answerReceipt=null;renderAnswerReceipt();};receipt.append(dismiss);
+}
+function openLearnedAnswer(id){
+ state.learnedMode='current';state.learnedPage=0;$('learned-search').value='';state.answerSelections['learned:current']={id};state.learnedKey=null;
+ renderLearnedAnswers(state.view);tab('learned');
+}
 function renderAnswers(v){
  if(!$('answer-groups'))return;
+ renderLearnedAnswers(v);renderAnswerReceipt();
  const active=(v.answer_queue?.groups||[]).filter(g=>g.disposition!=='canceled'&&!['applied','already_applied'].includes(g.status));
- const pending=v.answer_queue?.clusters?.length??active.reduce((count,g)=>count+g.pending_count,0);
- $('answer-count').textContent=pending?`(${pending})`:'';
- $('queue-answered-batch').disabled=!active.some(canQueueAnswers);
- const mode=$('answer-view')?.value||'inbox';const term=$('answer-search')?.value.trim().toLowerCase()||'';
- $('answer-summary').textContent=`${pending} distinct question${pending===1?'':'s'} need an answer · ${v.answer_queue?.ready?.length??active.filter(canQueueAnswers).length} applications ready to retry · ${v.answer_queue?.history_count??0} in history`;
- const key=JSON.stringify([mode,term,state.answerPage||0,v.answer_queue,v.answer_library]);if(key===state.answerKey)return;state.answerKey=key;
- $('answer-groups').replaceChildren();
- $('answer-pagination').replaceChildren();
- if(mode==='library'){renderAnswerLibrary(v,term);return;}
- if(mode==='history'){loadAnswerHistory(term,state.answerPage||0,key);return;}
- if(mode==='inbox'&&v.answer_queue?.clusters){renderAnswerClusters(v.answer_queue.clusters,term);return;}
- const groups=active.filter(g=>mode==='ready'?!g.pending_count:g.pending_count).filter(g=>!term||JSON.stringify(g).toLowerCase().includes(term));
- if(!groups.length){$('answer-groups').append(el('p','No application questions are waiting for you.','answer-empty'));return;}
- for(const group of groups){
-  const card=el('article',undefined,'answer-application');
-  const heading=el('div',undefined,'section-title');
-  const title=el('h3');title.append(link(group.url,postingLabel(group)));heading.append(title);
-  heading.append(badge(group.pending_count?'Needs your answer':group.retry?.state==='queued'?'Queued for retry':'Answers saved'));card.append(heading);
-  card.append(el('p',`${group.email} · ${group.pending_count} required question${group.pending_count===1?'':'s'} remaining`,'answer-meta'));
-  for(const question of group.questions.filter(q=>q.state!=='superseded')){
-   const label=el('label',undefined,'answer-field');label.append(el('span',question.question));
-   const draft=state.answerDrafts.get(question.id);
-   const current=draft?draft.value:question.answer;
-   let input;
-   if(question.kind==='text'){input=el('textarea');input.rows=3;input.maxLength=4000;input.value=current??'';}
-   else{
-    input=el('select');const empty=el('option','Choose your answer');empty.value='';empty.disabled=true;input.append(empty);
-    const choices=question.kind==='check'?[{value:'true',label:'Yes'},{value:'false',label:'No'}]:question.options;
-    for(const choice of choices){const option=el('option',choice.label);option.value=question.kind==='check'?choice.value:JSON.stringify([choice.value,choice.label]);input.append(option);}
-    input.value=current===null||current===undefined?'':question.kind==='check'?String(current):JSON.stringify([current.value,current.label]);
-   }
-   input.id='answer-'+question.id;input.setAttribute('aria-label',question.question);input.required=true;
-   input.oninput=()=>{let value=question.kind==='check'?input.value==='true':input.value;
-    if(question.kind==='select'||question.kind==='radio'){const parts=JSON.parse(input.value);value={value:parts[0],label:parts[1]};}
-    state.answerDrafts.set(question.id,{value,revision:state.answerDrafts.get(question.id)?.revision??question.revision});};
-   label.append(input);
-   if(question.answered_at)label.append(el('small',`Saved ${stamp(question.answered_at)}`));
-   card.append(label);
-  }
-  const actions=el('div',undefined,'answer-actions');const save=el('button','Save answers');save.type='button';save.onclick=()=>saveAnswerGroup(group,false);
-  const retry=el('button','Save and queue retry','primary');retry.type='button';retry.disabled=['applied','already_applied'].includes(group.status);retry.onclick=()=>saveAnswerGroup(group,true);actions.append(save,retry);card.append(actions);
-  if(!group.browser_stopped)card.append(el('small','Save your answers to continue in the active application.'));
-  if(group.retry?.state==='queued')card.append(el('small','Ready for pickup by your next application batch.'));
-  const superseded=group.questions.filter(q=>q.state==='superseded');
-  if(superseded.length){const history=el('details');history.append(el('summary','Earlier versions of these questions'));for(const q of superseded)history.append(el('p',q.question+' — choices changed'));card.append(history);}
-  $('answer-groups').append(card);
+ const pending=v.answer_queue?.clusters?.length??active.reduce((count,g)=>count+g.pending_count,0),ready=v.answer_queue?.ready||active.filter(canQueueAnswers);
+ $('answer-count').textContent=pending?`(${pending})`:'';$('inbox-count').textContent=pending;$('ready-count').textContent=ready.length;$('answer-history-count').textContent=v.answer_queue?.history_count??0;
+ $('queue-answered-batch').disabled=!active.some(canQueueAnswers);$('queue-answered-batch').hidden=state.answerMode!=='ready';
+ for(const button of document.querySelectorAll('[data-answer-mode]'))button.setAttribute('aria-pressed',String(button.dataset.answerMode===state.answerMode));
+ $('answer-heading').textContent={inbox:'Needs your answer',ready:'Ready to retry',history:'Answer history'}[state.answerMode];
+ const term=$('answer-search').value.trim().toLowerCase(),mode=state.answerMode;
+ if(mode==='history'){
+  const key=JSON.stringify([term,state.answerPage||0,v.answer_queue?.history_count]);
+  if(state.answerHistory?.key!==key){if(state.answerHistoryRequest!==key){state.answerHistoryRequest=key;loadAnswerHistory(term,state.answerPage||0,key);}return;}
+  const result=state.answerHistory.result;$('answer-summary').textContent=`${result.total} historical application${result.total===1?'':'s'}`;
+  workspaceList('answer',result.groups.map(g=>({id:g.job_id,value:g,company:g.company||'Company not recorded',role:g.title||'Position not recorded',question:`${g.questions.length} recorded questions`,meta:g.disposition==='canceled'?'Canceled':g.retry?.state==='queued'?'Queued for retry':g.status})),null,renderHistoryDetail,result.total,true);return;
+ }
+ const key=JSON.stringify([mode,term,state.answerPage||0,state.answerSelections['answer:'+mode],v.answer_queue]);if(key===state.answerKey)return;state.answerKey=key;
+ if(mode==='inbox'){
+  const clusters=v.answer_queue?.clusters||active.flatMap(g=>g.questions.filter(q=>q.state==='pending').map(q=>({...q,id:q.id,identity_id:g.identity_id,email:g.email,aliases:[],scope:'job',requests:[{...g,question_id:q.id,revision:q.revision}],request_count:1})));
+  const filtered=clusters.filter(c=>!term||JSON.stringify(c).toLowerCase().includes(term));
+  $('answer-summary').textContent=`${filtered.length} question${filtered.length===1?'':'s'}${term?' matching your search':' to answer'}`;
+  workspaceList('answer',filtered.map(c=>{const first=c.requests[0],count=new Set(c.requests.map(r=>r.job_id)).size;return {id:c.id,value:c,company:first.company||'Company not recorded',role:(first.title||'Position not recorded')+(count>1?` + ${count-1} other position${count===2?'':'s'}`:''),question:c.question,meta:`${count} application${count===1?'':'s'}`};}),null,renderClusterDetail);
+ }else{
+  const groups=ready.filter(g=>!term||JSON.stringify(g).toLowerCase().includes(term));$('answer-summary').textContent=`${groups.length} application${groups.length===1?'':'s'} ready to retry`;
+  workspaceList('answer',groups.map(g=>({id:g.job_id,value:g,company:g.company||'Company not recorded',role:g.title||'Position not recorded',question:`${g.questions.filter(q=>q.state!=='superseded').length} answers saved`,meta:g.email})),null,renderReadyDetail);
  }
 }
-
 function answerInput(question,id,current){
  let input;
- if(question.kind==='text'){input=el('textarea');input.rows=3;input.maxLength=4000;input.value=current??'';}
+ if(question.kind==='text'){input=el('textarea');input.rows=4;input.maxLength=4000;input.value=current??'';}
  else{input=el('select');const blank=el('option','Choose your answer');blank.value='';blank.disabled=true;input.append(blank);
   for(const option of question.kind==='check'?[{value:'true',label:'Yes'},{value:'false',label:'No'}]:question.options){
    const choice=el('option',option.label);choice.value=question.kind==='check'?option.value:JSON.stringify([option.value,option.label]);input.append(choice);}
   input.value=current==null?'':question.kind==='check'?String(current):JSON.stringify([current.value,current.label]);}
  input.id=id;input.setAttribute('aria-label',question.question);input.required=true;return input;
 }
-function renderAnswerClusters(clusters,term){
- const shown=clusters.filter(c=>!term||JSON.stringify(c).toLowerCase().includes(term));
- if(!shown.length){$('answer-groups').append(el('p','No questions need your answer.','answer-empty'));return;}
- for(const cluster of shown){
-  const form=el('form',undefined,'answer-application');form.append(el('h3',cluster.question));
-  form.append(el('p',`${cluster.email} · ${cluster.request_count} request${cluster.request_count===1?'':'s'} across ${new Set(cluster.requests.map(r=>r.job_id)).size} application${new Set(cluster.requests.map(r=>r.job_id)).size===1?'':'s'}`,'answer-meta'));
-  const question=cluster.requests[0];const draft=state.answerDrafts.get(question.question_id);
-  const field=el('label',undefined,'answer-field');field.append(el('span','Your answer'));
-  const input=answerInput(cluster,'answer-'+question.question_id,draft?.value);field.append(input);form.append(field);
-  input.oninput=()=>{const value=cluster.kind==='check'?input.value==='true':cluster.kind==='text'?input.value:((parts)=>({value:parts[0],label:parts[1]}))(JSON.parse(input.value));
-   state.answerDrafts.set(question.question_id,{...state.answerDrafts.get(question.question_id),value,revision:question.revision});};
-  const scopeLabel=el('label',undefined,'answer-field');scopeLabel.append(el('span','Reuse this answer for'));
-  const scope=el('select');for(const [value,label] of [['global','All matching applications'],['company','One company'],['job','One application']]){const option=el('option',label);option.value=value;scope.append(option);}scope.value=draft?.scope||cluster.scope;
-  const target=el('select');const update=()=>{target.replaceChildren();target.hidden=scope.value==='global';
-   const seen=new Set();for(const request of cluster.requests){const value=scope.value==='company'?request.company:request.job_id;if(!value||seen.has(value))continue;seen.add(value);
-    const option=el('option',scope.value==='company'?request.company:postingLabel(request));option.value=value;target.append(option);}};
-  const rememberScope=()=>state.answerDrafts.set(question.question_id,{...state.answerDrafts.get(question.question_id),scope:scope.value,scope_key:target.value});
-  scope.onchange=()=>{update();rememberScope();};target.onchange=rememberScope;update();if(draft?.scope_key)target.value=draft.scope_key;scopeLabel.append(scope,target);form.append(scopeLabel);
-  const requests=el('details',undefined,'answer-request-list');requests.append(el('summary','Applications asking this question'));
-  for(const request of cluster.requests){const row=el('div');row.append(link(request.url,postingLabel(request)),el('small',' — '+request.question));requests.append(row);}form.append(requests);
-  const actions=el('div',undefined,'answer-actions');const save=el('button','Save reusable answer','primary');save.type='submit';actions.append(save);form.append(actions);
-  form.onsubmit=async event=>{event.preventDefault();if(!input.reportValidity())return;save.disabled=true;
-   try{const draft=state.answerDrafts.get(question.question_id);if(!draft)throw Error('Enter your answer.');
-    await api('save_library_answer',{identity_id:cluster.identity_id,question:cluster.question,
-     answer:typeof draft.value==='object'?draft.value.label:draft.value,aliases:cluster.aliases,
-     scope:scope.value,scope_key:target.hidden?'':target.value,conditions:{},expected_revision:0});
-    state.answerDrafts.delete(question.question_id);notice('Reusable answer saved. Matching questions checked; earlier responses kept.');state.answerKey=null;await refresh();
-   }catch(error){notice(answerError(error),true);}finally{save.disabled=false;}};
-  $('answer-groups').append(form);
- }
+function inputAnswer(input,kind){return kind==='check'?input.value==='true':kind==='text'?input.value:((parts)=>({value:parts[0],label:parts[1]}))(JSON.parse(input.value));}
+function renderClusterDetail(cluster,container){
+ container.classList.add('answer-editor-host');
+ const form=el('form',undefined,'answer-application');form.append(applicationContext(cluster.requests));
+ form.append(el('h3',cluster.question,'answer-question-heading'),el('p',`Answering for ${cluster.email}`,'answer-meta'));
+ const question=cluster.requests[0],draft=state.answerDrafts.get(question.question_id);
+ const field=el('label',undefined,'answer-field');field.append(el('span','Your answer'));
+ const input=answerInput(cluster,'answer-'+question.question_id,draft?.value);field.append(input);form.append(field);
+ input.oninput=()=>state.answerDrafts.set(question.question_id,{...state.answerDrafts.get(question.question_id),value:inputAnswer(input,cluster.kind),revision:question.revision});
+ const scopeLabel=el('label',undefined,'answer-field');scopeLabel.append(el('span','Use this answer for'));
+ const scope=el('select');scope.setAttribute('aria-label','Use this answer for');
+ for(const [value,label] of [['global','Any application asking this question'],['company','One company'],['job','One position only']]){const option=el('option',label);option.value=value;scope.append(option);}scope.value=draft?.scope||cluster.scope;
+ const target=el('select');target.setAttribute('aria-label','Company or position to reuse this answer for');
+ const update=()=>{target.replaceChildren();target.hidden=scope.value==='global';const seen=new Set();
+  for(const request of cluster.requests){const value=scope.value==='company'?request.company:request.job_id;if(!value||seen.has(value))continue;seen.add(value);const option=el('option',scope.value==='company'?request.company:postingLabel(request));option.value=value;target.append(option);}};
+ const remember=()=>state.answerDrafts.set(question.question_id,{...state.answerDrafts.get(question.question_id),scope:scope.value,scope_key:target.value});
+ scope.onchange=()=>{update();remember();};target.onchange=remember;update();if(draft?.scope_key)target.value=draft.scope_key;scopeLabel.append(scope,target);form.insertBefore(scopeLabel,field);
+ const body=el('div',undefined,'answer-editor-body');for(const child of [...form.children])body.append(child);form.append(body);
+ const actions=el('div',undefined,'answer-actions answer-save-bar'),save=el('button','Save to Learned answers','primary');save.type='submit';actions.append(save);form.append(actions);
+
+ form.onsubmit=async event=>{event.preventDefault();if(save.disabled||!input.reportValidity())return;save.disabled=true;save.textContent='Saving…';
+  const submittedDraft=state.answerDrafts.get(question.question_id);
+  try{if(submittedDraft?.value===undefined)throw Error('Enter your answer.');
+   const result=await api('save_library_answer',{identity_id:cluster.identity_id,question:cluster.question,answer:typeof submittedDraft.value==='object'?submittedDraft.value.label:submittedDraft.value,aliases:cluster.aliases,scope:scope.value,scope_key:target.hidden?'':target.value,conditions:{},expected_revision:0});
+   if(state.answerDrafts.get(question.question_id)===submittedDraft)state.answerDrafts.delete(question.question_id);
+   state.answerReceipt={id:result.id};renderAnswerReceipt();notice('Saved to Learned answers. Matching questions checked.');state.answerKey=null;await refresh();
+  }catch(error){notice(answerError(error),true);}finally{save.disabled=false;save.textContent='Save to Learned answers';}};
+ container.append(form);
 }
-function renderAnswerLibrary(v,term){
- const entries=(v.answer_library?.entries||[]).filter(e=>!term||JSON.stringify([e.question,e.answer,e.aliases,e.scope_key]).toLowerCase().includes(term));
- const suggestions=(v.answer_library?.suggestions||[]).filter(e=>!term||JSON.stringify(e).toLowerCase().includes(term));
- if(!entries.length)$('answer-groups').append(el('p','Create a reusable answer here or answer a grouped question. Your approved profile facts are also checked automatically.','answer-empty'));
- for(const entry of entries){
-  const card=el('article',undefined,'answer-application');const candidate=v.candidates?.find(c=>c.id===entry.identity_id);
-  const heading=el('div',undefined,'section-title');heading.append(el('h3',entry.question),badge(entry.state==='active'?'Current':'Retired'));card.append(heading);
-  card.append(el('p',String(entry.answer)),el('small',`${candidate?.email||entry.identity_id} · ${entry.scope==='global'?'All matching applications':entry.scope==='company'?entry.scope_key:'Application '+entry.scope_key} · Updated ${stamp(entry.updated_at)} · Version ${entry.revision}`));
-  if(Object.keys(entry.conditions||{}).length)card.append(el('p',Object.entries(entry.conditions).map(([k,value])=>k+': '+value).join(' · '),'answer-meta'));
-  const actions=el('div',undefined,'answer-actions');const edit=el('button','Edit');edit.onclick=()=>editLibraryAnswer(entry);const retire=el('button',entry.state==='active'?'Retire':'Restore');
-  retire.onclick=async()=>{try{await api('set_library_answer_state',{entry_id:entry.id,state:entry.state==='active'?'retired':'active',expected_revision:entry.revision});notice('Reusable answer updated. Response history kept.');state.answerKey=null;await refresh();}catch(error){notice(answerError(error),true);}};
-  actions.append(edit,retire);card.append(actions);
-  const history=el('details',undefined,'answer-library-history');history.append(el('summary',`${entry.history?.length||0} saved versions`));
-  for(const version of entry.history||[])history.append(el('p',`Version ${version.revision} · ${stamp(version.updated_at)} · ${version.state}\n${version.question}\n${version.answer}`));card.append(history);$('answer-groups').append(card);
+function renderReadyDetail(group,container){
+ const card=el('article',undefined,'answer-application');card.append(applicationContext([group]),el('h3','Answers saved — ready to retry','answer-question-heading'),el('p',group.email,'answer-meta'));
+ for(const question of group.questions.filter(q=>q.state!=='superseded')){
+  const label=el('label',undefined,'answer-field');label.append(el('span',question.question));
+  const input=answerInput(question,'answer-'+question.id,state.answerDrafts.get(question.id)?.value??question.answer);
+  input.oninput=()=>state.answerDrafts.set(question.id,{value:inputAnswer(input,question.kind),revision:state.answerDrafts.get(question.id)?.revision??question.revision});label.append(input);
+  if(question.library_entry_id){const view=el('button','View learned answer');view.type='button';view.onclick=()=>openLearnedAnswer(question.library_entry_id);label.append(view);}
+  card.append(label);
  }
- if(suggestions.length){$('answer-groups').append(el('h3','Suggestions from earlier responses'));
-  $('answer-groups').append(el('p','Review these before making them reusable. Different past answers are shown together.','answer-meta'));
-  for(const suggestion of suggestions){const card=el('article',undefined,'answer-application');card.append(el('h3',suggestion.question),el('p',`${suggestion.request_count} earlier responses · ${suggestion.answers.map(String).join(' / ')}`));
-   const review=el('button','Review suggestion');review.onclick=()=>editLibraryAnswer({...suggestion,answer:suggestion.answers.length===1?suggestion.answers[0]:'',conditions:{}});card.append(review);$('answer-groups').append(card);}}
+ const actions=el('div',undefined,'answer-actions'),save=el('button','Save answers'),retry=el('button','Save and queue retry','primary');
+ save.onclick=()=>saveAnswerGroup(group,false);retry.onclick=()=>saveAnswerGroup(group,true);actions.append(save,retry);card.append(actions);
+ if(!group.browser_stopped)card.append(el('p','Save your answers to continue in the active application.'));
+ container.append(card);
+}
+function renderHistoryDetail(group,container){
+ const card=el('article',undefined,'answer-application');card.append(applicationContext([group]),el('h3','Recorded questions and responses','answer-question-heading'),el('p',group.email,'answer-meta'));
+ for(const [index,question] of group.questions.entries()){
+  const details=el('details',undefined,'answer-library-history');details.open=index===0;details.append(el('summary',question.question),el('p',answerText(question.answer)),el('small',question.answer_source||question.state));
+  for(const response of question.answer_history||[])details.append(el('p',`Version ${response.revision} · ${stamp(response.created_at)} · ${response.source}\n${answerText(response.answer)}`));
+  if(question.answer!=null){const reuse=el('button','Review as a learned answer');reuse.onclick=()=>editLibraryAnswer({identity_id:group.identity_id,question:question.question,answer:answerText(question.answer),scope:group.company?'company':'job',scope_key:group.company||group.job_id,aliases:[],conditions:{}});details.append(reuse);}card.append(details);
+ }container.append(card);
+}
+function renderLearnedAnswers(v){
+ const library=v.answer_library||{entries:[],suggestions:[]},entries=library.entries||[],suggestions=library.suggestions||[];
+ $('learned-count').textContent=`(${entries.filter(e=>e.state==='active').length})`;
+ $('learned-current-count').textContent=entries.filter(e=>e.state==='active').length;$('learned-retired-count').textContent=entries.filter(e=>e.state==='retired').length;$('learned-suggestion-count').textContent=suggestions.length;
+ for(const button of document.querySelectorAll('[data-learned-mode]'))button.setAttribute('aria-pressed',String(button.dataset.learnedMode===state.learnedMode));
+ const term=$('learned-search').value.trim().toLowerCase(),mode=state.learnedMode;
+ const key=JSON.stringify([library,term,mode,state.learnedPage,state.answerSelections['learned:'+mode]]);if(key===state.learnedKey)return;state.learnedKey=key;
+ const items=(mode==='suggestions'?suggestions:entries.filter(e=>e.state===(mode==='retired'?'retired':'active'))).filter(e=>!term||JSON.stringify([e,learnedScope(e,v)]).toLowerCase().includes(term));
+ $('learned-summary').textContent=`${items.length} ${mode==='suggestions'?'suggestions to review':mode==='retired'?'retired answers':'learned answers'}`;
+ workspaceList('learned',items.map((e,i)=>({id:e.id||'suggestion-'+i,value:e,company:e.question,role:learnedScope(e,v),question:mode==='suggestions'?e.answers.map(answerText).join(' / '):answerText(e.answer),meta:mode==='suggestions'?`${e.request_count} earlier responses`:v.candidates?.find(c=>c.id===e.identity_id)?.email||e.identity_id})),null,(entry,container)=>{
+  const card=el('article',undefined,'answer-application');card.append(el('p',learnedScope(entry,v),'eyebrow'),el('h3',entry.question,'answer-question-heading'));
+  if(entry.scope==='job'){const job=entry.application||v.jobs?.find(j=>j.id===entry.scope_key);if(job)card.prepend(applicationContext([job]));}
+  if(mode==='suggestions'){
+   if(entry.applications?.length)card.prepend(applicationContext(entry.applications));
+   card.append(el('p','Review this earlier response before making it a current reusable answer.','answer-meta'));
+   for(const answer of entry.answers)card.append(el('p',answerText(answer),'learned-answer-value'));
+   const review=el('button','Review and save','primary');review.onclick=()=>editLibraryAnswer({...entry,answer:entry.answers.length===1?entry.answers[0]:'',conditions:{}});card.append(review);
+  }else{
+   card.append(el('p',entry.state==='active'?'CURRENT ANSWER':'RETIRED ANSWER','eyebrow'),el('p',answerText(entry.answer),'learned-answer-value'),el('p',`Updated ${stamp(entry.updated_at)} · Version ${entry.revision}`,'answer-meta'));
+   if(Object.keys(entry.conditions||{}).length)card.append(el('p',Object.entries(entry.conditions).map(([k,value])=>k+': '+value).join(' · ')));
+   const actions=el('div',undefined,'answer-actions'),edit=el('button','Edit answer','primary'),retire=el('button',entry.state==='active'?'Retire answer':'Restore answer');
+   edit.onclick=()=>editLibraryAnswer(entry);retire.onclick=async()=>{retire.disabled=true;try{await api('set_library_answer_state',{entry_id:entry.id,state:entry.state==='active'?'retired':'active',expected_revision:entry.revision});notice('Learned answer updated. Earlier responses kept.');state.learnedKey=null;state.answerKey=null;await refresh();}catch(error){notice(answerError(error),true);}finally{retire.disabled=false;}};actions.append(edit,retire);card.append(actions);
+   if(entry.aliases?.length){const wording=el('details');wording.append(el('summary',`${entry.aliases.length} other question wordings`));for(const alias of entry.aliases)wording.append(el('p',alias));card.append(wording);}
+   const history=el('details',undefined,'answer-library-history');history.append(el('summary',`${entry.history?.length||0} saved versions`));for(const version of entry.history||[])history.append(el('p',`Version ${version.revision} · ${stamp(version.updated_at)} · ${version.state}\n${version.question}\n${answerText(version.answer)}`));card.append(history);
+  }container.append(card);
+ });
 }
 function libraryScopeControls(){const scope=$('library-scope').value;$('library-company-label').hidden=scope!=='company';$('library-job-label').hidden=scope!=='job';}
 function editLibraryAnswer(entry={}){
  const form=$('library-form');form.reset();state.libraryEditing=entry.id?entry:null;$('library-error').textContent='';
  choice('library-candidate',(state.view?.candidates||[]).map(c=>[c.id,c.email]),entry.identity_id||$('candidate').value);$('library-candidate').disabled=!!entry.id;
- choice('library-job',(state.view?.jobs||[]).map(j=>[j.id,postingLabel(j)]),entry.scope==='job'?entry.scope_key:undefined);
+ const jobs=[...(state.view?.jobs||[])];if(entry.scope==='job'&&!jobs.some(j=>j.id===entry.scope_key))jobs.push(entry.application||{id:entry.scope_key,title:'Saved application'});
+ choice('library-job',jobs.map(j=>[j.id,postingLabel(j)]),entry.scope==='job'?entry.scope_key:undefined);
  $('library-question').value=entry.question||'';$('library-answer').value=entry.answer===true?'Yes':entry.answer===false?'No':entry.answer??'';
  $('library-aliases').value=(entry.aliases||[]).join('\n');$('library-scope').value=entry.scope||'global';$('library-company').value=entry.scope==='company'?entry.scope_key:'';
  for(const key of ['country','currency','period'])$('library-'+key).value=entry.conditions?.[key]||'';
- libraryScopeControls();$('library-editor-title').textContent=entry.id?'Edit reusable answer':'Add reusable answer';$('library-dialog').showModal();
+ libraryScopeControls();$('library-editor-title').textContent=entry.id?'Edit learned answer':'Add learned answer';$('library-dialog').showModal();
 }
 async function loadAnswerHistory(term,offset,key){
- try{const result=await api('answer_queue_history',{search:term,offset,limit:25});if(state.answerKey!==key||$('answer-view').value!=='history')return;
-  if(!result.groups.length)$('answer-groups').append(el('p','No matching history.','answer-empty'));
-  for(const group of result.groups){const card=el('article',undefined,'answer-application');card.append(link(group.url,postingLabel(group)),badge(group.disposition==='canceled'?'Canceled':group.retry?.state==='queued'?'Queued for retry':group.status));
-   card.append(el('p',group.email,'answer-meta'));for(const question of group.questions){const details=el('details',undefined,'answer-library-history');details.append(el('summary',question.question));
-    const text=value=>value==null?'No answer recorded':typeof value==='object'?value.label:String(value);
-    details.append(el('p',text(question.answer)),el('small',question.answer_source||question.state));
-    for(const response of question.answer_history||[])details.append(el('p',`Version ${response.revision} · ${stamp(response.created_at)} · ${response.source}\n${text(response.answer)}`));
-    if(question.answer!=null){const reuse=el('button','Use as reusable answer');reuse.onclick=()=>editLibraryAnswer({identity_id:group.identity_id,question:question.question,answer:typeof question.answer==='object'?question.answer.label:question.answer,scope:'company',scope_key:group.company||'',aliases:[],conditions:{}});details.append(reuse);}card.append(details);}
-   $('answer-groups').append(card);}
-  const previous=el('button','Previous');previous.disabled=offset===0;previous.onclick=()=>{state.answerPage=Math.max(0,offset-25);state.answerKey=null;renderAnswers(state.view);};
-  const next=el('button','Next');next.disabled=offset+25>=result.total;next.onclick=()=>{state.answerPage=offset+25;state.answerKey=null;renderAnswers(state.view);};
-  $('answer-pagination').append(previous,el('span',`${result.total?offset+1:0}–${Math.min(offset+25,result.total)} of ${result.total}`),next);
- }catch(error){if(state.answerKey===key){state.answerKey=null;notice(error.message,true);}}
+ $('answer-list').replaceChildren(el('p','Loading history…','answer-empty'));$('answer-groups').replaceChildren();$('answer-pagination').replaceChildren();
+ try{const result=await api('answer_queue_history',{search:term,offset,limit:ANSWER_PAGE_SIZE});if(state.answerHistoryRequest!==key||state.answerMode!=='history')return;
+  state.answerHistory={key,result};state.answerHistoryRequest=null;renderAnswers(state.view);
+ }catch(error){if(state.answerHistoryRequest===key){state.answerHistoryRequest=null;$('answer-list').replaceChildren(el('p','Could not load history. Try again.','answer-empty'));notice(error.message,true);}}
 }
-$('answer-view').onchange=()=>{state.answerPage=0;state.answerKey=null;renderAnswers(state.view);};
-$('answer-search').oninput=()=>{state.answerPage=0;state.answerKey=null;renderAnswers(state.view);};
+function setAnswerMode(mode){state.answerMode=mode;state.answerPage=0;state.answerKey=null;state.answerHistoryRequest=null;renderAnswers(state.view);}
+for(const button of document.querySelectorAll('[data-answer-mode]'))button.onclick=()=>setAnswerMode(button.dataset.answerMode);
+for(const button of document.querySelectorAll('[data-learned-mode]'))button.onclick=()=>{state.learnedMode=button.dataset.learnedMode;state.learnedPage=0;state.learnedKey=null;renderLearnedAnswers(state.view);};
+$('answer-search').oninput=()=>{state.answerPage=0;state.answerSelections['answer:'+state.answerMode]=null;state.answerKey=null;renderAnswers(state.view);};
+$('learned-search').oninput=()=>{state.learnedPage=0;state.answerSelections['learned:'+state.learnedMode]=null;state.learnedKey=null;renderLearnedAnswers(state.view);};
 $('add-library-answer').onclick=()=>editLibraryAnswer();$('library-cancel').onclick=()=>$('library-dialog').close();$('library-scope').onchange=libraryScopeControls;
 $('library-form').onsubmit=async event=>{event.preventDefault();const save=event.currentTarget.querySelector('[type=submit]');if(save.disabled)return;save.disabled=true;
  try{const conditions={};for(const key of ['country','currency','period'])if($('library-'+key).value.trim())conditions[key]=$('library-'+key).value.trim();
-  await api('save_library_answer',{identity_id:$('library-candidate').value,question:$('library-question').value,answer:$('library-answer').value,
+  const entry=await api('save_library_answer',{identity_id:$('library-candidate').value,question:$('library-question').value,answer:$('library-answer').value,
    aliases:$('library-aliases').value.split('\n').map(q=>q.trim()).filter(Boolean),scope:$('library-scope').value,
    scope_key:$('library-scope').value==='company'?$('library-company').value:$('library-scope').value==='job'?$('library-job').value:'',conditions,
    ...(state.libraryEditing?{entry_id:state.libraryEditing.id}:{}),expected_revision:state.libraryEditing?.revision||0});
-  $('library-dialog').close();notice('Reusable answer saved. Matching outstanding questions checked.');state.answerKey=null;await refresh();
+  $('library-dialog').close();notice('Saved to Learned answers. Matching outstanding questions checked.');state.answerKey=null;state.learnedKey=null;await refresh();openLearnedAnswer(entry.id);
  }catch(error){$('library-error').textContent=answerError(error);}finally{save.disabled=false;}};
 $('reconcile-answers').onclick=async()=>{try{const result=await api('reconcile_answers');notice(`${result.resolved} questions resolved; ${result.updated} answers updated. History kept.`);state.answerKey=null;await refresh();}catch(error){notice(error.message,true);}};
+
 function renderRun(v){
  choice('run-picker',v.runs.map(r=>[r.id,`${stamp(r.requested_at)} · ${r.state}`]),state.run||v.current_run?.run_id);
  const r=v.current_run;$('run-counts').replaceChildren();$('attempts').replaceChildren();
@@ -844,7 +903,7 @@ function refresh(){
  }while(state.refreshRequested&&state.instance);}finally{state.busy=false;state.refreshPromise=null;}})();
  return state.refreshPromise;
 }
-function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!=='tab-'+name);document.querySelectorAll('[data-tab]').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));}
+function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!=='tab-'+name);document.querySelectorAll('[data-tab]').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));for(const n of document.querySelectorAll('nav [data-tab]')){if(n.dataset.tab===name)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}fitAnswerWorkspace();}
 $('reconnect').onclick=()=>location.reload();
 $('refresh').onclick=refresh;document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function filterJobs(){rememberProgress($('queue-rows'));state.queueKey=null;state.selected.clear();if(state.view)renderQueue(state.view);}

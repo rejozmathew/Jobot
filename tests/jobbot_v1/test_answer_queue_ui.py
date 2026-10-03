@@ -41,19 +41,55 @@ def test_dashboard_saves_drafts_and_queues_answered_applications(tmp_path):
                 await asyncio.sleep(.05)
             await page.evaluate("document.querySelector('[data-tab=answers]').click()")
             assert await page.evaluate("document.getElementById('answer-count').textContent")=='(2)'
+            assert await page.evaluate("document.querySelector('#answer-groups .answer-context').textContent.includes('Example Systems')")
+            assert await page.evaluate("document.querySelector('#answer-groups .answer-context').textContent.includes('Engineering Manager')")
+            await page.evaluate("""window.answerUxOriginal=state.view;window.answerUxRefresh=refresh;refresh=async()=>{};
+                const snapshot=JSON.parse(JSON.stringify(state.view)),base=snapshot.answer_queue.clusters[0];
+                snapshot.answer_queue.clusters=Array.from({length:35},(_,i)=>({...base,id:'ux-'+i,question:'Question '+i+' about this position',kind:'text',options:[],
+                  requests:[{...base.requests[0],question_id:'ux-question-'+i,company:i===0?'Example Systems':'Employer '+i,title:i===0?'Engineering Manager':'Leadership role '+i}],request_count:1}));
+                state.view=snapshot;state.answerSelections={};state.answerKey=null;renderAnswers(snapshot);""")
+            assert await page.evaluate("document.querySelectorAll('#answer-list .answer-list-item').length")==12
+            assert await page.evaluate("document.querySelectorAll('#answer-groups form').length")==1
+            await asyncio.sleep(.2)
+            assert await page.evaluate("const button=document.querySelector('#answer-groups [type=submit]').getBoundingClientRect(),panel=document.getElementById('answer-groups').getBoundingClientRect();button.bottom<=panel.bottom&&button.top>=panel.top"),'Save action is outside the visible editor'
+            assert await page.evaluate("document.querySelector('#answer-groups .answer-field select').getBoundingClientRect().bottom<=document.querySelector('#answer-groups .answer-save-bar').getBoundingClientRect().top"),'Sticky Save action hides the reuse scope'
+            await page.screenshot(str(tmp_path/'answer-workspace-desktop.png'))
+            await page.evaluate("document.querySelector('#answer-pagination [data-page=next]').click()")
+            assert await page.evaluate("document.querySelector('#answer-pagination').textContent.includes('13–24 of 35')")
+            await page._session.call('Emulation.setDeviceMetricsOverride',{'width':390,'height':844,'deviceScaleFactor':1,'mobile':True})
+            await asyncio.sleep(.2)
+            await page.screenshot(str(tmp_path/'answer-workspace-mobile.png'))
+            assert await page.evaluate("document.documentElement.scrollWidth<=window.innerWidth"),'Mobile layout overflows horizontally'
+            assert await page.evaluate("document.getElementById('answer-picker').getBoundingClientRect().height>0"),'Mobile question picker is hidden'
+            await page.evaluate("const picker=document.getElementById('answer-picker');picker.selectedIndex=1;picker.dispatchEvent(new Event('change'));")
+            assert await page.evaluate("document.querySelector('#answer-groups .answer-context').textContent.includes('Employer 13')")
+            await page._session.call('Emulation.setDeviceMetricsOverride',{'width':1920,'height':1080,'deviceScaleFactor':1,'mobile':False})
+            await page.evaluate("document.querySelector('#answer-pagination [data-page=previous]').click()")
+            await asyncio.sleep(.2)
+            await page.screenshot(str(tmp_path/'answer-workspace-wide.png'))
+            await page._session.call('Emulation.setDeviceMetricsOverride',{'width':1280,'height':1000,'deviceScaleFactor':1,'mobile':False})
+            await page.evaluate("refresh=window.answerUxRefresh;state.view=window.answerUxOriginal;state.answerSelections={};state.answerKey=null;renderAnswers(state.view);delete window.answerUxOriginal;delete window.answerUxRefresh;")
+            async def select_question(identifier):
+                await page.evaluate_function("""id=>{const cluster=state.view.answer_queue.clusters.find(c=>c.requests.some(r=>r.question_id===id));
+                    document.querySelector('[data-answer-id="'+cluster.id+'"]').click();}""",identifier)
+            await select_question(first['id'])
+            await asyncio.sleep(.2)
             await page.screenshot(str(tmp_path/'answer-queue-before.png'))
             await page.evaluate_function('''args=>{const field=document.getElementById('answer-'+args.id);
                 field.value=JSON.stringify(args.value);field.dispatchEvent(new Event('input',{bubbles:true}));}''',{'id':first['id'],'value':['yes','Yes']})
+            await select_question(second['id'])
             await page.evaluate_function('''args=>{const field=document.getElementById('answer-'+args.id);
                 field.value=args.value;field.dispatchEvent(new Event('input',{bubbles:true}));}''',{'id':second['id'],'value':'After two weeks notice'})
             await page.evaluate('refresh()')
             assert await page.evaluate_function('id=>document.getElementById("answer-"+id).value',second['id'])=='After two weeks notice'
             await page.evaluate("document.querySelector('#answer-groups form').requestSubmit()")
             deadline=time.monotonic()+5
-            while service.questions_for_attempt(owner['attempt_id'])['questions'][0]['state']=='pending':
+            while next(q for q in service.questions_for_attempt(owner['attempt_id'])['questions'] if q['id']==second['id'])['state']=='pending':
                 assert time.monotonic()<deadline
                 await asyncio.sleep(.05)
             await page.evaluate('refresh()')
+            await select_question(first['id'])
+            assert await page.evaluate_function('id=>JSON.parse(document.getElementById("answer-"+id).value)',first['id'])==['yes','Yes'],'Switching questions lost an unsaved draft'
             await page.evaluate("document.querySelector('#answer-groups form').requestSubmit()")
             deadline=time.monotonic()+5
             while service.answer_queue()['groups'][0]['pending_count']:
@@ -61,7 +97,12 @@ def test_dashboard_saves_drafts_and_queues_answered_applications(tmp_path):
                 await asyncio.sleep(.05)
             assert service.answer_retries(identity_id='candidate')['requests']==[],'Save must not launch or queue work'
             await page.evaluate('refresh()')
-            await page.evaluate("document.getElementById('answer-view').value='ready';document.getElementById('answer-view').onchange()")
+            await page.evaluate("document.querySelector('#answer-receipt button').click()")
+            assert await page.evaluate("!document.getElementById('tab-learned').hidden")
+            assert await page.evaluate("document.querySelectorAll('#learned-list .answer-list-item').length")==2
+            await asyncio.sleep(.2)
+            await page.screenshot(str(tmp_path/'learned-answers.png'))
+            await page.evaluate("document.querySelector('nav [data-tab=answers]').click();document.querySelector('[data-answer-mode=ready]').click()")
             await page.evaluate_function('''id=>{const field=document.getElementById('answer-'+id);
                 field.value=JSON.stringify(['no','No']);field.dispatchEvent(new Event('input',{bubbles:true}));}''',first['id'])
             service.answer_questions(answers=[{'question_id':first['id'],'answer':'yes','expected_revision':1}])
@@ -74,10 +115,12 @@ def test_dashboard_saves_drafts_and_queues_answered_applications(tmp_path):
                 assert time.monotonic()<deadline
                 await asyncio.sleep(.05)
             await page.evaluate('refresh()')
+            await asyncio.sleep(.2)
             await page.screenshot(str(tmp_path/'answer-queue-after.png'))
             assert service.session(session['id'])['ended_at'],'Queueing must not adopt a stopped browser'
             await page.evaluate('showLogin()')
             assert await page.evaluate("document.getElementById('answer-groups').childElementCount")==0
+            assert await page.evaluate("document.getElementById('learned-detail').childElementCount")==0
     try:asyncio.run(check())
     finally:
         server.should_exit=True;thread.join(timeout=5);sock.close()

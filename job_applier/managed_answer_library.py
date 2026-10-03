@@ -244,8 +244,12 @@ class AnswerLibraryServices:
                 entry['history'] = [json.loads(r[0]) for r in db.execute(
                     'SELECT snapshot_json FROM answer_library_versions WHERE entry_id=? ORDER BY revision DESC', (entry['id'],))]
             if not include_history:return {'entries':entries, 'suggestions':[]}
+            for entry in entries:
+                if entry['scope']=='job':
+                    application=db.execute('SELECT id,company,title,url FROM jobs WHERE id=?',(entry['scope_key'],)).fetchone()
+                    if application:entry['application']=dict(application)
             # Human history supplies proposals, never becomes active knowledge by itself.
-            rows = db.execute('''SELECT q.*,j.company,a.answer_json AS historical_answer_json FROM application_questions q
+            rows = db.execute('''SELECT q.*,j.company,j.title,j.url,a.answer_json AS historical_answer_json FROM application_questions q
                 JOIN jobs j ON j.id=q.job_id JOIN application_question_answers a ON a.question_id=q.id
                 WHERE a.source IN ('user_dashboard','user_reply') AND a.answer_json IS NOT NULL'''
                 + (' AND q.identity_id=?' if identity_id else '') + ' ORDER BY q.last_seen_at DESC',
@@ -257,12 +261,14 @@ class AnswerLibraryServices:
                 if scope=='company' and not key[2]:scope='job';key=(*key[:2],q['job_id'])
                 if any(e['state']=='active' and matches(e,q,dict(id=q['job_id'],company=row['company'])) for e in entries if e['identity_id']==q['identity_id']):continue
                 item = proposals.setdefault(key, dict(identity_id=q['identity_id'], question=q['question'], aliases=[], scope=scope,
-                    scope_key=key[2], answers=[], request_count=0, question_ids=[]))
+                    scope_key=key[2], answers=[], request_count=0, question_ids=[], applications=[]))
                 historical = json.loads(row['historical_answer_json'])
                 answer = historical['label'] if isinstance(historical, dict) else historical
                 if answer not in item['answers']:item['answers'].append(answer)
                 if q['question']!=item['question'] and q['question'] not in item['aliases']:item['aliases'].append(q['question'])
                 item['request_count'] += 1;item['question_ids'].append(q['id'])
+                if not any(application['job_id']==q['job_id'] for application in item['applications']):
+                    item['applications'].append(dict(job_id=q['job_id'],company=row['company'],title=row['title'],url=row['url']))
             return {'entries':entries, 'suggestions':list(proposals.values())[:50]}
 
     @staticmethod

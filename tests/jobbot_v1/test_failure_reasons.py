@@ -458,6 +458,13 @@ class FakeElement {{
   }}
   setAttribute(attr, val) {{ this.attributes[attr] = String(val); }}
   getAttribute(attr) {{ return this.attributes[attr] !== undefined ? this.attributes[attr] : null; }}
+      contains(node) {{ return node===this || this.children.some(c=>c.contains(node)); }}
+      get lastChild() {{ return this.children[this.children.length-1] || null; }}
+      insertBefore(node, before) {{
+        const index=this.children.indexOf(before);
+        if(index<0) this.append(node);
+        else {{ this.children.splice(index,0,node); this.textContent=this.children.map(c=>c.textContent).join(''); }}
+      }}
   closest() {{ return this; }}
   querySelector(sel) {{ return this.querySelectorAll(sel)[0] || null; }}
   querySelectorAll(sel) {{

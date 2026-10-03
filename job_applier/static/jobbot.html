@@ -34,6 +34,7 @@
   <nav aria-label="Workspace">
     <button data-tab="queue" class="active">Applications</button>
     <button data-tab="answers">Needs your answer <span id="answer-count"></span></button>
+    <button data-tab="learned">Learned answers <span id="learned-count"></span></button>
     <button data-tab="run">Activity</button>
     <button data-tab="profile">Profile</button>
     <button data-tab="settings">Settings</button>
@@ -194,21 +195,48 @@
   </section>
 
   <section id="tab-answers" class="tab" hidden>
-    <section class="card">
+    <section class="card answers-card">
       <div class="section-title">
-        <h2>Application answers</h2>
+        <div><h2 id="answer-heading">Needs your answer</h2><p>Choose a question to see the company, position and applications it belongs to.</p></div>
         <button id="queue-answered-batch" type="button">Queue all answered applications</button>
       </div>
-      <p>Answer once for matching applications. Edit your reusable answers as your circumstances change; earlier responses stay in history.</p>
       <div class="answer-toolbar">
-        <label>Show<select id="answer-view"><option value="inbox">Needs an answer</option><option value="ready">Ready to retry</option><option value="library">Answer library</option><option value="history">History</option></select></label>
-        <label>Search<input id="answer-search" type="search" placeholder="Question, company or answer"></label>
-        <button id="add-library-answer" type="button">Add reusable answer</button>
-        <button id="reconcile-answers" type="button">Check saved knowledge</button>
+        <div class="answer-segments" role="group" aria-label="Application answer views">
+          <button type="button" data-answer-mode="inbox" aria-pressed="true">Unanswered <span id="inbox-count"></span></button>
+          <button type="button" data-answer-mode="ready" aria-pressed="false">Ready to retry <span id="ready-count"></span></button>
+          <button type="button" data-answer-mode="history" aria-pressed="false">History <span id="answer-history-count"></span></button>
+        </div>
+        <label class="answer-search-label"><span class="sr-only">Search questions and applications</span><input id="answer-search" type="search" placeholder="Search company, position or question"></label>
       </div>
-      <p id="answer-summary" class="answer-meta"></p>
-      <div id="answer-groups"></div>
-      <div id="answer-pagination" class="answer-actions"></div>
+      <div id="answer-receipt" role="status" aria-live="polite" hidden></div>
+      <label class="answer-mobile-picker">Choose a question or application<select id="answer-picker"></select></label>
+      <div class="answer-workspace">
+        <aside class="answer-sidebar" aria-label="Questions and applications"><p id="answer-summary" class="answer-list-summary"></p><div id="answer-list" class="answer-list"></div><div id="answer-pagination" class="answer-pagination"></div></aside>
+        <div id="answer-groups" class="answer-detail" role="region" aria-label="Selected question and application details" tabindex="-1"></div>
+      </div>
+      <p class="answer-flow-note">Saved answers go to <button type="button" data-tab="learned">Learned answers</button>. Fully answered applications appear in Ready to retry.</p>
+    </section>
+  </section>
+
+  <section id="tab-learned" class="tab" hidden>
+    <section class="card answers-card">
+      <div class="section-title">
+        <div><h2>Learned answers</h2><p>Your current reusable questions and answers. Edit these when your circumstances change.</p></div>
+        <div class="answer-actions"><button id="reconcile-answers" type="button">Check unanswered questions</button><button id="add-library-answer" class="primary" type="button">Add learned answer</button></div>
+      </div>
+      <div class="answer-toolbar">
+        <div class="answer-segments" role="group" aria-label="Learned answer views">
+          <button type="button" data-learned-mode="current" aria-pressed="true">Current <span id="learned-current-count"></span></button>
+          <button type="button" data-learned-mode="retired" aria-pressed="false">Retired <span id="learned-retired-count"></span></button>
+          <button type="button" data-learned-mode="suggestions" aria-pressed="false">Suggestions <span id="learned-suggestion-count"></span></button>
+        </div>
+        <label class="answer-search-label"><span class="sr-only">Search learned answers</span><input id="learned-search" type="search" placeholder="Search question, answer, company or position"></label>
+      </div>
+      <label class="answer-mobile-picker">Choose a learned answer<select id="learned-picker"></select></label>
+      <div class="answer-workspace">
+        <aside class="answer-sidebar" aria-label="Learned answer list"><p id="learned-summary" class="answer-list-summary"></p><div id="learned-list" class="answer-list"></div><div id="learned-pagination" class="answer-pagination"></div></aside>
+        <div id="learned-detail" class="answer-detail" role="region" aria-label="Selected learned answer" tabindex="-1"></div>
+      </div>
     </section>
   </section>
 
@@ -228,7 +256,7 @@
         <label>Pay period<select id="library-period"><option value="">Any / not applicable</option><option value="hour">Hourly</option><option value="month">Monthly</option><option value="year">Annual</option></select></label>
       </details>
       <p id="library-error" role="alert"></p>
-      <div class="answer-actions"><button type="submit" class="primary">Save reusable answer</button><button id="library-cancel" type="button">Cancel</button></div>
+      <div class="answer-actions"><button type="submit" class="primary">Save learned answer</button><button id="library-cancel" type="button">Cancel</button></div>
     </form>
   </dialog>
 

@@ -31,9 +31,15 @@ retain the selected library ID/revision as provenance. Simplify order, browser
 ownership, writer checks and submission evidence remain unchanged.
 
 The dashboard groups repeated outstanding requests and can save one scoped answer
-for them. Its Needs an answer, Ready to retry, Answer library and History views
-separate action from records. Submitted, canceled, archived and explicitly queued
-answer retries leave the inbox without asserting that an unanswered question was
+for them. Learned answers has its own top-level navigation entry. The inbox,
+ready applications, history and learned answers each use a paginated 12-row list
+and one focused detail pane. Company and position are visible before answering;
+question selection and drafts survive polling and list reordering. Mobile uses a
+question/application picker. Save receipts link directly to the learned answer,
+and a resolved question advances to the next request without losing other drafts.
+Historical suggestions include the companies and positions they came from.
+These views separate action from records. Submitted, canceled, archived and
+explicitly queued answer retries leave the inbox without asserting that an unanswered question was
 answered. History is searchable and paginated, including response revisions.
 Human response history supplies library proposals; conflicting historical answers
 are shown together and proposals are not silently promoted into current facts.
