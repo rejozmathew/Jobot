@@ -127,7 +127,8 @@ def test_conflicting_human_history_proposes_review_without_automatic_promotion(t
     service.answer_questions(answers=[{'question_id':q['id'],'answer':'no','expected_revision':1}])
     library=service.answer_library()
     assert library['entries']==[]
-    assert set(library['suggestions'][0]['answers'])=={'Yes','No'}
+    assert {s['source']['answer'] for s in library['suggestions']}=={'Yes','No'}
+    assert all(s['state']=='pending' for s in library['suggestions'])
 
 
 def test_terminal_and_canceled_requests_keep_answers_and_restore_to_inbox(tmp_path):
@@ -235,8 +236,9 @@ def test_historical_suggestions_include_the_company_and_position_they_came_from(
     q=request(service,owner,question='What interests you about this position?',kind='text',options=[])
     service.answer_questions(answers=[{'question_id':q['id'],'answer':'The team leadership scope','expected_revision':0}])
     suggestion=service.answer_library()['suggestions'][0]
-    assert suggestion['applications']==[dict(job_id=session['job_id'],company='Example Systems',
-        title='Engineering Manager',url=service.job(session['job_id'])['url'])]
+    assert {key:suggestion['source'][key] for key in ('job_id','company','title','url')}==dict(job_id=session['job_id'],company='Example Systems',
+        title='Engineering Manager',url=service.job(session['job_id'])['url'])
+    assert suggestion['state']=='pending' and suggestion['answer'] is None
 
 
 def test_application_scoped_library_projects_the_company_and_position(tmp_path):

@@ -272,13 +272,18 @@ def serve(config, service):
     from .managed_client import Client
     token=credential(config['operator_token_env'],config)
     service.executor_config=config
+    from .answer_learning import AnswerLearner
+    learner=AnswerLearner(service,config)
+    learner.start()
     service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}
     with Client(config['base_url'],config['instance_id'],token):pass
     workers=json.loads(credential(config['worker_tokens_env'],config)) if config.get('worker_tokens_env') else {
         credential(config['worker_token_env'],config):config['worker_id']}
     address=urlsplit(config['base_url'])
-    uvicorn.run(create_app(service,operator_token=token,worker_tokens=workers),
-                host=address.hostname,port=address.port or 60158,access_log=False)
+    try:
+        uvicorn.run(create_app(service,operator_token=token,worker_tokens=workers),
+                    host=address.hostname,port=address.port or 60158,access_log=False)
+    finally:learner.stop.set()
 
 
 def main(argv=None):

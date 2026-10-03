@@ -301,7 +301,21 @@ def migration_26(db):
         add_columns(db, table, {'library_entry_id':'TEXT', 'library_revision':'INTEGER'})
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23), (24, migration_24), (25, migration_25), (26, migration_26)]
+def migration_27(db):
+    # Existing raw entries retain their IDs/history while awaiting AI synthesis.
+    add_columns(db, 'answer_library_entries', {'origin': "TEXT NOT NULL DEFAULT 'legacy'"})
+    db.execute('''CREATE TABLE answer_learning_sources (
+        id TEXT PRIMARY KEY,identity_id TEXT NOT NULL REFERENCES candidates(id),kind TEXT NOT NULL,
+        source_id TEXT NOT NULL,source_revision INTEGER NOT NULL,payload_json TEXT NOT NULL,
+        state TEXT NOT NULL,entry_id TEXT, result_json TEXT,error_code TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL,retry_at TEXT,
+        UNIQUE(kind,source_id,source_revision))''')
+    db.execute('CREATE INDEX learning_pending ON answer_learning_sources(state,retry_at)')
+    db.execute('''CREATE TABLE answer_learning_reviews (
+        id TEXT PRIMARY KEY,state TEXT NOT NULL,updated_at TEXT NOT NULL,retry_at TEXT)''')
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23), (24, migration_24), (25, migration_25), (26, migration_26), (27, migration_27)]
 
 
 def migrate(path):

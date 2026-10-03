@@ -1,5 +1,40 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 3: AI learns generalized knowledge from application responses
+
+The inbox's primary **Save answer** action records human responses for the selected
+applications using `answer_questions`. **Add reusable answer** is a separate optional
+manual action. Saving a response does not create an exact-copy library entry or wait
+for inference. Fully answered applications use the existing retry flow.
+
+Migration 27 adds response-learning work records and an origin label on current
+knowledge. The dashboard's independent `AnswerLearner` thread synthesizes reusable,
+general questions and grounded first-person answers through the installed Hermes
+auxiliary client and its authenticated provider configuration. It runs no application
+executor, tools, browser or application session, and never holds a database transaction
+while waiting for a model. Learning failures retry independently; human responses,
+application progress, dispatch policy and browser recovery remain available.
+
+Original questions, answers, company/position context and version history remain
+inspectable. Existing raw library entries retain their IDs and immutable earlier
+versions while AI generalizes them. Already-general questions can retain their wording.
+A response containing only application-specific facts stays in history; the model
+must not invent generic candidate facts. Company/job scope and currency, pay period,
+country and time qualifiers are retained. Exact source quotations substantiate each
+extraction. New facts conflicting with current knowledge appear for review, and
+concurrent edits win over model results. AI-derived entries edited by the user remain
+labelled as such; manual entries are labelled **Added by you**.
+
+A second auxiliary pass compares pending questions with current knowledge and adds
+only equivalent question wording. Reconciliation still maps current answers to the
+actual form choices and checks scope/conditions. A generalized career motivation
+cannot automatically stand in for an incomplete compound employer-specific response.
+Unchanged misses are cached; changes to current knowledge permit another review.
+The application executor receives the generic knowledge in its existing context.
+The Learned answers tab separates current knowledge from learning activity and
+shows the original source responses. Closed application responses feed learning
+without returning to the actionable inbox.
+
 ## October 2: current reusable answers and an actionable inbox
 
 Migration 26 adds an operator-owned Answer library in the authoritative database.
@@ -35,14 +70,14 @@ for them. Learned answers has its own top-level navigation entry. The inbox,
 ready applications, history and learned answers each use a paginated 12-row list
 and one focused detail pane. Company and position are visible before answering;
 question selection and drafts survive polling and list reordering. Mobile uses a
-question/application picker. Save receipts link directly to the learned answer,
+question/application picker. Save receipts link to AI learning activity,
 and a resolved question advances to the next request without losing other drafts.
-Historical suggestions include the companies and positions they came from.
+Learning records include the companies and positions they came from.
 These views separate action from records. Submitted, canceled, archived and
 explicitly queued answer retries leave the inbox without asserting that an unanswered question was
 answered. History is searchable and paginated, including response revisions.
-Human response history supplies library proposals; conflicting historical answers
-are shown together and proposals are not silently promoted into current facts.
+Human response history supplies background synthesis inputs; conflicting facts require
+review before replacing current editable knowledge.
 The existing dispatcher reevaluates current knowledge once per minute, including
 while automation is paused; it performs no browser work or model calls. Existing
 queue policy still controls whether and when an answered application retries.
@@ -954,7 +989,8 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | browser_controls.py / browser_helpers/form_controls.js | Shared form reader including Apply, committed-selection verification, posting metadata, private code groups and remaining_submission_work; iCIMS entry guidance; used by submission, browser runtime, answer capture, credentials and Workday |
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_queue._settle_reconciled_queue | Called inside successful manual reconciliation; atomically settles only queued rows for the related job and same identity. Existing stopped-session/newer-attempt checks and dispatched/history rows remain intact. |
-| managed_answer_library.py / migration 26 | Current candidate-scoped knowledge, aliases, applicability, append-only revisions and historical proposals; called by profile writes, question capture, operator APIs, application context, shared saved_answer and the dispatcher minute reconciliation. No browser/helper outcome authority. |
+| managed_answer_library.py / migration 26 | Current candidate-scoped knowledge, aliases, applicability, append-only revisions and synthesis provenance; called by profile writes, question capture, operator APIs, application context, shared saved_answer and the dispatcher minute reconciliation. No browser/helper outcome authority. |
+| answer_learning.py / answer_learning_model.py / migration 27 | Dashboard-owned background synthesis and equivalent wording review; uses the installed Hermes auxiliary inference client without application tools/sessions. Called by queue_runtime.serve; human saves enqueue durable inputs in the same database. No application/helper outcome authority. |
 | managed_questions.py / migrations 16 and 26 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
 | application_answers.py | Shared label_has, match_answer_to_option, approved_answer, answer_action and saved_answer (re-exported by LinkedIn); approved Greenhouse plan journal restoration; interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |
 | submission.py / browser_helpers/submission_observe.js | One activation per explicit call, current incomplete-form continuation, retained dispatch evidence and native/Simplify confirmation; local browser and Workday callers |

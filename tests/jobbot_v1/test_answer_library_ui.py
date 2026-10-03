@@ -14,16 +14,18 @@ w.draw(v);w.noRefresh();w.drawAnswers(v);
 '''
 
 
-def test_grouped_inbox_saves_one_reusable_answer_with_aliases():
+def test_grouped_inbox_saves_application_replies_without_adding_raw_library_entries():
     dashboard_check(FIXTURE + r'''
-assert(doc.getElementById('answer-count').textContent==='(1)','Badge counts requests rather than distinct questions');
-assert(doc.querySelectorAll('#answer-groups .answer-application').length===1,'Duplicate requests still create separate cards');
 const input=doc.getElementById('answer-q1');input.value='After two weeks notice';input.oninput();
-let payload;w.fetch=async(path,options)=>{assert(path==='/v1/save_library_answer','Saving launched an application or wrote a browser');payload=JSON.parse(options.body);return {ok:true,status:200,json:async()=>({id:'saved'})};};
-const form=doc.querySelector('#answer-groups form');await form.onsubmit({preventDefault(){}});
-assert(payload.answer==='After two weeks notice'&&payload.scope==='global','Reusable answer lost meaning or scope');
-assert(payload.aliases[0]==='When could you start?'&&payload.identity_id==='candidate','Alias or candidate omitted');
-assert(!JSON.stringify(payload).includes('ref'),'Browser refs leaked into reusable knowledge');
+let payload;w.fetch=async(path,options)=>{assert(path==='/v1/answer_questions','Save must persist a human application response');payload=JSON.parse(options.body);return {ok:true,status:200,json:async()=>({questions:[]})};};
+const form=doc.querySelector('#answer-groups form');
+assert(form.querySelector('[type=submit]').textContent==='Save answer','Primary save still requires adding knowledge');
+assert([...form.querySelectorAll('button')].some(b=>b.textContent==='Add reusable answer'),'Optional manual reusable answer is missing');
+await form.onsubmit({preventDefault(){}});
+assert(payload.answers.length===2,'Matching requests were not answered');
+assert(payload.answers[0].answer==='After two weeks notice'&&payload.answers[0].question_id==='q1','Human answer lost');
+assert(payload.answers[1].question_id==='q2','Other matching application omitted');
+assert(doc.getElementById('answer-receipt').textContent.includes('AI'),'Background learning destination is unclear');
 ''')
 
 
@@ -101,13 +103,13 @@ doc.querySelector('[data-answer-id=next]').click();let input=doc.getElementById(
 doc.querySelector('[data-answer-id=cluster]').click();input=doc.getElementById('answer-q1');input.value='Two weeks';input.oninput();
 w.fetch=async()=>({ok:true,status:200,json:async()=>({id:'saved'})});
 await doc.querySelector('#answer-groups form').onsubmit({preventDefault(){}});
-assert(!doc.getElementById('answer-receipt').hidden&&doc.getElementById('answer-receipt').textContent.includes('Learned answers'),'Save destination is unclear');
-v.answer_queue.clusters=[next];v.answer_library={entries:[{id:'saved',identity_id:'candidate',question:'When can you start?',answer:'Two weeks',scope:'global',state:'active',revision:1,history:[]}],suggestions:[]};
+assert(!doc.getElementById('answer-receipt').hidden&&doc.getElementById('answer-receipt').textContent.includes('AI'),'Save destination is unclear');
+v.answer_queue.clusters=[next];v.answer_library={entries:[{id:'saved',identity_id:'candidate',question:'When can you start?',answer:'Two weeks',scope:'global',state:'active',revision:1,history:[]}],suggestions:[{id:'source',identity_id:'candidate',question:'When can you start?',state:'pending',source:{question:'When can you start?',answer:'Two weeks',job_id:'job-a',company:'Example',title:'Role A'}}]};
 w.drawAnswers(v);
 assert(doc.getElementById('answer-q3').value==='My next draft','Saving failed to advance or lost another draft');
 doc.querySelector('#answer-receipt button').click();
 assert(!doc.getElementById('tab-learned').hidden&&doc.getElementById('tab-answers').hidden,'View saved answer did not open its destination');
-assert(doc.getElementById('learned-detail').textContent.includes('Two weeks'),'Saved answer cannot be found');
+assert(doc.getElementById('learned-detail').textContent.includes('Two weeks'),'Original response cannot be found in AI learning activity');
 ''')
 
 

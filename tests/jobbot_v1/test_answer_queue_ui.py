@@ -97,7 +97,15 @@ def test_dashboard_saves_drafts_and_queues_answered_applications(tmp_path):
                 await asyncio.sleep(.05)
             assert service.answer_retries(identity_id='candidate')['requests']==[],'Save must not launch or queue work'
             await page.evaluate('refresh()')
-            await page.evaluate("document.querySelector('#answer-receipt button').click()")
+            assert service.answer_library()['entries']==[], 'Human saves must not become raw learned answers'
+            def generalize(payload):
+                source=payload['sources'][0]
+                return dict(reusable=True,question='Start availability?' if 'start' in source['question'] else 'Work authorization?',
+                    answer=source['answer'],scope='global',scope_key='',conditions=source['conditions'],source_equivalent=True,
+                    existing_entry_id=None,evidence_quotes=[str(source['answer'])])
+            service.learn_answers(generator=generalize);service.learn_answers(generator=generalize)
+            await page.evaluate('refresh()')
+            await page.evaluate("document.querySelector('#answer-receipt button').click();document.querySelector('[data-learned-mode=current]').click()")
             assert await page.evaluate("!document.getElementById('tab-learned').hidden")
             assert await page.evaluate("document.querySelectorAll('#learned-list .answer-list-item').length")==2
             await asyncio.sleep(.2)

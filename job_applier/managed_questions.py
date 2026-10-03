@@ -165,6 +165,7 @@ class QuestionServices:
                 db.execute("UPDATE application_questions SET state='answered',answer_json=?,answer_source=?,answered_at=?,revision=?,library_entry_id=NULL,library_revision=NULL WHERE id=?",
                     (dumps(value),source,now,revision,question['id']))
                 saved.append(self._question(self._get(db,'application_questions',question['id'])))
+                self._enqueue_answer_learning(db, saved[-1])
             return {'questions':saved}
 
     def answer_from_user(self,attempt_id,*,worker_id,fence,answers,reply_evidence):

@@ -214,24 +214,25 @@
         <aside class="answer-sidebar" aria-label="Questions and applications"><p id="answer-summary" class="answer-list-summary"></p><div id="answer-list" class="answer-list"></div><div id="answer-pagination" class="answer-pagination"></div></aside>
         <div id="answer-groups" class="answer-detail" role="region" aria-label="Selected question and application details" tabindex="-1"></div>
       </div>
-      <p class="answer-flow-note">Saved answers go to <button type="button" data-tab="learned">Learned answers</button>. Fully answered applications appear in Ready to retry.</p>
+      <p class="answer-flow-note">Save answers here for the applications shown. AI extracts reusable knowledge in <button type="button" data-tab="learned">Learned answers</button>. Fully answered applications appear in Ready to retry.</p>
     </section>
   </section>
 
   <section id="tab-learned" class="tab" hidden>
     <section class="card answers-card">
       <div class="section-title">
-        <div><h2>Learned answers</h2><p>Your current reusable questions and answers. Edit these when your circumstances change.</p></div>
-        <div class="answer-actions"><button id="reconcile-answers" type="button">Check unanswered questions</button><button id="add-library-answer" class="primary" type="button">Add learned answer</button></div>
+        <div><h2>Learned answers</h2><p>AI extracts general knowledge from your application responses. Edit it as your circumstances change, or add reusable answers manually.</p></div>
+        <div class="answer-actions"><button id="retry-learning" type="button">Run AI learning</button><button id="reconcile-answers" type="button">Check unanswered questions</button><button id="add-library-answer" class="primary" type="button">Add reusable answer</button></div>
       </div>
       <div class="answer-toolbar">
         <div class="answer-segments" role="group" aria-label="Learned answer views">
           <button type="button" data-learned-mode="current" aria-pressed="true">Current <span id="learned-current-count"></span></button>
           <button type="button" data-learned-mode="retired" aria-pressed="false">Retired <span id="learned-retired-count"></span></button>
-          <button type="button" data-learned-mode="suggestions" aria-pressed="false">Suggestions <span id="learned-suggestion-count"></span></button>
+          <button type="button" data-learned-mode="suggestions" aria-pressed="false">Learning activity <span id="learned-suggestion-count"></span></button>
         </div>
         <label class="answer-search-label"><span class="sr-only">Search learned answers</span><input id="learned-search" type="search" placeholder="Search question, answer, company or position"></label>
       </div>
+      <p id="learning-status" class="answer-meta" role="status"></p>
       <label class="answer-mobile-picker">Choose a learned answer<select id="learned-picker"></select></label>
       <div class="answer-workspace">
         <aside class="answer-sidebar" aria-label="Learned answer list"><p id="learned-summary" class="answer-list-summary"></p><div id="learned-list" class="answer-list"></div><div id="learned-pagination" class="answer-pagination"></div></aside>
@@ -256,7 +257,7 @@
         <label>Pay period<select id="library-period"><option value="">Any / not applicable</option><option value="hour">Hourly</option><option value="month">Monthly</option><option value="year">Annual</option></select></label>
       </details>
       <p id="library-error" role="alert"></p>
-      <div class="answer-actions"><button type="submit" class="primary">Save learned answer</button><button id="library-cancel" type="button">Cancel</button></div>
+      <div class="answer-actions"><button type="submit" class="primary">Save reusable answer</button><button id="library-cancel" type="button">Cancel</button></div>
     </form>
   </dialog>
 

@@ -1,7 +1,8 @@
 """Current operator-owned answer knowledge; historical responses remain snapshots.
 
-Matching is deterministic. Known narrow intents and operator-entered aliases can
-travel between forms; field IDs, option values and document URLs cannot.
+AI extracts general knowledge and equivalent wording in a separate background worker.
+Application reuse checks current scope, conditions and actual form options; field IDs,
+option values and document URLs never become reusable knowledge.
 """
 import hashlib
 import json
@@ -10,6 +11,7 @@ import unicodedata
 
 from .managed_shared import ProtocolError, dumps, uid
 from .managed_redaction import reject_secrets
+from .answer_learning import AnswerLearningServices
 
 
 def normalized(text):
@@ -110,7 +112,7 @@ def resolve_library(question, job, entries):
             'basis':'answer_library:' + entry['id'] + ':' + str(entry['revision'])}
 
 
-class AnswerLibraryServices:
+class AnswerLibraryServices(AnswerLearningServices):
     @staticmethod
     def _has_library_schema(db):
         return bool(db.execute("SELECT 1 FROM sqlite_master WHERE name='answer_library_entries'").fetchone())
@@ -118,6 +120,7 @@ class AnswerLibraryServices:
     @staticmethod
     def _library_entry(row):
         value = dict(row)
+        value.setdefault('origin', 'legacy')
         for key in ('answer', 'aliases', 'conditions'):
             value[key] = json.loads(value.pop(key + '_json'))
         return value
@@ -174,6 +177,12 @@ class AnswerLibraryServices:
 
     def save_library_answer(self, *, identity_id, question, answer, aliases=None, scope='global', scope_key='',
                             conditions=None, entry_id=None, expected_revision=0):
+        return self._save_library_answer(identity_id=identity_id, question=question, answer=answer,
+            aliases=aliases, scope=scope, scope_key=scope_key, conditions=conditions,
+            entry_id=entry_id, expected_revision=expected_revision)
+
+    def _save_library_answer(self, *, identity_id, question, answer, aliases=None, scope='global', scope_key='',
+                            conditions=None, entry_id=None, expected_revision=0, origin=None, learning_source=None):
         from .managed_questions import PRIVATE
         if not isinstance(question, str) or not 1 <= len(question.strip()) <= 4000 or PRIVATE.search(question):
             raise ProtocolError('invalid_library_question')
@@ -204,21 +213,46 @@ class AnswerLibraryServices:
                     if e['state']=='active' and e['scope']==scope and e['scope_key']==scope_key and e['conditions']==conditions
                     and question_identity(e['question'])==question_identity(question)),None)
                 if duplicate:
-                    if duplicate['answer']==answer and duplicate['aliases']==aliases:return duplicate
+                    if duplicate['answer']==answer and duplicate['aliases']==aliases:
+                        if learning_source:
+                            if not self._learning_source_current(db,learning_source):raise ProtocolError('learning_source_changed')
+                            db.execute("UPDATE answer_learning_sources SET state='learned',entry_id=?,updated_at=? WHERE id=?",(duplicate['id'],self.now(),learning_source['id']))
+                        return duplicate
                     raise ProtocolError('library_answer_exists')
             if old and old['identity_id'] != identity_id:raise ProtocolError('asset_identity_mismatch')
             if expected_revision != (old['revision'] if old else 0):raise ProtocolError('answer_revision_conflict')
+            if learning_source and not self._learning_source_current(db, learning_source):raise ProtocolError('learning_source_changed')
+            origin = origin or ('ai_edited' if old and old.get('origin') in ('ai','ai_edited') else 'manual')
             identifier = entry_id or uid();revision = expected_revision + 1;now = self.now()
             entry = dict(id=identifier, identity_id=identity_id, question=question, answer=answer, aliases=aliases,
                          scope=scope, scope_key=scope_key, conditions=conditions, state='active', revision=revision,
-                         created_at=old['created_at'] if old else now, updated_at=now)
+                         created_at=old['created_at'] if old else now, updated_at=now, origin=origin)
             db.execute('''INSERT INTO answer_library_entries
-                (id,identity_id,question,answer_json,aliases_json,scope,scope_key,conditions_json,state,revision,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET question=excluded.question,answer_json=excluded.answer_json,
+                (id,identity_id,question,answer_json,aliases_json,scope,scope_key,conditions_json,state,revision,created_at,updated_at,origin)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET question=excluded.question,answer_json=excluded.answer_json,
                 aliases_json=excluded.aliases_json,scope=excluded.scope,scope_key=excluded.scope_key,conditions_json=excluded.conditions_json,
-                state=excluded.state,revision=excluded.revision,updated_at=excluded.updated_at''',
-                (identifier, identity_id, question, dumps(answer), dumps(aliases), scope, scope_key, dumps(conditions), 'active', revision, entry['created_at'], now))
+                state=excluded.state,revision=excluded.revision,updated_at=excluded.updated_at,origin=excluded.origin''',
+                (identifier, identity_id, question, dumps(answer), dumps(aliases), scope, scope_key, dumps(conditions), 'active', revision, entry['created_at'], now, origin))
             db.execute('INSERT INTO answer_library_versions VALUES (?,?,?,?)', (identifier, revision, dumps(entry), now))
+            if learning_source:
+                db.execute("UPDATE answer_learning_sources SET state='learned',entry_id=?,updated_at=? WHERE id=?", (identifier,now,learning_source['id']))
+                if learning_source['kind']=='legacy':
+                    # The old UI saved human replies as library-derived responses.
+                    # If synthesis extracts only part of that reply, preserve its
+                    # full application response rather than reopening the question.
+                    for row in db.execute("""SELECT q.* FROM application_questions q JOIN jobs j ON j.id=q.job_id
+                        WHERE q.library_entry_id=? AND q.answer_source='answer_library' AND q.state='answered'
+                        AND j.disposition!='canceled' AND j.status NOT IN ('applied','already_applied')
+                        AND NOT EXISTS (SELECT 1 FROM job_archives a WHERE a.job_id=j.id)""",(learning_source['source_id'],)).fetchall():
+                        response=self._question(row);job=dict(self._get(db,'jobs',response['job_id']))
+                        if not matches(entry,response,job):
+                            self._record_question_answer(db,response,response['answer'],'user_dashboard',
+                                evidence='Original operator response retained during AI generalization')
+                if learning_source['kind']=='legacy' and learning_source['source_id']!=identifier:
+                    earlier=self._library_entry(self._get(db,'answer_library_entries',learning_source['source_id']))
+                    earlier.update(state='retired',revision=earlier['revision']+1,updated_at=now)
+                    db.execute("UPDATE answer_library_entries SET state='retired',revision=?,updated_at=? WHERE id=?",(earlier['revision'],now,earlier['id']))
+                    db.execute('INSERT INTO answer_library_versions VALUES (?,?,?,?)',(earlier['id'],earlier['revision'],dumps(earlier),now))
             self._reconcile_answers(db, identity_id)
             return entry
 
@@ -248,28 +282,11 @@ class AnswerLibraryServices:
                 if entry['scope']=='job':
                     application=db.execute('SELECT id,company,title,url FROM jobs WHERE id=?',(entry['scope_key'],)).fetchone()
                     if application:entry['application']=dict(application)
-            # Human history supplies proposals, never becomes active knowledge by itself.
-            rows = db.execute('''SELECT q.*,j.company,j.title,j.url,a.answer_json AS historical_answer_json FROM application_questions q
-                JOIN jobs j ON j.id=q.job_id JOIN application_question_answers a ON a.question_id=q.id
-                WHERE a.source IN ('user_dashboard','user_reply') AND a.answer_json IS NOT NULL'''
-                + (' AND q.identity_id=?' if identity_id else '') + ' ORDER BY q.last_seen_at DESC',
-                (identity_id,) if identity_id else ()).fetchall()
-            proposals = {}
-            for row in rows:
-                q = self._question(row);scope = recommended_scope(q['question'])
-                key = (q['identity_id'], question_identity(q['question']), company_key(row['company'] or '') if scope=='company' else '')
-                if scope=='company' and not key[2]:scope='job';key=(*key[:2],q['job_id'])
-                if any(e['state']=='active' and matches(e,q,dict(id=q['job_id'],company=row['company'])) for e in entries if e['identity_id']==q['identity_id']):continue
-                item = proposals.setdefault(key, dict(identity_id=q['identity_id'], question=q['question'], aliases=[], scope=scope,
-                    scope_key=key[2], answers=[], request_count=0, question_ids=[], applications=[]))
-                historical = json.loads(row['historical_answer_json'])
-                answer = historical['label'] if isinstance(historical, dict) else historical
-                if answer not in item['answers']:item['answers'].append(answer)
-                if q['question']!=item['question'] and q['question'] not in item['aliases']:item['aliases'].append(q['question'])
-                item['request_count'] += 1;item['question_ids'].append(q['id'])
-                if not any(application['job_id']==q['job_id'] for application in item['applications']):
-                    item['applications'].append(dict(job_id=q['job_id'],company=row['company'],title=row['title'],url=row['url']))
-            return {'entries':entries, 'suggestions':list(proposals.values())[:50]}
+            learning = self._learning_view(db, identity_id)
+            for entry in entries if self._has_learning_schema(db) else []:
+                entry['sources'] = [json.loads(r[0]) for r in db.execute(
+                    "SELECT payload_json FROM answer_learning_sources WHERE entry_id=? AND state='learned' ORDER BY updated_at DESC", (entry['id'],))]
+            return {'entries':entries, 'suggestions':learning.pop('activity'), 'learning':learning}
 
     @staticmethod
     def _answer_clusters(groups):
@@ -289,6 +306,6 @@ class AnswerLibraryServices:
                     scope=scope, scope_key=key[2], requests=[], request_count=0))
                 if question['question']!=item['question'] and question['question'] not in item['aliases']:item['aliases'].append(question['question'])
                 item['requests'].append(dict(question_id=question['id'], revision=question['revision'], job_id=group['job_id'],
-                    company=group['company'], title=group['title'], url=group['url'], question=question['question']))
+                    company=group['company'], title=group['title'], url=group['url'], question=question['question'], options=question['options']))
                 item['request_count'] += 1
         return list(clusters.values())

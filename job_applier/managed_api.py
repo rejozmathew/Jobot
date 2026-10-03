@@ -17,6 +17,7 @@ OPERATOR=OPERATOR|frozenset({'lesson_observe','lesson_set_status','lesson_record
 OPERATOR=OPERATOR|frozenset({'sessions_view','session_status'})
 OPERATOR=OPERATOR|frozenset({'answer_queue','answer_questions','queue_answer_retries','answer_retries','questions_for_attempt'})
 OPERATOR=OPERATOR|frozenset({'answer_library','save_library_answer','set_library_answer_state','reconcile_answers','answer_queue_history'})
+OPERATOR=OPERATOR|frozenset({'retry_answer_learning'})
 OPERATOR=OPERATOR|frozenset({'enrich_job','backfill_job_metadata'})
 OPERATOR=OPERATOR|frozenset({'queue_enqueue','queue_status','queue_control'})
 OPERATOR=OPERATOR|frozenset({'set_job_disposition','update_job_url'})
