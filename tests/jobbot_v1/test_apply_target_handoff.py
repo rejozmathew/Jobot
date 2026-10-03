@@ -87,6 +87,34 @@ def test_external_apply_observation_is_armed_before_click(monkeypatch):
     assert order[3][0]=="handoff_target" and result["target_handoff"]["target_id"]=="adp"
 
 
+@pytest.mark.parametrize('inventory,expected', [
+    ([{'tag':'INPUT','type':'email'}, {'tag':'SELECT','type':'select-one'},
+      {'tag':'INPUT','type':'checkbox'}], True),
+    ([{'tag':'INPUT','type':'password'}, {'tag':'BUTTON','role':'combobox'}], True),
+    ([{'tag':'INPUT','type':'email'}, {'tag':'INPUT','type':'text','label':'Full name'}], False),
+    ([{'tag':'INPUT','type':'email'}, {'tag':'DIV','role':'textbox','label':'Full name'}], False),
+    ([{'tag':'INPUT','type':'text','label':'Experience'}], False),
+    ([{'tag':'SELECT','type':'select-one'}], False),
+])
+def test_mixed_access_continuation_does_not_add_navigation_wait_to_normal_profiles(monkeypatch, inventory, expected):
+    armed=[]
+    class Page:
+        async def evaluate(self, script): return 'https://careers.example.test/jobs/123'
+        async def evaluate_function(self, script, args): return {'stage':{'name':'unknown'}, 'inventory':inventory}
+    class Browser: base_url='http://127.0.0.1:9222'
+    class Trace:
+        def close(self): pass
+    async def start(*args): armed.append(True); return Trace()
+    async def wait(*args, **kwargs): return None
+    monkeypatch.setattr('job_applier.cdp_client.NavigationTrace.start', start)
+    monkeypatch.setattr('job_applier.cdp_client.arm_target_observation', lambda *a, **kw: object())
+    monkeypatch.setattr('job_applier.cdp_client.wait_for_apply_target', wait)
+    async def activate(): return {'clicked':True}
+    asyncio.run(click_and_follow_external_apply(Browser(), Page(), {'text':'Next'}, activate,
+        None, {}, 'fixture'))
+    assert bool(armed) is expected
+
+
 def test_external_apply_same_tab_is_selected():
     result=observe([
         [target("linkedin",LINKEDIN)],

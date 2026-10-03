@@ -153,7 +153,12 @@ class RuntimeServices:
                 self._owner(db,attempt_id,worker_id,fence)
                 related=db.execute(RELATED+'SELECT 1 FROM related r JOIN job_identity_keys k ON k.job_id=r.id WHERE k.identity_key=?',(job['id'],identity)).fetchone() if identity else None
                 if identity!=target['identity_key'] and not related:
-                    if urlsplit(anchor)[:2]==urlsplit(url)[:2] and application_match(anchor,url)['status']=='different_job':return False
+                    # A correlated canonical application route can differ from
+                    # the intake path. Its already-verified child scope remains
+                    # authoritative; an unobserved route gains no alias here.
+                    if (urlsplit(anchor)[:2]==urlsplit(url)[:2] and
+                            application_match(anchor,url)['status']=='different_job' and
+                            not is_same_application_scope(target['url'],url)):return False
                     if not is_same_application_scope(job['url'], url) and not is_same_application_scope(anchor,url) and not is_same_application_scope(target['url'], url) and not is_workday_candidate_home(job['url'], url):
                         return False
                 return True

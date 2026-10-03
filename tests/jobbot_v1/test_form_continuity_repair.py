@@ -73,6 +73,42 @@ def test_owned_transition_carries_no_id_intermediate_and_rejects_conflicting_job
         s.handoff_target(**owner,current_target_id='adp',new_target_id='adp',url=EXTERNAL.replace('424242','999'),source_url=intermediate,evidence='Observed navigation')
 
 
+@pytest.mark.parametrize('promoted', [False, True])
+@pytest.mark.parametrize('destination', ['same_job', 'other_job', 'other_site', 'other_host', 'other_query'])
+def test_verified_application_route_children_keep_scope_without_intake_aliases(tmp_path, monkeypatch, promoted, destination):
+    from unittest.mock import AsyncMock
+    from test_apply_target_handoff import connected
+    from job_applier import browser_controls
+    from job_applier.cdp_client import CDPBrowser
+    service, session, owner, workspace = connected(tmp_path)
+    original = 'https://careers.example.test/hcmUI/CandidateExperience/en/job/123'
+    application = 'https://careers.example.test/hcmUI/CandidateExperience/en/sites/Careers/job/123'
+    service.handoff_target(**owner, current_target_id='linkedin', new_target_id='form',
+        url=original, expected_url=original, evidence='Synthetic observed Apply destination')
+    if promoted:
+        service.handoff_target(**owner, current_target_id='form', new_target_id='form',
+            url=application, source_url=original, navigation_chain=[original, application],
+            evidence='Synthetic observed canonical application navigation')
+    current = application + '/apply/email'
+    if destination == 'other_job': current = current.replace('/job/123', '/job/999')
+    if destination == 'other_site': current = current.replace('/sites/Careers/', '/sites/Other/')
+    if destination == 'other_host': current = current.replace('careers.example.test', 'other.example.test')
+    if destination == 'other_query': current += '?context=other'
+    class Page:
+        async def evaluate(self, script): return current if script == 'location.href' else 'Application'
+        async def evaluate_function(self, script, args): return {}
+    page = Page()
+    browser = type('Browser', (), {'get_current_page': AsyncMock(return_value=page),
+        'close': AsyncMock(), 'observed_mode': 'headed'})()
+    monkeypatch.setattr(CDPBrowser, 'connect', AsyncMock(return_value=browser))
+    observation = {'status': 'unavailable', 'url': current, 'panel': False, 'activity': {},
+        'inventory': [], 'native': {}, 'fingerprint': 'stable', 'page_signature': 'fixture'}
+    monkeypatch.setattr(browser_controls, 'observe_writers', AsyncMock(return_value=observation))
+    result = service.browser_observe(**owner, target_id='form', cdp_url=workspace['cdp_url'])
+    assert (result['identity']['status'] == 'same_job') is (promoted and destination == 'same_job')
+    assert service.job(session['job_id'])['url'] != application
+
+
 def test_live_shared_form_batch_handles_asterisk_fields_and_continues(tmp_path):
     import asyncio
     from test_embedded_forms import fixture_browser

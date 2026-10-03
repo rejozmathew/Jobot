@@ -349,6 +349,17 @@ async def click_and_follow_external_apply(browser,page,control,activate,client,o
         document,_=await resolve_control(page,locator) if locator else (page,{})
         state=await document.evaluate_function(FORM,{'method':'observe'})
         authentication=(state.get('stage') or {}).get('name') in ('email_entry','sign_in','create_account','verification')
+        if not authentication and (state.get('stage') or {}).get('name')=='unknown':
+            # Privacy choices can make an access form's coarse stage unknown.
+            # Observe its navigation without reclassifying the form or bypassing
+            # Simplify/consent handling. Ordinary profile fields add no new wait.
+            choices={'combobox','listbox','checkbox','radio','switch'}
+            fields=[f for f in state.get('inventory',[]) if
+                (f.get('tag') in ('INPUT','SELECT','TEXTAREA') or f.get('role') in choices|{'textbox'}) and
+                f.get('type') not in ('hidden','button','submit','reset','search')]
+            authentication=(any(f.get('type') in ('email','password') for f in fields) and
+                all(f.get('type') in ('email','password','checkbox','radio') or
+                    f.get('tag')=='SELECT' or f.get('role') in choices for f in fields))
     navigation=await NavigationTrace.start(page,current) if apply_control or authentication else None
     observation=await asyncio.to_thread(arm_target_observation,cdp_url or browser.base_url,target_id,destination or current) if destination or navigation else None
     try:

@@ -1,5 +1,29 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 3: preserve observed application routes through authentication
+
+The shared navigation helper used by ordinary browser actions and iCIMS continues
+to correlate Apply and authentication navigation from the owned document. An
+unknown-stage form containing email/password and only choice controls can now
+retain that authentication navigation evidence as well. A privacy dropdown no
+longer hides the email-to-password continuation. This does not relabel the form,
+select consent, change Simplify order or add navigation waits to ordinary profile
+forms with text fields. Credentials still use the selected employer account.
+
+After a successful ownership/writer observation, the workspace host refreshes
+application context before credential entry because that observation can promote a
+delayed route. The private filler retains its own current-route and candidate
+checks. The observer also accepts existing child routes of an already-verified
+canonical application target, even when its path differs from the intake path.
+No static host/site alias is inferred; an unobserved route, different requisition,
+different site/host or conflicting query remains outside that retained scope.
+
+These are updates to existing shared navigation, observation and credential
+callers; no helper, executor, retry limit or application-time gate is added. Daily
+engineering reviews use the counterfactual and baseline/candidate replay workflow
+in [SELF_IMPROVEMENT.md](SELF_IMPROVEMENT.md), including successful controls and
+capacity effects, without treating historical accounting as regression proof.
+
 ## October 3: AI learns generalized knowledge from application responses
 
 The inbox's primary **Save answer** action records human responses for the selected

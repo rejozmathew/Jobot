@@ -585,7 +585,6 @@ class WorkspaceHost:
             return advance(cfg,client,own,dict(params,target_id=session['target_id']))
         if op=='account_lock':return service.coordinate_account(session['id'],release=params.get('release',False))
         if op in ('browser','credentials'):
-            package=service.application_context(attempt['id'])
             if op=='credentials':
                 if params.get('mode')!='verification':service.coordinate_account(session['id'])
                 from .managed_credentials import handle_credentials,credential_progress
@@ -599,6 +598,9 @@ class WorkspaceHost:
                             'recover the application route in this same session, then retry credentials.')
                     raise ProtocolError('simplify_input_or_settlement_required',
                         'Observe or cancel ongoing Simplify work. For a broken page or missing panel before submission, use browser reload or session restart, then inspect and continue.')
+                # Observation can promote a delayed owned navigation. Credentials
+                # must use its current route and retained employer account.
+                package=service.application_context(attempt['id'])
                 action=uid();started=time.monotonic();result={}
                 credential_progress(client.call,own,params)
                 client.call('action_start',**own,action_id=action,tool_name='credentials')
@@ -607,6 +609,7 @@ class WorkspaceHost:
                     client.call('action_end',**own,action_id=action,status='success' if result.get('values_committed') or result.get('resend_requested') or params.get('action')=='inspect' and 'groups' in result else 'failed',duration_seconds=time.monotonic()-started)
                     credential_progress(client.call,own,params,result=result,action_id=action)
             from .application_runtime import browser_action
+            package=service.application_context(attempt['id'])
             return browser_action(cfg,client,own,package,session['target_id'],params)
         from .managed_api import WORKER
         prohibited={'accept_run','claim','resume_run','checkpoint','ack_run_control','ack_control','bind_target','handoff_target','extend_budget','next_request'}

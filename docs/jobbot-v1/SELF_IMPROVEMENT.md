@@ -12,6 +12,57 @@ failures of the model/runtime from employer obstacles and user interventions.
 Attribute attempts spanning a deployment to their actual source/version evidence;
 do not infer performance gains from fixtures or a partial day.
 
+## Counterfactual review and submission preservation
+
+Every daily run includes a private counterfactual exercise before selecting a fix.
+Freeze the previous day's evidence and version provenance, then deduplicate by
+observed employer posting identity. Keep attempt counts, distinct postings, new
+submissions and already-applied outcomes separate. Preserve every successful
+attempt as a control inventory, including its confirmation source, recovery path,
+timing, deadline, assistance and source version. Do not rewrite production history.
+
+For each proposed change, identify the exact failure mechanism, evidence that was
+available before the affected attempt, remaining application time and unresolved
+downstream obstacles. Do not import later answers, consent or credentials backward
+in time. Later success can corroborate feasibility, but cannot establish the
+counterfactual outcome. Distinguish fixes already deployed from genuinely new work.
+Report affected attempts, additional unique-job candidates, retry/time savings,
+overlaps and explicit assumptions. A repaired prerequisite is an opportunity, not
+a submitted application. Do not credit repeated retries as extra jobs or turn
+saved minutes into invented submissions. Include a zero-gain scenario and label
+optimistic scenarios without assigning unsupported probabilities.
+
+Historical accounting and executable replay are separate evidence. Holding past
+successes fixed, enumerating combinations or replaying recorded success labels
+does not test a changed executor. Reproduce the bounded mechanism with isolated
+synthetic forms, accounts and approved answers; never use live applications or
+private personal records as test fixtures. Run the same relevant synthetic cases
+against the baseline and candidate implementation. Cover the successful mechanisms
+represented by the control inventory as well as the failure being repaired. Save
+commands, source versions, before/after results, logs and JUnit privately.
+
+The acceptance target is zero lost confirmed submissions: a previously successful
+case becoming blocked, interrupted, unknown or incomplete is a regression. Check
+confirmation acceptance, recovery after helper/authentication errors, answer and
+account identity, Simplify order, operator stops and the original deadline. Keep
+new recovery on the demonstrated failure path and measure added work on normal
+successful paths. Compare complete application series, not only their final retry.
+When recovery duration or concurrency changes, also compare a fixed-capacity
+synthetic queue with the same arrivals, deadlines and successful controls; longer
+recovery must not silently displace another success. Label unmatched mechanisms
+and unmeasured capacity effects explicitly rather than calling them passed.
+
+Do not deploy a candidate with an observed lost-success regression; correct it or
+defer that candidate while retaining the working version. This is an engineering
+release criterion, never a new application-time refusal, finish gate or shorter
+recovery budget. Passing synthetic checks reduces risk but cannot guarantee future
+employer outcomes. Continue matched post-deployment observation and investigate
+credible submission losses before optimizing speed. Keep raw private evidence
+local. Prefer command-only external validation: prepared synthetic test commands
+write detailed logs locally and return aggregate results for primary inspection.
+
+## Implementation and deployment
+
 Use exact recorded evidence to propose a bounded change. Prefer a shared fix when
 the same cause applies across portals. Add a synthetic failing regression, implement,
 review the diff, and delegate routine validation to authenticated Antigravity
@@ -282,3 +333,66 @@ passed 116 tests with one incorrect new timeout-label assertion; correcting that
 assertion to the existing interrupted outcome with a distinct timeout reason
 passed in the subsequent 44-test account/restart suite and final managed suite.
 Ubuntu validation and deployment verification are recorded in the annotated tag.
+
+### Self-improvement #007 — 2026-10-03
+
+Namespace checkpoint: `aba0ff237bf3d0cc03d468966e6e8e2588b89cc1`.
+Tag: `self-improvement-007-2026-10-03`. This bounded change is deployed together
+with #008; the combined runtime commit and both component identities are recorded
+in the shared Ubuntu manifest and annotated tags.
+
+Posting identity can contain a site identifier that is not an account namespace.
+Previously that verified identifier could make application-context construction
+raise `invalid_namespace`. Account selection now falls back to the existing
+account URL when a posting-derived identifier cannot represent an account. Raw
+posting/requisition identity, explicit account namespaces, account evidence and
+retry history retain their existing behavior.
+
+The same 53 synthetic cases ran against baseline and candidate: the baseline had
+47 passes and six expected failures; the candidate passed all 53. Browser cases
+verify actual credential entry and confirmation, including an already-working
+account-shaped namespace. The observed historical posting was later found closed,
+so this repair receives no credited additional submission in the retrospective.
+
+### Self-improvement #008 — 2026-10-03
+
+Tag: `self-improvement-008-2026-10-03`. The tagged checkpoint contains the combined
+#007/#008 deployment. Exact final validation, deployed hashes, service readiness
+and the operator-requested queue resumption are retained in private run records.
+
+Three shared defects prevented supported application continuations. Credential
+handling now builds its context after the authorized browser observation, which
+can promote a delayed route while preserving the employer account. An access
+form containing email/password plus privacy choices can use the existing observed
+authentication navigation even when its coarse stage is unknown. Ordinary profile
+text fields, including custom textboxes, add no new wait. Finally, a previously
+verified canonical application route retains its existing child-route scope when
+the intake URL has a different path. Unobserved aliases and conflicting jobs,
+sites, hosts and query identities do not gain ownership from this repair.
+
+Regressions reproduce stale credential context, mixed access-form navigation and
+canonical child-route loss. Real isolated-browser cases fill the selected employer
+credential and reach confirmed submission through the shared browser and iCIMS
+paths, both with and without privacy choices. A four-slot synthetic scenario holds
+the recovered authentication call while three existing controls submit, then
+verifies the next queued reservation can enter and submit after an owned tab closes.
+It checks preserved deadlines and actual outcomes, not recorded success labels.
+
+Daily reviews and the recurring task now require frozen counterfactual evidence,
+posting deduplication, successful control inventories, baseline/candidate execution
+and explicit uncertainty. The historical accounting identifies two conditional
+answer-reuse candidates and eight route opportunities, not ten proven recoveries.
+Answer learning was already deployed before this change. Neither these scenarios
+nor synthetic checks establish a production gain or guarantee future submissions.
+The capacity scenario checks independent progress and admission during recovery;
+production throughput remains unmeasured. Deadlines, application permissions,
+retry policy and Simplify order are unchanged.
+
+Windows validation covered all 1,188 non-skipped managed cases successfully across
+two full runs, with 153 opt-in/platform skips. Neither run was a clean sweep: one
+hit an existing Node subprocess timeout; the other hit a Windows access error
+while replacing a synthetic Hermes receipt. Each affected case passed in the other
+run, with isolated recheck evidence retained. The earlier five-window startup
+timeout also passed unchanged in isolation. The four-slot submission replay and
+final edited credential/navigation checks passed. These environment failures are
+recorded rather than hidden or addressed by loosening application behavior.

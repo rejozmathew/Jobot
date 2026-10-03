@@ -11,7 +11,7 @@ SCREENING = 'https://applications.example.test/screening'
 
 
 @asynccontextmanager
-async def owned_page(tmp_path, html_for=None, metadata=None):
+async def owned_page(tmp_path, html_for=None, metadata=None, settings=None):
     from test_embedded_forms import fixture_browser
     from test_local_sessions import setup, connect
     async with fixture_browser(tmp_path, 'top') as (page, _, __):
@@ -32,7 +32,7 @@ async def owned_page(tmp_path, html_for=None, metadata=None):
             service, asset, _, workspaces, config = setup(tmp_path / 'ledger')
             workspaces[0].update(cdp_url=page.fixture_endpoint, mode='headless')
             service.configure_workspaces(workspaces)
-            service.configure({'mode': 'development', 'autofill': 'native', 'browser_mode': 'headless'},
+            service.configure({'mode': 'development', 'autofill': 'native', 'browser_mode': 'headless', **(settings or {})},
                               expected_version=service.settings_view()['version'])
             job = service.intake(url=SOURCE); service.eligibility(job['id'], 'ready', reason='Synthetic')
             session = connect(service, service.reserve_session(request_id='history', job_id=job['id'],
