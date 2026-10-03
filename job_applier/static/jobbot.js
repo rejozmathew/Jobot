@@ -583,14 +583,14 @@ function renderHistoryDetail(group,container){
 }
 function learningLabel(value){return ({pending:'Waiting for AI learning',processing:'AI is extracting reusable knowledge',error:'AI learning could not finish; will retry',context_only:'Application-specific response — kept in history',conflict:'Different from current knowledge — review before replacing',changed:'Source changed — your latest response is preserved'})[value]||value||'Waiting for AI learning';}
 function renderLearnedAnswers(v){
- const library=v.answer_library||{entries:[],suggestions:[]},entries=(library.entries||[]).filter(e=>e.origin!=='legacy'),suggestions=library.suggestions||[];
+ const library=v.answer_library||{entries:[],suggestions:[]},entries=library.entries||[],suggestions=library.suggestions||[];
  const learning=library.learning||{};const status=$('learning-status');if(status)status.textContent=`AI learning: ${learning.pending||0} waiting · ${learning.processing||0} processing${learning.error?' · '+learning.error+' will retry':''}. Your application answers are already saved.`;
- $('learned-count').textContent=`(${entries.filter(e=>e.state==='active').length})`;
- $('learned-current-count').textContent=entries.filter(e=>e.state==='active').length;$('learned-retired-count').textContent=entries.filter(e=>e.state==='retired').length;$('learned-suggestion-count').textContent=suggestions.length;
+ $('learned-count').textContent=`(${entries.filter(e=>e.state==='active'&&e.origin!=='legacy').length})`;
+ $('learned-current-count').textContent=entries.filter(e=>e.state==='active'&&e.origin!=='legacy').length;$('learned-retired-count').textContent=entries.filter(e=>e.state==='retired').length;$('learned-suggestion-count').textContent=suggestions.length;
  for(const button of document.querySelectorAll('[data-learned-mode]'))button.setAttribute('aria-pressed',String(button.dataset.learnedMode===state.learnedMode));
  const term=$('learned-search').value.trim().toLowerCase(),mode=state.learnedMode;
  const key=JSON.stringify([library,term,mode,state.learnedPage,state.answerSelections['learned:'+mode]]);if(key===state.learnedKey)return;state.learnedKey=key;
- const items=(mode==='suggestions'?suggestions:entries.filter(e=>e.state===(mode==='retired'?'retired':'active'))).filter(e=>!term||JSON.stringify([e,learnedScope(e,v)]).toLowerCase().includes(term));
+ const items=(mode==='suggestions'?suggestions:entries.filter(e=>e.state===(mode==='retired'?'retired':'active')&&(mode==='retired'||e.origin!=='legacy'))).filter(e=>!term||JSON.stringify([e,learnedScope(e,v)]).toLowerCase().includes(term));
  $('learned-summary').textContent=`${items.length} ${mode==='suggestions'?'learning records':mode==='retired'?'retired answers':'learned answers'}`;
  workspaceList('learned',items.map((e,i)=>({id:e.id||'suggestion-'+i,value:e,company:e.question,role:learnedScope(e,v),question:mode==='suggestions'?learningLabel(e.state):answerText(e.answer),meta:mode==='suggestions'?`${e.source?.company||''} · ${e.source?.title||''}`:v.candidates?.find(c=>c.id===e.identity_id)?.email||e.identity_id})),null,(entry,container)=>{
   const card=el('article',undefined,'answer-application');card.append(el('p',learnedScope(entry,v),'eyebrow'),el('h3',entry.question,'answer-question-heading'));
@@ -601,7 +601,7 @@ function renderLearnedAnswers(v){
    const source=el('details');source.append(el('summary','Original question and response'),el('p',entry.source?.question||''),el('p',answerText(entry.source?.answer)));card.append(source);
    if(entry.state==='conflict'&&entry.answer!=null){card.append(el('p',answerText(entry.answer),'learned-answer-value'));const review=el('button','Review proposed knowledge');review.onclick=()=>{const current=entries.find(e=>e.id===entry.existing_entry_id);editLibraryAnswer(current?{...current,answer:entry.answer}:{...entry,id:undefined,answer:entry.answer});};card.append(review);}
   }else{
-   card.append(el('p',entry.origin==='ai'?'LEARNED BY AI':entry.origin==='ai_edited'?'LEARNED BY AI · EDITED BY YOU':'ADDED BY YOU','eyebrow'),el('p',answerText(entry.answer),'learned-answer-value'),el('p',`Updated ${stamp(entry.updated_at)} · Version ${entry.revision}`,'answer-meta'));
+   card.append(el('p',entry.origin==='legacy'?'ORIGINAL RESPONSE · ARCHIVED':entry.origin==='ai'?'LEARNED BY AI':entry.origin==='ai_edited'?'LEARNED BY AI · EDITED BY YOU':'ADDED BY YOU','eyebrow'),el('p',answerText(entry.answer),'learned-answer-value'),el('p',`Updated ${stamp(entry.updated_at)} · Version ${entry.revision}`,'answer-meta'));
    if(Object.keys(entry.conditions||{}).length)card.append(el('p',Object.entries(entry.conditions).map(([k,value])=>k+': '+value).join(' · ')));
    const actions=el('div',undefined,'answer-actions'),edit=el('button','Edit answer','primary'),retire=el('button',entry.state==='active'?'Retire answer':'Restore answer');
    edit.onclick=()=>editLibraryAnswer(entry);retire.onclick=async()=>{retire.disabled=true;try{await api('set_library_answer_state',{entry_id:entry.id,state:entry.state==='active'?'retired':'active',expected_revision:entry.revision});notice('Learned answer updated. Earlier responses kept.');state.learnedKey=null;state.answerKey=null;await refresh();}catch(error){notice(answerError(error),true);}finally{retire.disabled=false;}};actions.append(edit,retire);card.append(actions);

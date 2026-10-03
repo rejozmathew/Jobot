@@ -18,7 +18,9 @@ application progress, dispatch policy and browser recovery remain available.
 Original questions, answers, company/position context and version history remain
 inspectable. Existing raw library entries retain their IDs and immutable earlier
 versions while AI generalizes them. Already-general questions can retain their wording.
-A response containing only application-specific facts stays in history; the model
+A raw legacy copy that cannot be extracted or conflicts with current knowledge moves
+to Retired, preserving full responses for active applications.
+Explicitly restoring that archived copy labels it as manual knowledge. The model
 must not invent generic candidate facts. Company/job scope and currency, pay period,
 country and time qualifiers are retained. Exact source quotations substantiate each
 extraction. New facts conflicting with current knowledge appear for review, and
@@ -33,7 +35,11 @@ Unchanged misses are cached; changes to current knowledge permit another review.
 The application executor receives the generic knowledge in its existing context.
 The Learned answers tab separates current knowledge from learning activity and
 shows the original source responses. Closed application responses feed learning
-without returning to the actionable inbox.
+without returning to the actionable inbox. A supplementary company pass can extract
+company knowledge from original responses, including system-archived raw copies,
+without restoring those copies. Company-scoped knowledge remains available across
+roles at the same company; role-specific details stay with their application.
+Current edits and explicit retirement take precedence over older source history.
 
 ## October 2: current reusable answers and an actionable inbox
 

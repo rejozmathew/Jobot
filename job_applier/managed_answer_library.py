@@ -237,17 +237,7 @@ class AnswerLibraryServices(AnswerLearningServices):
             if learning_source:
                 db.execute("UPDATE answer_learning_sources SET state='learned',entry_id=?,updated_at=? WHERE id=?", (identifier,now,learning_source['id']))
                 if learning_source['kind']=='legacy':
-                    # The old UI saved human replies as library-derived responses.
-                    # If synthesis extracts only part of that reply, preserve its
-                    # full application response rather than reopening the question.
-                    for row in db.execute("""SELECT q.* FROM application_questions q JOIN jobs j ON j.id=q.job_id
-                        WHERE q.library_entry_id=? AND q.answer_source='answer_library' AND q.state='answered'
-                        AND j.disposition!='canceled' AND j.status NOT IN ('applied','already_applied')
-                        AND NOT EXISTS (SELECT 1 FROM job_archives a WHERE a.job_id=j.id)""",(learning_source['source_id'],)).fetchall():
-                        response=self._question(row);job=dict(self._get(db,'jobs',response['job_id']))
-                        if not matches(entry,response,job):
-                            self._record_question_answer(db,response,response['answer'],'user_dashboard',
-                                evidence='Original operator response retained during AI generalization')
+                    self._preserve_legacy_replies(db,learning_source,entry)
                 if learning_source['kind']=='legacy' and learning_source['source_id']!=identifier:
                     earlier=self._library_entry(self._get(db,'answer_library_entries',learning_source['source_id']))
                     earlier.update(state='retired',revision=earlier['revision']+1,updated_at=now)
@@ -262,8 +252,9 @@ class AnswerLibraryServices(AnswerLearningServices):
             entry = self._library_entry(self._get(db, 'answer_library_entries', entry_id))
             if type(expected_revision) is not int or expected_revision != entry['revision']:raise ProtocolError('answer_revision_conflict')
             entry.update(state=state, revision=expected_revision+1, updated_at=self.now())
-            db.execute('UPDATE answer_library_entries SET state=?,revision=?,updated_at=? WHERE id=?',
-                       (state, entry['revision'], entry['updated_at'], entry_id))
+            if state=='active' and entry.get('origin')=='legacy':entry['origin']='manual'
+            db.execute('UPDATE answer_library_entries SET state=?,revision=?,updated_at=?,origin=? WHERE id=?',
+                       (state, entry['revision'], entry['updated_at'], entry['origin'], entry_id))
             db.execute('INSERT INTO answer_library_versions VALUES (?,?,?,?)', (entry_id, entry['revision'], dumps(entry), entry['updated_at']))
             self._reconcile_answers(db, entry['identity_id'])
             return entry
@@ -285,7 +276,7 @@ class AnswerLibraryServices(AnswerLearningServices):
             learning = self._learning_view(db, identity_id)
             for entry in entries if self._has_learning_schema(db) else []:
                 entry['sources'] = [json.loads(r[0]) for r in db.execute(
-                    "SELECT payload_json FROM answer_learning_sources WHERE entry_id=? AND state='learned' ORDER BY updated_at DESC", (entry['id'],))]
+                    "SELECT payload_json FROM answer_learning_sources WHERE entry_id=? AND state IN ('learned','context_only','conflict') ORDER BY updated_at DESC", (entry['id'],))]
             return {'entries':entries, 'suggestions':learning.pop('activity'), 'learning':learning}
 
     @staticmethod

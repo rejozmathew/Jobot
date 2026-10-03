@@ -144,3 +144,66 @@ def test_boolean_legacy_answers_supply_labelled_evidence_to_the_model(tmp_path):
             scope='global',scope_key='',conditions={},source_equivalent=True,existing_entry_id=None,evidence_quotes=['No'])
     assert service.learn_answers(generator=generalize)['state']=='learned'
     assert service.answer_library()['entries'][0]['answer']=='No'
+
+
+def test_context_only_legacy_knowledge_is_archived_but_its_application_reply_is_kept(tmp_path):
+    service, _, owner, _, _ = connected(tmp_path)
+    q=request(service,owner,question='Why this employer?',kind='text',options=[])
+    answer='The specific team at Example appeals to me.'
+    entry=service.save_library_answer(identity_id='candidate',question=q['question'],answer=answer)
+    with service.tx() as db:db.execute("UPDATE answer_library_entries SET origin='legacy' WHERE id=?",(entry['id'],))
+    assert service.learn_answers(generator=lambda _:dict(reusable=False))['state']=='context_only'
+    current=service.questions_for_attempt(owner['attempt_id'])['questions'][0]
+    assert current['answer']==answer and current['answer_source']=='user_dashboard'
+    archived=service.answer_library()['entries'][0]
+    assert archived['state']=='retired' and archived['history'][-1]['answer']==answer
+    restored=service.set_library_answer_state(entry_id=entry['id'],state='active',expected_revision=archived['revision'])
+    assert restored['origin']=='manual'
+
+
+def test_conflicting_legacy_copy_is_archived_without_changing_its_application_reply(tmp_path):
+    service, _, owner, _, _ = connected(tmp_path)
+    current=service.save_library_answer(identity_id='candidate',question='What motivates you professionally?',answer='Technical design')
+    q=request(service,owner,question='Why this employer?',kind='text',options=[])
+    answer='I enjoy mentoring engineers and building reliable platforms.'
+    raw=service.save_library_answer(identity_id='candidate',question=q['question'],answer=answer)
+    with service.tx() as db:db.execute("UPDATE answer_library_entries SET origin='legacy' WHERE id=?",(raw['id'],))
+    assert service.learn_answers(generator=lambda payload:{**synthesis(payload),'existing_entry_id':current['id']})['state']=='conflict'
+    entries={e['id']:e for e in service.answer_library()['entries']}
+    assert entries[raw['id']]['state']=='retired'
+    assert entries[current['id']]['answer']=='Technical design'
+    reply=service.questions_for_attempt(owner['attempt_id'])['questions'][0]
+    assert reply['answer']==answer and reply['answer_source']=='user_dashboard'
+
+
+def test_system_archived_company_response_can_supply_new_company_knowledge(tmp_path):
+    service, _, _, _, _ = connected(tmp_path)
+    raw=service.save_library_answer(identity_id='candidate',question='Why Example?',
+        answer='I am drawn to Example because of its infrastructure mission.',scope='company',scope_key='Example')
+    with service.tx() as db:db.execute("UPDATE answer_library_entries SET origin='legacy' WHERE id=?",(raw['id'],))
+    service.learn_answers(generator=lambda _:dict(reusable=False))
+    def company(payload):
+        source=payload['sources'][0]
+        return dict(reusable=True,question='What interests you about Example as an employer?',answer=source['answer'],
+            scope='company',scope_key='Example',conditions={},source_equivalent=True,existing_entry_id=None,evidence_quotes=[source['answer']])
+    result=service.learn_answers(generator=company)
+    assert result['state']=='learned'
+    entries={e['id']:e for e in service.answer_library()['entries']}
+    assert entries[raw['id']]['state']=='retired'
+    learned=entries[result['entry_id']]
+    assert learned['id']!=raw['id'] and learned['scope']=='company'
+    from job_applier.managed_answer_library import resolve_library
+    question=dict(question=learned['question'],kind='text',options=[])
+    assert resolve_library(question,dict(id='other-position',company='Example'),list(entries.values()))['answer']==learned['answer']
+    assert resolve_library(question,dict(id='other-company',company='Another'),list(entries.values()))['answer'] is None
+
+
+def test_unprocessed_legacy_entries_are_source_material_not_current_generic_facts(tmp_path):
+    service, _, _, _, _ = connected(tmp_path)
+    for question in ('Why this position?', 'What do you enjoy about this role?'):
+        entry=service.save_library_answer(identity_id='candidate',question=question,answer='I enjoy mentoring engineers.')
+        with service.tx() as db:db.execute("UPDATE answer_library_entries SET origin='legacy' WHERE id=?",(entry['id'],))
+    def generalize(payload):
+        assert all(e['origin']!='legacy' for e in payload['entries'])
+        return synthesis(payload)
+    assert service.learn_answers(generator=generalize)['state']=='learned'
