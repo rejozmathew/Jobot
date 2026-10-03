@@ -609,3 +609,23 @@ dialog::backdrop { background: #0f172a66; }
 #automation-toggle { font-weight: 700; }
 #automation-status { padding: 12px 16px; border: 1px solid #cbd5e1; border-radius: 8px; }
 #automation-status.paused { background: #fff8e6; color: #684700; border-color: #d4a72c; }
+
+.activity-period-label { display: flex; align-items: center; gap: 10px; margin: 0; }
+.activity-period-label select { width: auto; margin: 0; }
+.activity-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 20px 0; }
+.activity-metrics .stat { text-align: left; min-width: 0; padding: 16px; }
+.activity-metrics .stat strong { font-variant-numeric: tabular-nums; }
+.activity-outcomes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
+.activity-outcome { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.activity-outcome strong { margin-left: auto; font-variant-numeric: tabular-nums; }
+.activity-pagination { justify-content: flex-end; margin-top: 16px; }
+.activity-history { width: 100%; }
+.run-diagnostics > summary { cursor: pointer; font-weight: 600; }
+.run-diagnostics[open] > summary { margin-bottom: 20px; }
+#activity-custom { align-items: end; flex-wrap: wrap; }
+#activity-custom label { margin: 0; }
+@media (max-width: 650px) {
+  .activity-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .activity-outcomes { grid-template-columns: 1fr; }
+  .activity-overview > .section-title { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+}

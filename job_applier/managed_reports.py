@@ -1,5 +1,6 @@
 """Timing projections preserve wall time and report overlap instead of inventing speed."""
-from datetime import datetime,timedelta,timezone
+from datetime import date,datetime,time,timedelta,timezone
+from zoneinfo import ZoneInfo
 import json
 import hashlib
 import re
@@ -111,6 +112,51 @@ def application_progress(events,*,actions=(),now=None,ended_at=None,limit=12):
 
 
 class ReportServices:
+    def activity_stats(self, period='7d', start_date=None, end_date=None, offset=0, limit=25):
+        """Read complete start-date cohorts; never infer outcomes from job/queue status."""
+        if period not in ('1d','7d','30d','lifetime','custom'):
+            raise ProtocolError('invalid_activity_period')
+        if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=100:
+            raise ProtocolError('invalid_activity_page')
+        now=instant(self.now())
+        zone_name=self.settings_view()['values'].get('timezone','UTC')
+        zone=ZoneInfo(zone_name);today=now.astimezone(zone).date()
+        first=None;last=today
+        if period=='custom':
+            try:
+                first=date.fromisoformat(start_date);last=date.fromisoformat(end_date)
+            except (TypeError,ValueError):raise ProtocolError('invalid_activity_dates')
+            if first>last or last==date.max:raise ProtocolError('invalid_activity_dates')
+        elif period!='lifetime':first=today-timedelta(days=int(period[:-1])-1)
+        begin=datetime.combine(first,time.min,zone).astimezone(timezone.utc).isoformat() if first else None
+        end=datetime.combine(last+timedelta(days=1),time.min,zone).astimezone(timezone.utc).isoformat()
+        # SQLite parses legacy UTC timestamps, Z and offset-aware timestamps equally.
+        where='(? IS NULL OR julianday(started_at)>=julianday(?)) AND julianday(started_at)<julianday(?) AND julianday(started_at)<=julianday(?)'
+        parameters=(begin,begin,end,now.isoformat())
+        outcome="CASE WHEN completed_at IS NULL THEN 'active' ELSE COALESCE(NULLIF(outcome,''),'unrecorded') END"
+        with self.tx() as db:
+            totals=db.execute(f'''SELECT COUNT(*) AS attempts,COUNT(DISTINCT job_id) AS jobs,
+                MIN(id) AS first,MAX(id) AS last,
+                COUNT(DISTINCT CASE WHEN completed_at IS NOT NULL AND outcome='applied' THEN job_id END) AS submitted_jobs
+                FROM application_attempts WHERE {where}''',parameters).fetchone()
+            outcomes={r['outcome']:r['count'] for r in db.execute(f'''SELECT {outcome} AS outcome,COUNT(*) AS count
+                FROM application_attempts WHERE {where} GROUP BY 1''',parameters)}
+            dispatches=db.execute(f'SELECT COUNT(*) FROM dispatch_queue WHERE {where}',parameters).fetchone()[0]
+            recent=[dict(r) for r in db.execute(f'''SELECT a.id,a.job_id,a.started_at,a.completed_at,
+                CASE WHEN a.completed_at IS NULL THEN 'active' ELSE COALESCE(NULLIF(a.outcome,''),'unrecorded') END AS outcome,j.company,j.title,j.url
+                FROM (SELECT id,job_id,started_at,completed_at,outcome FROM application_attempts WHERE {where}
+                ORDER BY julianday(started_at) DESC,id DESC LIMIT ? OFFSET ?) a
+                JOIN jobs j ON j.id=a.job_id ORDER BY julianday(a.started_at) DESC,a.id DESC''',parameters+(limit,offset))]
+        attempts=totals['attempts'];jobs=totals['jobs']
+        return {'period':period,'timezone':zone_name,'as_of':now.isoformat(),
+            'start_date':first.isoformat() if first else None,'end_date':last.isoformat(),
+            'attempts':attempts,'jobs':jobs,'dispatches':dispatches,
+            'attempt_ids':{'first':totals['first'],'last':totals['last']},'outcomes':outcomes,
+            'submitted_jobs':totals['submitted_jobs'],
+            'submission_rate_per_attempt':100*outcomes.get('applied',0)/attempts if attempts else None,
+            'submission_rate_per_job':100*totals['submitted_jobs']/jobs if jobs else None,
+            'recent_attempts':recent,'offset':offset,'limit':limit}
+
     def attempt_report(self,attempt_id,worker_id=None):
         now=instant(self.now())
         with self.tx() as db:

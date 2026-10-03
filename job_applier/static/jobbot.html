@@ -48,10 +48,6 @@
 
   <!-- TAB: APPLICATIONS (QUEUE & START) -->
   <section id="tab-queue" class="tab">
-    <section class="card" id="local-sessions-card" hidden>
-      <div class="section-title"><h2>Application activity</h2><span id="activity-count" class="muted"></span></div>
-      <div id="local-sessions"></div>
-    </section>
     <section class="card">
       <h2>Application queue</h2>
       <p id="dispatcher-status" role="status">Checking queue worker…</p>
@@ -263,9 +259,58 @@
 
   <!-- TAB: ACTIVITY (RUN & TIMELINE) -->
   <section id="tab-run" class="tab" hidden>
-    <section class="card">
+    <section class="card activity-overview" aria-labelledby="activity-title">
       <div class="section-title">
-        <h2>Run Control &amp; Status</h2>
+        <h2 id="activity-title">Application results</h2>
+        <label class="activity-period-label">Period
+          <select id="activity-period">
+            <option value="1d">Today</option>
+            <option value="7d" selected>Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="lifetime">Lifetime</option>
+            <option value="custom">Custom dates</option>
+          </select>
+        </label>
+      </div>
+      <form id="activity-custom" class="toolbar" hidden>
+        <label>From <input id="activity-from" type="date" required></label>
+        <label>Through <input id="activity-to" type="date" required></label>
+        <button type="submit">Show results</button>
+      </form>
+      <p id="activity-cohort" class="muted" role="status">Open Activity to load results.</p>
+      <div id="activity-metrics" class="stats activity-metrics"></div>
+      <h3>Recorded outcomes</h3>
+      <div id="activity-outcomes" class="activity-outcomes"></div>
+      <p class="muted">Attempts are grouped by their start date, including retries and jobs later canceled or archived.
+        New submissions exclude already-applied results. The job rate counts distinct jobs with a new submission in this cohort.
+        Queue dispatches are counted separately by dispatch start date. Last 7 and 30 days include today.</p>
+    </section>
+    <section class="card" id="local-sessions-card" hidden>
+      <div class="section-title"><h2>Current applications</h2><span id="activity-count" class="muted"></span></div>
+      <div id="local-sessions"></div>
+    </section>
+    <section class="card">
+      <h2>Attempt history</h2>
+      <p class="muted">All attempts in the selected period, newest first. Open an attempt to see its evidence and timeline.</p>
+      <div class="table-wrap"><table class="activity-history">
+        <thead><tr><th>Attempt</th><th>Job</th><th>Started</th><th>Outcome</th></tr></thead>
+        <tbody id="activity-attempt-rows"></tbody>
+      </table></div>
+      <div class="toolbar activity-pagination">
+        <button id="activity-prev" disabled>Previous</button>
+        <span id="activity-page" class="muted"></span>
+        <button id="activity-next" disabled>Next</button>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Attempt details</h2>
+      <p id="attempt-summary">Select an attempt from history.</p>
+      <div id="events"></div>
+    </section>
+    <details class="run-diagnostics card">
+      <summary>Advanced run controls &amp; diagnostics</summary>
+      <div class="section-title">
+        <h3>Selected run</h3>
         <select id="run-picker" aria-label="Run"></select>
       </div>
       <div class="toolbar" style="margin-bottom: 12px;">
@@ -283,19 +328,9 @@
         <div id="target-list"></div>
         <div id="extension-list"></div>
       </details>
-    </section>
-
-    <div class="split">
-      <section class="card">
-        <h2>Attempts</h2>
-        <div id="attempts"></div>
-      </section>
-      <section class="card">
-        <h2>Attempt Timeline</h2>
-        <p id="attempt-summary">Select an attempt.</p>
-        <div id="events"></div>
-      </section>
-    </div>
+      <h3>Attempts in this run</h3>
+      <div id="attempts"></div>
+    </details>
   </section>
 
   <!-- TAB: CANDIDATE PROFILE -->
