@@ -64,7 +64,12 @@ class AccountServices:
         if job['namespace'] and job['requisition_id']:
             key=job_key(account_url,job['namespace'],job['requisition_id'])
             if db.execute('SELECT 1 FROM job_identity_keys WHERE job_id=? AND identity_key=?',(job['id'],key)).fetchone():
-                expected=valid_namespace(job['namespace'])
+                # A verified posting namespace may be a board/site identifier,
+                # not host[/tenant] account scope. Keep that identity unchanged
+                # and use the existing account-URL host fallback in that case.
+                try:expected=valid_namespace(job['namespace'])
+                except ProtocolError as exc:
+                    if exc.code!='invalid_namespace':raise
         expected=self._namespace(db,expected)
         actual=self._namespace(db,requested) if requested is not None else expected
         return actual if actual==expected else None
