@@ -144,6 +144,14 @@ function selection(){
  const visible=state.view?visibleJobs(state.view):[];
  $('select-unfinished').disabled=!visible.some(unfinished);
  $('select-visible').disabled=!visible.some(j=>j.disposition==='canceled');
+ const canceledView=$('job-filter').value==='canceled';
+ const selectable=visible.filter(canceledView?j=>j.disposition==='canceled':unfinished);
+ const count=selectable.filter(j=>state.selected.has(j.id)).length,all=$('select-all-jobs');
+ all.disabled=!selectable.length;
+ all.checked=!!selectable.length&&count===selectable.length;
+ all.indeterminate=count>0&&count<selectable.length;
+ all.title=canceledView?'Select all canceled jobs shown by the current filters':'Select all unfinished jobs shown by the current filters';
+ all.setAttribute('aria-label',canceledView?'Select all canceled jobs shown':'Select all unfinished jobs shown');
 }
 function link(url,label){try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))return el('span',label);const a=el('a',label);a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';return a;}catch{return el('span',label);}}
 function postingLabel(job){
@@ -942,6 +950,10 @@ $('job-url-form').onsubmit=async event=>{
 $('select-unfinished').onclick=()=>{state.selected=new Set(visibleJobs(state.view).filter(unfinished).map(j=>j.id));state.queueKey=null;renderQueue(state.view);};
 $('select-visible').onclick=()=>{state.selected=new Set(visibleJobs(state.view).filter(j=>j.disposition==='canceled').map(j=>j.id));state.queueKey=null;renderQueue(state.view);};
 $('clear-selection').onclick=()=>{state.selected.clear();state.queueKey=null;renderQueue(state.view);};
+$('select-all-jobs').onchange=()=>{
+ if(!$('select-all-jobs').checked)$('clear-selection').onclick();
+ else $($('job-filter').value==='canceled'?'select-visible':'select-unfinished').onclick();
+};
 async function changeDisposition(disposition){
  const job_ids=state.view.jobs.filter(j=>state.selected.has(j.id)&&(disposition==='canceled'?unfinished(j):j.disposition==='canceled')).map(j=>j.id);
  if(!job_ids.length)return;

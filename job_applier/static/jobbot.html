@@ -138,7 +138,7 @@
       </div>
       <div class="bulk-actions">
         <button id="queue-selected-jobs" type="button" class="primary">Queue selected</button>
-        <button id="select-unfinished" type="button">Select unfinished</button>
+        <button id="select-unfinished" type="button" title="Select all unfinished jobs shown by the current filters">Select all</button>
         <button id="select-visible" type="button" hidden>Select visible canceled jobs</button>
         <button id="clear-selection" type="button">Clear selection</button>
         <span id="selection" role="status">No jobs selected</span>
@@ -157,7 +157,7 @@
           </colgroup>
           <thead>
             <tr>
-              <th title="Permanent job sequence number, assigned when first added"><button type="button" data-job-sort="sequence">#</button></th>
+              <th title="Permanent job sequence number, assigned when first added"><button type="button" data-job-sort="sequence">#</button><input id="select-all-jobs" type="checkbox" aria-label="Select all unfinished jobs shown" title="Select all unfinished jobs shown by the current filters"></th>
               <th><button type="button" data-job-sort="company">Company &amp; Role</button></th>
               <th><button type="button" data-job-sort="status">Status</button></th>
               <th><button type="button" data-job-sort="assessment">Assessment</button></th>

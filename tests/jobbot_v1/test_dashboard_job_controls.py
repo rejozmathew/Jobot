@@ -106,6 +106,43 @@ def test_manual_batch_reuses_queue_and_keeps_requested_order_across_restart(tmp_
     assert fresh.queue_take()['job_id'] == jobs[1]['id']
 
 
+def test_select_all_tracks_filtered_rows_partial_selection_and_refresh():
+    dashboard_check(r'''
+v.jobs=[{id:'first',company:'Match First',status:'queued'},
+ {id:'second',company:'Match Second',status:'failed'},
+ {id:'other',company:'Other',status:'queued'},
+ {id:'done',company:'Match Done',status:'applied'},
+ {id:'canceled',company:'Match Canceled',status:'queued',disposition:'canceled'}];
+doc.getElementById('job-filter').value='all';w.draw(v);
+const all=doc.getElementById('select-all-jobs');
+assert(all,'Table header needs a select-all checkbox');
+assert(doc.getElementById('select-unfinished').textContent==='Select all','Bulk selection label is unclear');
+doc.getElementById('job-search').value='Match';doc.getElementById('job-search').oninput();
+all.click();
+const checked=()=>[...doc.querySelectorAll('#queue-rows input:checked')].map(n=>n.closest('tr').dataset.jobId).sort().join();
+assert(checked()==='first,second','Select all must select only unfinished filtered jobs');
+assert(all.checked&&!all.indeterminate,'Full selection not reflected in header');
+assert(!doc.getElementById('queue-selected-jobs').disabled,'Bulk selection cannot be queued');
+doc.querySelector('#queue-rows tr[data-job-id="first"] input').click();
+assert(!all.checked&&all.indeterminate,'Partial selection not reflected in header');
+w.draw(v);
+assert(all.indeterminate&&checked()==='second','Polling lost partial selection');
+doc.getElementById('select-unfinished').click();
+assert(all.checked&&checked()==='first,second','Toolbar and header selection disagree');
+all.click();
+assert(checked()===''&&!all.indeterminate,'Header uncheck did not clear selection');
+doc.getElementById('job-search').value='Missing';doc.getElementById('job-search').oninput();
+assert(all.disabled&&!all.checked&&!all.indeterminate,'Empty view has an active selection checkbox');
+doc.getElementById('job-search').value='';doc.getElementById('job-filter').value='canceled';doc.getElementById('job-filter').onchange();
+all.click();
+assert(checked()==='canceled'&&!doc.getElementById('restore-selected').disabled,'Canceled view bulk restore broken');
+doc.getElementById('clear-selection').click();
+assert(!all.checked&&!all.indeterminate,'Clear selection left stale header');
+doc.getElementById('job-filter').value='submitted';doc.getElementById('job-filter').onchange();
+assert(all.disabled,'Submitted-only view must have no queue selection');
+''')
+
+
 def test_queue_selected_uses_table_order_and_one_atomic_request():
     dashboard_check(r'''
 v.jobs=[{id:'old',seq_id:1,company:'Old',status:'queued',created_at:'2026-09-15T12:00:00Z'},
@@ -115,9 +152,7 @@ v.assets=[{id:'resume',identity_id:'candidate',kind:'resume',status:'available',
 v.settings={values:{submission_mode:'review'}};
 doc.getElementById('candidate').append(new w.Option('Fixture','candidate'));
 doc.getElementById('main-submission-mode').value='review';w.draw(v);w.noRefresh();
-const checks=[...doc.querySelectorAll('#queue-rows input[type="checkbox"]')];
-// Select in the opposite order: table order, not click order, must reach the queue.
-for(const check of checks.reverse()){check.checked=true;check.onchange();}
+doc.getElementById('select-all-jobs').click();
 let calls=[],finish;
 w.fetch=async(path,options)=>{calls.push([path,JSON.parse(options.body)]);await new Promise(r=>finish=r);return {ok:true,status:200,json:async()=>({items:[{},{}],queue:{worker_online:true}})};};
 const pending=doc.getElementById('queue-selected-jobs').onclick();
