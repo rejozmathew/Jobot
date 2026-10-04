@@ -1,0 +1,11 @@
+[Unit]
+Description=Clean completed JobBot validation fixtures daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=15m
+Persistent=true
+Unit=jobbot-validation-cleanup.service
+
+[Install]
+WantedBy=timers.target

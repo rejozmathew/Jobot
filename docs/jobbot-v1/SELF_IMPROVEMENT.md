@@ -70,6 +70,14 @@ review the diff, and delegate routine validation to authenticated Antigravity
 final `python -m pytest tests/jobbot_v1 -q` suite. Do not use live applications as
 fixtures or manufacture production outcomes for tests.
 
+Register each Ubuntu validation run's disposable `TMPDIR` and pytest basetemp
+with the completion/identity/report manifest described in
+[`VALIDATION_STORAGE.md`](VALIDATION_STORAGE.md). Preserve logs/JUnit outside
+those directories and mark completion only after the test process and its owned
+browser fixtures finish. The installed daily validation-cleanup timer removes
+completed registered fixtures after 24 hours; protected metadata on unrelated
+system/browser processes must not cause unlimited fixture retention.
+
 The initial deployment disables optional automatic background memory/skill reviews
 in the selected Ubuntu Hermes profile to reduce competing model requests. This is
 a profile-wide private configuration change, backed up separately from Git. It does

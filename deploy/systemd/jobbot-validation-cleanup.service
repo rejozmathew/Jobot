@@ -1,0 +1,10 @@
+[Unit]
+Description=Remove registered completed JobBot synthetic test fixtures
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/apps/auto-job-applier-runtime
+ExecStart=%h/apps/auto-job-applier-runtime/.venv/bin/python scripts/cleanup_validation_fixtures.py --records-dir %h/apps/auto-job-applier-runtime/artifacts/jobbot-v1-private --cache-root %h/.cache --apply
+Nice=19
+IOSchedulingClass=idle
+UMask=0077
