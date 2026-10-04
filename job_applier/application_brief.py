@@ -1,6 +1,7 @@
 """Rebuild a self-contained execution brief for every single queued application."""
 import json
 import sys
+from urllib.parse import urlsplit
 
 from .application_runtime import REPOSITORY
 from .hermes_gmail import mailbox_handoff
@@ -10,6 +11,8 @@ from .managed_context import platform_for_url
 
 def application_brief(config, service, item):
     job=service.job(item['job_id'])
+    title=' '.join((job.get('title') or 'job').split())
+    company=' '.join((job.get('company') or urlsplit(job['url']).hostname or 'employer').split())
     settings=service.settings_view()['values']
     platform=platform_for_url(job['url'])
     mailbox=mailbox_handoff(config,platform=platform)
@@ -24,7 +27,7 @@ def application_brief(config, service, item):
     prior=service.prior_application_history(job['id'],item['identity_id'])
     start=[sys.executable,'-m','job_applier.application_runtime','start','--job-id',job['id'],
            '--config',config['config_path'],'--request-id','queue:'+item['id'],'--wait-seconds','0']
-    return f'''# One application — fresh execution context
+    return f'''# Apply to {company} for {title}
 
 Apply to exactly ONE job in this fresh conversation. Do not discover or apply to
 other jobs, resume another conversation, or launch another application agent.

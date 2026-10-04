@@ -18,6 +18,17 @@ def test_brief_supplies_exact_selected_email_not_profile_guess(tmp_path):
     assert 'copy the observed address exactly' in brief
 
 
+def test_brief_opens_with_job_identity_for_hermes_thread_title(tmp_path):
+    from job_applier.application_brief import application_brief
+    s, asset, jobs, _, cfg = runtime_fixture(tmp_path)
+    s.intake(url=jobs[0]['url'], company='Example Corp', title='Systems Engineer')
+    item = enqueue(s, asset, [jobs[0]])['items'][0]
+
+    brief = application_brief(cfg, s, item)
+
+    assert brief.startswith('# Apply to Example Corp for Systems Engineer\n')
+
+
 def test_desktop_command_uses_native_backend_when_selected(tmp_path):
     from job_applier.queue_runtime import executor_command
     prompt = tmp_path/'one job.md'
