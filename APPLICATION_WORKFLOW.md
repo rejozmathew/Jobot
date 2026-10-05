@@ -1,5 +1,13 @@
 # Simplify-First Application Workflow
 
+> Historical tracker workflow. The root database/profile and legacy entry points
+> below describe an earlier implementation. For the current managed runtime, use
+> the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.md),
+> [user guide](docs/USER_GUIDE.md) and [canonical application skill](skills/productivity/job-apply/SKILL.md).
+> The explicitly selected managed database is authoritative; do not infer it from
+> the root `job_applier.db` mentioned below. Historical stop/retry instructions do
+> not override the current [retry policy](docs/jobbot-v1/RETRY_POLICY.md).
+
 This repository is the single package for application data, portal automation, outcomes, timing, and improvement tracking. `job_applier.db` is the system of record. `timing_log.jsonl` is retained only as historical timing data.
 
 ## Components used

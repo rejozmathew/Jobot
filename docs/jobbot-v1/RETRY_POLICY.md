@@ -1,5 +1,7 @@
 # Shared application request and retry policy
 
+[Operator guide](../USER_GUIDE.md#retries-and-current-applications) · [Architecture](../ARCHITECTURE.md)
+
 This is the authoritative policy adopted September 9, 2026 after the user
 rejected blanket submission-uncertainty, same-job and account-use restrictions. It
 applies to every portal, including Greenhouse, Workday and proprietary forms.
@@ -36,7 +38,7 @@ attempt. Request metadata exposes `application_kind`: `first_attempt` or
 
 ### Automatic queue recovery (operator update, September 16)
 
-The sequential worker picks up active intake automatically. An interrupted,
+The capacity-aware worker picks up active intake automatically. An interrupted,
 failed, blocked or submission-unknown request gets up to five automatic retries
 (six total attempts). Target offsets from the first start are 0, 2, 4, 6, 24 and
 28 hours: four attempts in the first 24-hour window and two in the next. Retries
@@ -54,7 +56,8 @@ an in-progress application, rewrites evidence or bypasses browser cleanup.
 `managed_queue.queue_reconcile` performs idempotent pickup; `attempt_schedule`
 derives attempt counts and due times from durable request lineage. Both the
 worker and Run next use that reconciliation. `queue_take` skips future retries
-while allowing other ready jobs, and preserves one dispatched application.
+while allowing other ready jobs, and admits work within the configured application
+capacity. Each dispatched application retains independent ownership and cleanup.
 Ready fresh/operator work precedes due automatic retries. This changes ordering,
 not eligibility, due times or the existing automatic attempt count. Retries receive
 compact advisory history for the same candidate/posting; past errors never become

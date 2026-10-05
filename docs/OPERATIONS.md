@@ -1,0 +1,170 @@
+# Operations and troubleshooting
+
+[Documentation index](README.md) · [Configuration](CONFIGURATION.md) · [Contributing](../CONTRIBUTING.md)
+
+## Identify the installation first
+
+The authoritative Ubuntu runtime and the Windows engineering checkout can have
+different filesystem paths and deliberate deployed overlays. Use the existing
+private runtime config and deployment records. Do not infer history from the root
+`job_applier.db`, copy a Windows profile over Ubuntu, or replace the deployed tree
+with an unrelated checkout.
+
+The tracked [systemd templates](../deploy/systemd/) use example home-relative paths.
+Installed unit files describe the actual checkout, interpreter, environment and
+display. Examples below assume the existing user's service manager.
+
+## Service map
+
+| Unit / process | Function | Consequence if unavailable |
+|---|---|---|
+| `jobbot-dashboard.service` | `queue_runtime serve`; API, UI and answer learner | No dashboard/learning process; independent queue work may continue |
+| `jobbot-queue.service` | `queue_runtime watch` | New saved requests wait; inspect existing executor ownership before changing processes |
+| Workspace host(s) | Per-workspace owned browser operations and supervision | Browser readiness or session recovery needs investigation |
+| Retained browser launcher | Configured existing browser profile and CDP | Existing-mode applications cannot attach until available |
+| `jobbot-harvest.timer` / `.service` | Schedule separate discovery runs | No scheduled discovery; existing intake remains |
+| `jobbot-notifications.service` | Optional confirmed-submission observer | Alert delivery waits; application outcomes remain durable |
+| `jobbot-validation-cleanup.timer` / `.service` | Remove completed registered disposable fixtures | Test storage can accumulate; production artifacts have separate retention |
+
+The queue unit's historical description may say “sequential”; the current
+dispatcher implements the operator-selected concurrency. The selected settings
+and code determine behavior, not the unit's display name.
+
+## Read-only health checks
+
+```bash
+systemctl --user status jobbot-dashboard.service jobbot-queue.service
+systemctl --user list-timers jobbot-harvest.timer jobbot-validation-cleanup.timer
+systemctl --user cat jobbot-dashboard.service jobbot-queue.service
+journalctl --user -u jobbot-queue.service --since '30 minutes ago' --no-pager
+./.venv/bin/python -m job_applier.queue_runtime --config /absolute/runtime.json status
+./.venv/bin/python -m job_applier.application_runtime sessions --config /absolute/runtime.json
+```
+
+Keep config paths, log output and application details private. `queue_runtime doctor`
+checks executable/display/configuration presence; it does not establish authenticated
+mail access, Simplify functionality or employer acceptance. `application_runtime doctor`
+is optional diagnostic inspection, not another prerequisite before each application.
+
+On Windows use the repository `.venv\Scripts\python.exe` and the existing private
+launcher. See the [Windows runbook](jobbot-v1/WINDOWS_RUNBOOK.md) for its historical
+provisioning details; current runtime entry points are in [Getting started](GETTING_STARTED.md).
+
+## Scheduling controls
+
+```bash
+# Global persistent pause: current admitted work drains normally.
+./.venv/bin/python -m job_applier.queue_runtime --config /absolute/runtime.json pause-all
+./.venv/bin/python -m job_applier.queue_runtime --config /absolute/runtime.json resume-all
+
+# Automatic pickup only; explicit manual requests remain a separate path.
+./.venv/bin/python -m job_applier.queue_runtime --config /absolute/runtime.json pause
+./.venv/bin/python -m job_applier.queue_runtime --config /absolute/runtime.json resume
+```
+
+`run-next` wakes existing ready queue work. `once` directly runs a dispatch loop
+iteration and should not be started beside the installed watcher. Both use a
+per-instance dispatcher lock. Normal operation uses one watcher.
+
+Individual session Pause, Stop and Restart use the application's owned lifecycle.
+Do not terminate the shared browser to fix one job. Lowering concurrency does not
+evict admitted work. Pausing automatic pickup is not the same as pausing all new
+manual and discovery work.
+
+## Diagnosing a problem
+
+| Symptom | Likely boundary | First useful checks |
+|---|---|---|
+| Empty or unexpected job history | Wrong runtime/configuration | Instance ID, resolved `db_path`, current versus legacy server |
+| UI works; jobs wait | Dispatcher/schedule/capacity | Worker online state, global pause, automatic setting, due times and active cleanup |
+| Manual request is saved but waits | Global pause or occupied capacity | Banner, earlier explicit requests and active windows |
+| Existing browser cannot attach | Browser launch/profile/CDP | Configured launcher, loopback endpoint, profile path and browser process |
+| Recovery seems stuck | Current owned page or pending lifecycle operation | Session status, fresh screenshot actually inspected, overlays/frames and available recovery |
+| Application ended at a consistent duration | Overall deadline | Attempt snapshot, `application_time_limit` reason and original dispatch start |
+| SQLite BUSY/LOCKED appears | Concurrent bookkeeping | Bounded transaction logs, worker continuity, disk health and current source; retain owned executors |
+| Required answers remain pending | Question/answer mapping | Exact current choices, saved response scope, conflicting knowledge and retry state |
+| AI learning is unavailable | Dashboard learner/provider | Dashboard process, learning activity, installed auxiliary inference credentials |
+| Discovery found nothing or ended incomplete | Discovery executor/intake | Recorded discovery status, saved outputs and source attribution; distinguish no matches from failure |
+| Confirmation alert missing | Optional observer/delivery | Submission ledger, new versus already-applied outcome, private receipt and observer logs |
+| Browser windows remain after an attempt | Owned-target cleanup | Session/dispatch state, process identity and pending cleanup; do not close unrelated tabs |
+
+For browser recovery, follow the canonical application procedure. A helper miss,
+an exhausted helper slice or an old Submit click is not a new finish rule. Before
+concluding an unresolved obstacle, inspect a fresh owned screenshot and attempt
+remaining plausible supported recovery within the selected deadline.
+
+For engineering diagnosis, retrieve the attempt report, event/action timeline,
+source/version evidence and relevant private captures. Separate runtime defects,
+employer obstacles, missing user information and operator intervention. Do not
+change production records to reproduce a test.
+
+## Backups and migrations
+
+The selected instance must match its configuration. Runtime preparation backs up
+before additive migrations. Managed tools provide explicit backup and copy-migrate
+operations:
+
+```text
+python run_applier.py managed backup --source /absolute/managed.db --destination /absolute/new-backup.db --instance-id EXISTING_INSTANCE_ID
+python run_applier.py managed preview-new --db /absolute/new-development.db
+```
+
+Use a new destination and record its identity/hash. For active SQLite databases,
+use the backup API/tool rather than copying only the main `.db` while WAL writes
+may exist. Preserve private assets, account references and evidence independently
+of the code release. A code rollback is not permission to restore an older database.
+
+## Validated deployment workflow
+
+Repository instructions authorize deployment of completed, tested changes to the
+existing authoritative Ubuntu runtime. They do not authorize replacing private
+configuration, discarding unrelated deployed changes or pushing unrelated remotes.
+
+1. Review the exact diff and validate it. Commit the local checkpoint. Record the
+   source commit, intended file list and validation evidence.
+2. Inspect deployed file hashes, installed services and private deployment notes.
+   Account for intentional Ubuntu-only overlays before composing a file-scoped
+   deployment. Back up every file that will change.
+3. For runtime changes, pause new pickup as needed and let active applications
+   finish. Record prior queue/discovery state. Never kill an application to obtain
+   an idle deployment window.
+4. Apply only the intended files, verify their hashes and perform any existing
+   migration procedure with its backup. Preserve profiles, credentials, databases,
+   browser cookies, evidence and unrelated changes.
+5. Reload/restart only affected idle processes. A queue-service stop may terminate
+   its process group, so do not treat restart as harmless during active work.
+   Pure reference-document changes normally require no service restart.
+6. Verify source hashes and affected services, perform appropriate synthetic
+   checks, then restore the recorded pickup state. Save the deployment manifest,
+   backups and verification results privately.
+
+Static UI files are served from disk; a pure asset update may need only a browser
+refresh, as appropriate to that release. Python processes retain imported code
+until reloaded. Decide from the changed component rather than restarting everything.
+
+For self-improvement reviews, use the additional numbered label/tag/report workflow
+in [SELF_IMPROVEMENT.md](jobbot-v1/SELF_IMPROVEMENT.md). Do not infer production
+performance improvements from a synthetic test count.
+
+## Rollback
+
+Use the deployment manifest's file-scoped backups and prior service/pickup state.
+Wait for an appropriate idle boundary for executable changes, restore only those
+files, and verify hashes and service health again. Keep newer application history
+and evidence. Additive database changes require compatibility review; an older
+binary must not be assumed safe against every later schema.
+
+If a deployed overlay or unexpected file change prevents a clean update, preserve
+it and resolve the diff. Do not use a whole-tree reset or checkout overwrite as a
+deployment mechanism.
+
+## Private validation storage
+
+Synthetic browser fixtures, temporary profiles and test databases live in isolated
+private directories. Logs/JUnit and completion metadata must live outside disposable
+fixture directories. Ubuntu cleanup removes completed registered fixtures after
+the documented retention interval and verifies process ownership first.
+
+Follow [Validation storage](jobbot-v1/VALIDATION_STORAGE.md). Never apply its fixture
+cleanup rules to production browsers, current application evidence or private
+configuration.

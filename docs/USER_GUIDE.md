@@ -1,0 +1,294 @@
+# Dashboard user guide
+
+[Documentation index](README.md) · [Getting started](GETTING_STARTED.md) · [Operations](OPERATIONS.md)
+
+The dashboard is titled **Application Operations**. It reads and changes the
+selected managed instance. Six pages are in the main navigation; three more are
+under **Advanced**. The instance identity is also under Advanced.
+
+## Page map
+
+| Page | Use it for |
+|---|---|
+| [Applications](#applications) | Add, find, prioritize and control jobs |
+| [Needs your answer](#needs-your-answer) | Answer unresolved application questions and prepare retries |
+| [Learned answers](#learned-answers) | Inspect and maintain reusable candidate knowledge |
+| [Activity](#activity) | Compare recorded outcomes and inspect attempt evidence |
+| [Profile](#profile) | Maintain candidate facts and register resumes |
+| [Settings](#settings) | Choose execution model, concurrency, deadline and discovery settings |
+| [Accounts & history](#accounts--history) | Inspect candidate-scoped portal accounts and run history |
+| [Lessons & helpers](#lessons--helpers) | Review procedural observations and registered helper versions |
+| [Document records](#document-records) | Inspect document versions, selections, uploads and match assessments |
+
+## Header and connection state
+
+The header shows the connected mode and **Pause JobBot / Resume JobBot**. The
+standard local dashboard connects automatically; **Reconnect** retries that
+connection. **Refresh** requests a fresh view. Visible pages update periodically;
+hidden browser tabs stop polling until visible again.
+
+**Pause JobBot** is a persistent pause on new queued applications and discovery.
+Admitted work continues, with **Finishing current work** shown until it drains.
+Then the status becomes **Paused**. Requests made while paused remain saved and
+wait for Resume. Resume retains the previous automatic pickup setting, history
+and retry schedule.
+
+This global control differs from a single application's Pause/Stop and from
+disabling automatic pickup. It does not stop unrelated model activity or an
+independently started application outside the queue.
+
+## Applications
+
+### Queue overview and application options
+
+The queue card shows whether the worker is online, active capacity, application
+scheduling and discovery state. A reachable dashboard with an offline worker can
+save requests but cannot dispatch them until the worker returns.
+
+Expand **Candidate, resume and application options** to inspect the candidate,
+active resume, browser profile, model/effort, submission mode and browser mode.
+**Review only** records readiness for review instead of submitting. **Submit when
+complete** permits the executor to submit within the configured application
+workflow. Changes are for new work; existing attempts retain their snapshots.
+
+| Action | Effect |
+|---|---|
+| **Queue selected** | Save/prioritize the selected jobs in the displayed sort order and request execution without waiting for the automatic schedule |
+| **Apply now** on a job | Prioritize that specific job, including bypassing a scheduled retry wait; it waits for available capacity and earlier manual requests |
+| **Wake existing queue** | Wake the worker for existing ready work; it does not choose the selected table row or accelerate a future retry by itself |
+| **Enable automatic queue** / its pause counterpart | Enable or pause automatic pickup; explicit manual requests can still run unless global Pause JobBot is active |
+
+The configured concurrency determines how many applications can run. Manual
+priority does not evict an application already running. Repeated authenticated
+delivery of the same UI request keeps its request identity.
+
+### Jobs table
+
+Use text search and the **Show** filter: **Unfinished**, **Needs attention**,
+**Submitted**, **Canceled** or **All jobs**. Additional filters cover source,
+country, assessment and added-date range. Clear filters restores the broad view.
+
+The permanent **#** is assigned when first added. Rediscovery does not change that
+number or the added date. Sortable columns include company/role, status,
+assessment, country, original posted date, source/reference, added date and last
+disposition. Missing posting metadata is shown as unavailable rather than guessed.
+Source references help trace a posting back to discovery or external intake.
+
+**Select all** and the heading checkbox select unfinished jobs shown by the current
+filters. Check the selection count and order before **Queue selected**. Submitted
+and canceled rows are not silently selected for new applications. Clear selection
+resets the selection. Canceled views provide their own selection/restoration controls.
+
+Expand a job for attempt details, failure/recovery information and current
+application controls. Technical diagnostics are collapsed so normal queue work
+does not require reading runtime identifiers.
+
+### Add, edit, cancel and restore
+
+**Add a job** accepts an official URL and optional company/title. Active intake
+can enter the automatic queue; adding a job is not necessarily a passive bookmark.
+The existing eligibility, success, cancellation and answer-handling policies apply.
+
+**Edit job URL** corrects the posting link while preserving its number, added date,
+history and source references. Saving does not navigate an already open application.
+
+**Cancel selected** records an operator disposition and reason, such as Posting
+closed, No longer interested or Manually applied. It preserves attempts and portal
+accounts. **Restore selected** makes canceled jobs available again without erasing
+the cancellation history. “Manually applied” is an operator disposition; it does
+not manufacture an automated submission event.
+
+### Retries and current applications
+
+Automatic recovery has six total attempts in a series, targeting elapsed offsets
+of 0, 2, 4, 6, 24 and 28 hours from the first start. Each retry also waits at least
+two hours after the preceding completion, or four hours for the sixth attempt.
+Busy capacity or a long application moves the due time later. Other ready jobs can
+run while a retry waits.
+
+After an unsuccessful series the job remains **Needs attention** with its reason.
+An explicit retry request can start another series; failed or uncertain history
+is not a permanent ban. Recorded success, explicit cancellation, review-only
+completion, user stop and pending required answers retain their distinct handling.
+See the authoritative [retry policy](jobbot-v1/RETRY_POLICY.md).
+
+Individual application controls act on that owned session. Pause allows operator
+intervention through its existing lifecycle; Stop requests cleanup of its owned
+executor/targets; Restart replaces its application target for recovery. Restart
+does not clear the attempt's evidence or reset its original deadline. Personal
+browser tabs and unrelated applications remain outside those controls.
+
+## Needs your answer
+
+This is the actionable inbox for unresolved application questions. It groups
+repeated questions while keeping company, role and affected applications visible.
+Choose a question in the list or the mobile picker to see its actual wording and
+available answer controls.
+
+1. Check which applications the selected question belongs to.
+2. Supply the response that is true for those applications, using the offered
+   choices when the employer constrains the answer.
+3. Use **Save answer**. The response is recorded for the selected applications
+   immediately; background AI learning is separate.
+4. Review **Ready to retry** once all required answers for an application are saved.
+   Use its **Save and queue retry** action to request another attempt.
+
+The page has **Needs your answer**, **Ready to retry** and **Answer history** views.
+History includes previous response revisions and resolved application context.
+Submitted, canceled, archived and explicitly queued answer retries leave the
+actionable inbox without being relabeled as answered when they were not answered.
+
+Search, pagination and a focused detail pane keep the list manageable. Selection
+and draft answers survive polling and reorderings. Saving one response can move
+to the next question without discarding other drafts.
+
+**Save answer** does not require making a universal reusable answer.
+**Add reusable answer** is an optional separate action. If a question changes on
+the employer form, review its current wording/choices rather than assuming the old
+response still maps to it. Answered retries use the normal queue and pause policy.
+
+## Learned answers
+
+This page holds current reusable knowledge and its source history. The views are
+**Current**, **Retired** and **Learning activity**. Search by question, answer,
+company or position; select one entry for its details and original responses.
+
+AI learning extracts generalized, grounded answers from application responses.
+Human saves do not wait for inference. A learning error leaves the original answer
+saved and retries independently. **Run AI learning** requests another learning
+pass; **Check unanswered questions** reevaluates pending requests against available
+knowledge. Neither button starts an application executor.
+
+Use **Add reusable answer** for explicit knowledge you want to maintain yourself.
+An entry includes:
+
+- The selected candidate, general question and current answer.
+- Other question wording it covers.
+- Scope: all matching applications, a company, or a single application.
+- Optional country, currency and compensation period.
+
+Edit knowledge when circumstances change. Retire an answer to stop future reuse
+while preserving earlier versions; restoration is explicit. Entries indicate AI
+derivation or **Added by you** provenance. Conflicts and scope differences should
+be resolved using the actual facts, not by treating the most frequent old response
+as correct. A company-specific response is not automatically universal.
+
+See [Data model](DATA_MODEL.md) for how human response history, profile facts,
+library revisions and learning work records fit together.
+
+## Activity
+
+**Application results** supports Today, Last 7 days, Last 30 days, Lifetime and
+custom dates. Calendar boundaries use the configured reporting timezone. The 7-
+and 30-day ranges include today.
+
+Metrics group attempts by their **start date**, including retries and jobs later
+canceled or archived. Distinct postings and new submissions are separated from
+raw recorded counts and already-applied outcomes. Queue dispatches have their own
+start-date cohort. A job-level submission rate is not the same as an attempt rate.
+
+**Current applications** shows active sessions and progress. **Attempt history**
+lists attempts in the selected period; select one to open its evidence and timeline
+under **Attempt details**. The timeline distinguishes stages, actions, waits and
+recorded outcomes. It is the place to inspect the actual reason a run ended.
+
+**Advanced run controls & diagnostics** exposes run selection, Request pause,
+Resume, Request stop, ownership details, targets and legacy budget-extension
+records. These protocol diagnostics are distinct from the main queue controls.
+
+Use the evidence source in the attempt report when describing a success. A Submit
+click, helper return status or executor exit code does not independently establish
+employer acceptance. See [Activity statistics](jobbot-v1/ACTIVITY_STATS.md).
+
+## Profile
+
+Select the candidate and inspect identity, email, full name, work authorization
+and selected resume. **Advanced Factual JSON** contains candidate facts, without
+account passwords or other secrets. **Save profile** updates future snapshots;
+existing attempt snapshots retain their recorded facts.
+
+**Import & Resume Assets** can import factual data from a legacy JSON file. It
+excludes credentials, secrets and policy fields from that factual import and
+reports skipped content. Approved private policy configuration is a separate path.
+
+**Upload & register resume** stores the file locally, computes SHA-256 and records
+a versioned resume asset. Registration does not upload to an employer. Confirm the
+intended active resume in application options before requesting new work.
+The upload endpoint accepts PDF, DOCX, DOC, TXT and RTF files, up to 10 MiB.
+
+## Settings
+
+**Application model** selects the executor/provider, model and supported effort.
+**Refresh models** refreshes the installed catalog. Save before requesting new
+work; running applications keep their selected model. Discovery has its own
+executor configuration.
+
+**Simultaneous applications** selects 1–5, default 1. Existing browser mode uses
+separate application windows in the retained profile. Lowering capacity allows
+current applications to finish. Shared logins still behave like multiple manual
+windows on the same employer site.
+
+**Application time limit** defaults to 30 minutes. Set 1–1440 minutes or uncheck
+the option for **Off**. It includes model calls and recovery and excludes waiting
+in queue. At expiry, supervision stops the owned executor and completes cleanup.
+Changes apply to new attempts. Reloads and same-dispatch replacement do not restart
+the clock.
+
+**Job discovery** configures the desired job limit and interval for later discovery
+runs. **All Operational Settings** shows the remaining settings. **Health & Resolved
+System Paths** is useful for checking instance/configuration during troubleshooting;
+its machine-specific output should stay private.
+
+[Configuration](CONFIGURATION.md) lists defaults, precedence and legacy fields.
+
+## Accounts & history
+
+Under **Advanced**, **Portal Accounts** shows namespace, candidate identity,
+account status and last confirmation. An unsuccessful application does not erase
+confirmed account state. Passwords and verification codes are not displayed.
+
+**Run History** provides historical managed run context. This page helps explain
+account reuse; it is not a credential editor and does not make all sites belonging
+to one ATS share an account. See [Data model](DATA_MODEL.md).
+
+## Lessons & helpers
+
+**Observed Lessons** holds procedural observations from execution. Candidate
+observations are advisory; an operator can deliberately activate verified lessons.
+These are procedure records, separate from candidate facts in Learned answers.
+
+**Versioned Helper Catalogue** records existing helper implementations, hashes,
+scope, tests and status. **Register an Existing Helper** needs an approved file,
+version, capability, SHA-256 and test references. It does not write a new helper or
+silently install generated code. Activation follows the existing evidence and
+quiescent-ownership rules. This page is primarily for maintainers.
+
+The canonical [helper/caller map](jobbot-v1/APPLICATION_RUNTIME.md) explains each
+helper's implementation responsibility.
+
+## Document records
+
+**Document Versions** separates a document being available, selected, upload
+attempted and upload confirmed. These stages are not interchangeable.
+
+**External Match Assessments** records evaluator outputs with document/profile
+versions and provenance. A score is the evaluator's assessment, not a hiring
+probability or a guarantee of eligibility.
+
+**Register External Document Metadata** registers a resume or cover-letter version
+with storage reference, SHA-256 and source. **Select a Document** associates an
+available version with a job. The normal resume upload workflow is in Profile.
+The application does not generate cover letters automatically.
+
+## Common questions
+
+| Observation | What to check |
+|---|---|
+| Job is saved but nothing starts | Global pause, worker status, automatic pickup setting, selected capacity and retry due time |
+| Expected history is missing | Instance identity and configured database; check that the legacy server was not launched |
+| Retry waits despite Wake existing queue | Due time and earlier manual work; Apply now targets one job explicitly |
+| Answers saved but learning still pending | Original answers are already durable; inspect Learning activity and dashboard learner availability |
+| Running application still uses old settings | Its immutable snapshot; settings changes apply to new work |
+| Result says interrupted after the limit | Read the distinct timeout reason and any preserved submission evidence |
+
+For process-level checks and recovery, see [Operations](OPERATIONS.md).

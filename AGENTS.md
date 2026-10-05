@@ -18,6 +18,7 @@
 
 ## Engineering
 
+- Keep repository documentation current in the same change when behavior, dashboard pages, configuration, data ownership, integrations or operations change. Start with `docs/README.md` and the change-to-document map in `docs/DOCUMENTATION.md`; update the relevant guide and canonical reference rather than adding another conflicting workflow. Label historical evidence and proposals, preserve private data outside Git, and explain when a change has no documentation impact. This is an engineering maintenance practice, not an application-execution restriction or approval gate.
 - For self-improvement reviews, follow `docs/jobbot-v1/SELF_IMPROVEMENT.md`. Give each run a persistent numbered/date label in commit subjects, an annotated Git tag and matching GitHub/Ubuntu run notes.
 - Ask the user for explicit approval before adding any new application-execution restriction, refusal condition, retry limit, approval requirement or blocking rule in code, database constraints, helpers or executor instructions. Explain the concrete behavior it would prevent. Do not silently add such rules while fixing another problem; removal of an existing unnecessary veto does not require renewed approval.
 - Read `docs/jobbot-v1/APPLICATION_RUNTIME.md` for helper responsibilities, shared versus Workday scope, and data ownership before adding another helper.

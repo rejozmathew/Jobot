@@ -1,5 +1,13 @@
 # Application queue and existing Ubuntu VM rollout
 
+[Current operator guide](../USER_GUIDE.md) · [Operations guide](../OPERATIONS.md)
+
+Current dashboard labels are **Queue selected**, **Apply now** and **Wake existing
+queue**. Older rollout notes below sometimes call the last action **Run next queued
+job** or **Run next**; the CLI still calls it `run-next`. Current queue capacity is
+operator-selectable (1–5), even where older deployment notes describe sequential
+dispatch. Preserve the dated evidence as a record of those checkpoints.
+
 ## Concurrent applications in the existing profile
 
 Under **Settings → Application model**, **Simultaneous applications** selects

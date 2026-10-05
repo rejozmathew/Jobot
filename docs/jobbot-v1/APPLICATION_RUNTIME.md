@@ -1,5 +1,10 @@
 # Application runtime: ownership, helper map, and rationale
 
+Start with the [architecture guide](../ARCHITECTURE.md) for a component overview,
+the [user guide](../USER_GUIDE.md) for dashboard behavior, and
+[configuration](../CONFIGURATION.md) for current setting scope. This detailed
+reference retains the canonical helper map and dated implementation rationale.
+
 ## October 4: contention recovery and compact projections
 
 `Service.read` opens a read-only, deferred SQLite snapshot; reviewed dashboard,

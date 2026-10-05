@@ -1,5 +1,10 @@
 # Auto Job Applier - Development Context
 
+> Historical February 2026 development context. These setup instructions, models,
+> support claims and architecture describe the original browser-use application.
+> Start with the [current README](README.md), [architecture](docs/ARCHITECTURE.md)
+> and [project history](docs/PROJECT_HISTORY.md) for the managed JobBot runtime.
+
 ## Project History
 
 This project was extracted from a fork of [browser-use](https://github.com/browser-use/browser-use) to be a standalone application that uses `browser-use` as a dependency.

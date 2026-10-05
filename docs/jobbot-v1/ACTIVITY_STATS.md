@@ -1,7 +1,9 @@
 # Activity statistics
 
-Activity opens with application results, followed by current applications,
-recent session history, and paginated attempt history. Selecting an attempt
+[Dashboard guide](../USER_GUIDE.md#activity) · [Data model](../DATA_MODEL.md)
+
+Activity opens with application results, followed by current applications
+and paginated attempt history. Selecting an attempt
 opens its existing evidence and timeline. Legacy selected-run controls and
 diagnostics remain available in a collapsed section.
 
@@ -17,19 +19,26 @@ dispatch policy or submission evidence. There are no migrations or new helpers.
 
 - Application attempts: all attempts started in the selected period, including
   retries and attempts for jobs later canceled or archived.
-- Distinct jobs: unique job IDs among those attempts.
+- Distinct jobs: postings among those attempts, deduplicated through connected
+  observed identity aliases, including links through records outside the cohort.
+  `recorded_jobs` separately preserves the raw unique job-ID count.
 - Queue dispatches: queue records actually started in the same period. Pending
   queue entries are excluded. Dispatches and attempts are independent counts;
   a dispatch may create multiple attempts, and an attempt may start directly.
-- Recorded outcomes: the current stored outcome for completed attempts in the
-  start-date cohort. Completion may fall outside the selected dates. Unfinished
+- Reported outcomes: the current outcome classification for completed attempts in
+  the start-date cohort. Explicit prior-application evidence is reported as
+  `already_applied`, even if an older stored row says `applied`; raw rows are not
+  rewritten. `recorded_outcomes` preserves the original stored counts and each
+  history row retains `recorded_outcome`. Completion may fall outside the selected
+  dates. Unfinished
   attempts appear as In progress. Missing completed outcomes remain visible as
   Outcome not recorded. All other recorded outcome values are retained.
-- New submissions: completed attempts recorded as `applied`. `already_applied`
-  appears separately and does not count as a new submission.
+- New submissions: completed attempts reported as `applied`, excluding affirmative
+  already-applied evidence. `already_applied` appears separately and does not count
+  as a new submission.
 - Per-attempt rate: new submissions divided by all cohort attempts.
-- Per-job rate: distinct jobs with a new submission in the cohort divided by
-  all distinct jobs in the cohort. Repeated successful attempts for one job
+- Per-job rate: distinct postings with a new submission in the cohort divided by
+  all distinct postings in the cohort. Repeated successful attempts for one posting
   count once in this numerator.
 
 Empty cohorts show zero counts and an unavailable rate, rather than inventing
