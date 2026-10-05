@@ -341,8 +341,20 @@ async def click_and_follow_external_apply(browser,page,control,activate,client,o
     destination=external_apply_destination(control,current)
     label=str(control.get('text') or control.get('label') or '')
     apply_control=not control.get('submission_control') and bool(re.match(r'^apply\b',label,re.I))
+    # An executor can select a job-title link in an owned embedded board, or
+    # the employer's assessment invitation. Preserve that exact observed href
+    # across same-tab/popup navigation just as for a labelled Apply control.
+    if not destination and not control.get('submission_control') and control.get('href'):
+        from .managed_identity import ats_posting_identity,query_requisition,explicit_job_conflict
+        from .cdp_client import _public_destination
+        href=control['href']
+        posting=ats_posting_identity(href) or query_requisition(href)
+        assessment=re.fullmatch(r'\s*(?:start|take|complete|launch|open)\s+(?:the\s+)?(?:required\s+)?assessment\s*',label,re.I)
+        assigned=(getattr(page,'application_package',{}) or {}).get('job',{}).get('posting_url') or current
+        if _public_destination(href) and (posting or assessment) and not explicit_job_conflict(assigned,href):
+            destination=href
     authentication=False
-    if not control.get('submission_control') and re.fullmatch(r'\s*(?:next|continue|sign\s*in|log\s*in|create\s+account)\s*',label,re.I):
+    if not control.get('submission_control') and re.fullmatch(r'\s*(?:next|continue|sign\s*in|log\s*in|create\s+account|reset\s+(?:your\s+)?password|forgot\s+(?:your\s+)?password\??)\s*',label,re.I):
         from .browser_controls import FORM
         from .browser_frames import resolve_control
         locator=control_target or ({'ref':control['ref']} if control.get('ref') else {})
@@ -360,7 +372,7 @@ async def click_and_follow_external_apply(browser,page,control,activate,client,o
             authentication=(any(f.get('type') in ('email','password') for f in fields) and
                 all(f.get('type') in ('email','password','checkbox','radio') or
                     f.get('tag')=='SELECT' or f.get('role') in choices for f in fields))
-    navigation=await NavigationTrace.start(page,current) if apply_control or authentication else None
+    navigation=await NavigationTrace.start(page,current) if apply_control or authentication or destination else None
     observation=await asyncio.to_thread(arm_target_observation,cdp_url or browser.base_url,target_id,destination or current) if destination or navigation else None
     try:
         result=await activate()

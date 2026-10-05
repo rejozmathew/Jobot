@@ -1,6 +1,8 @@
 """Operator-selected application wall-clock budget, independent of model turns."""
 from datetime import datetime, timedelta, timezone
 import json
+import logging
+import sqlite3
 import time
 
 REASON = 'application_time_limit: Application time limit reached'
@@ -83,8 +85,15 @@ def dispatch_expired(service, item, *, clock=None):
     if not path.exists():return False
     config = json.loads(path.read_text())
     if not (clock or Deadline(config.get('application_deadline'))).expired():return False
-    sessions = find_sessions(service, item)
-    request_stop(service, sessions)
+    try:
+        sessions = find_sessions(service, item)
+        request_stop(service, sessions)
+    except sqlite3.OperationalError as exc:
+        from .managed_migrations import database_busy
+        if not database_busy(exc):raise
+        # The saved deadline still cancels the executor. A later supervision
+        # pass records the stop and completes ordinary owned-browser cleanup.
+        logging.getLogger(__name__).warning('sqlite_contention operation=dispatch_deadline; cancelling owned executor')
     # Record independently of a functioning model or browser. The queue's normal
     # settlement preserves successful submission and uncertainty from attempts.
     from .queue_runtime import private_write

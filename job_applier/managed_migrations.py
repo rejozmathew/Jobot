@@ -3,12 +3,22 @@ import sqlite3
 from pathlib import Path
 
 
-def connect(path):
-    db = sqlite3.connect(str(path), timeout=15, isolation_level=None)
+def connect(path, *, readonly=False):
+    target=Path(path).resolve().as_uri()+'?mode=ro' if readonly else str(path)
+    db = sqlite3.connect(target, uri=readonly, timeout=15, isolation_level=None)
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
     db.execute('PRAGMA busy_timeout=15000')
+    if readonly:db.execute('PRAGMA query_only=ON')
     return db
+
+
+def database_busy(exc):
+    """Only transient SQLite contention; malformed SQL and corruption still surface."""
+    if not isinstance(exc,sqlite3.OperationalError):return False
+    code=getattr(exc,'sqlite_errorcode',None)
+    return (code & 255) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED) if code is not None else str(exc) in (
+        'database is locked','database table is locked','database schema is locked')
 
 
 def add_columns(db, table, columns):
@@ -315,7 +325,23 @@ def migration_27(db):
         id TEXT PRIMARY KEY,state TEXT NOT NULL,updated_at TEXT NOT NULL,retry_at TEXT)''')
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23), (24, migration_24), (25, migration_25), (26, migration_26), (27, migration_27)]
+def migration_28(db):
+    # Non-unique lookup indexes only; application/retry policy is unchanged.
+    for name,table,columns in (
+        ('events_by_attempt_time','managed_events','attempt_id,observed_at,recorded_at,id'),
+        ('actions_by_attempt','managed_actions','attempt_id'),
+        ('dispatch_by_job','dispatch_queue','job_id'),
+        ('sessions_by_job_identity','application_sessions','job_id,identity_id'),
+        ('sessions_by_attempt','application_sessions','attempt_id'),
+        ('attempts_by_job_time','application_attempts','job_id,started_at,id'),
+        ('attempts_by_run','application_attempts','run_id'),
+        ('sources_by_job','job_sources','job_id')):
+        db.execute(f'CREATE INDEX IF NOT EXISTS {name} ON {table}({columns})')
+    from .managed_identity import retain_observed_posting_aliases
+    retain_observed_posting_aliases(db)
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23), (24, migration_24), (25, migration_25), (26, migration_26), (27, migration_27), (28, migration_28)]
 
 
 def migrate(path):

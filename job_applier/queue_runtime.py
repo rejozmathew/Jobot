@@ -6,6 +6,8 @@ The subprocess is replaceable; JobBot owns durable intake, outcomes and scheduli
 import argparse
 from datetime import datetime, timedelta
 import json
+import logging
+import sqlite3
 import os
 from pathlib import Path
 import shutil
@@ -16,6 +18,7 @@ import time
 from .application_runtime import REPOSITORY, prepare_local, resolve_config
 from .application_brief import application_brief
 from .managed import Service
+from .managed_migrations import database_busy
 from .managed_shared import ProtocolError, dumps, uid
 from .workspace_process import FileLock, process_identity, process_matches
 
@@ -54,7 +57,7 @@ def find_sessions(service, item):
         receipt = Path(root)/'dispatch'/item['id']/'desktop-session.json'
         if receipt.exists():
             driver = json.loads(receipt.read_text()).get('stored_session_id')
-    with service.tx() as db:
+    with service.read() as db:
         return [dict(row) for row in db.execute('''SELECT * FROM application_sessions
             WHERE job_id=? AND identity_id=? AND (request_id=? OR driver_id=?) ORDER BY rowid''',
             (item['job_id'], item['identity_id'], 'queue:'+item['id'], driver))]
@@ -106,18 +109,32 @@ def settle(service, item):
     return True
 
 
+def supervise_cached_dispatches(service):
+    # Deadline cancellation cannot wait behind a pending identity write/heartbeat.
+    from .application_deadline import dispatch_expired
+    for item in list(getattr(service,'dispatch_items',{}).values()):
+        dispatch_expired(service,item,clock=getattr(service,'dispatch_clocks',{}).get(item['id']))
+
+
 def recover_dispatch(service):
     recovered=True
+    supervise_cached_dispatches(service)
     processes=getattr(service,'dispatch_processes',{})
+    for item_id,identity in list(getattr(service,'dispatch_identity_pending',{}).items()):
+        with service.tx() as db:
+            db.execute('UPDATE dispatch_queue SET executor_identity_json=? WHERE id=?',(dumps(identity),item_id))
+        service.dispatch_identity_pending.pop(item_id,None)
     # Reap children even when the durable cleanup of their browser is pending.
     for item_id,process in list(processes.items()):
         if process.poll() is not None:processes.pop(item_id,None)
-    with service.tx() as db:
+    with service.read() as db:
         rows=[dict(r) for r in db.execute('''SELECT q.* FROM dispatch_queue q
             WHERE q.state='dispatched' OR (q.state='finished' AND EXISTS (
                 SELECT 1 FROM application_sessions s WHERE s.job_id=q.job_id
                 AND s.identity_id=q.identity_id AND s.ended_at IS NULL))''')]
     for item in rows:
+        if item['id']==getattr(service,'dispatch_preparation',{}).get('item',{}).get('id'):
+            recovered=False;continue  # Resume this reserved launch after a busy read.
         if item['state']=='dispatched':
             from .application_deadline import dispatch_expired
             dispatch_expired(service,item,clock=getattr(service,'dispatch_clocks',{}).get(item['id']))
@@ -131,7 +148,9 @@ def recover_dispatch(service):
         if orphan_is_active(service, item, check_finished=active):
             recovered=False;continue
         if not settle(service,item):recovered=False
-        else:getattr(service,'dispatch_clocks',{}).pop(item['id'],None)
+        else:
+            getattr(service,'dispatch_clocks',{}).pop(item['id'],None)
+            getattr(service,'dispatch_items',{}).pop(item['id'],None)
     return recovered
 
 
@@ -154,7 +173,7 @@ def dispatch_capacity(config, service):
     workspaces=config['workspaces']
     if not any(w.get('connection_mode')=='existing' for w in workspaces):
         limit=min(limit,len(workspaces))
-    with service.tx() as db:
+    with service.read() as db:
         sessions=[dict(r) for r in db.execute('SELECT * FROM application_sessions WHERE ended_at IS NULL AND workspace_id IS NOT NULL')]
         items=[dict(r) for r in db.execute("SELECT * FROM dispatch_queue WHERE state='dispatched'")]
     associated={s['id'] for item in items for s in find_sessions(service,item)}
@@ -168,19 +187,25 @@ def dispatch_one(config, service, *, launcher=subprocess.Popen, wait=True):
     service.desktop_dispatch_spool=config['spool_dir']
     recover_dispatch(service)
     limit,manual,items,browser_available=dispatch_capacity(config,service)
-    if len(items)>=limit:return {'state':'waiting_for_executor_or_cleanup'}
-    if len(items)+manual>=limit or not browser_available:
-        return {'state':'waiting_for_browser'}
-    item=service.queue_take(concurrency_limit=limit-manual)
-    if not item:return {'state':'paused' if service.queue_status()['automation_paused'] else 'empty'}
+    pending=getattr(service,'dispatch_preparation',None)
+    if not pending:
+        if len(items)>=limit:return {'state':'waiting_for_executor_or_cleanup'}
+        if len(items)+manual>=limit or not browser_available:
+            return {'state':'waiting_for_browser'}
+        item=service.queue_take(concurrency_limit=limit-manual)
+        if not item:return {'state':'paused' if service.queue_status()['automation_paused'] else 'empty'}
+        pending=service.dispatch_preparation={'item':item,'limit':limit}
+    item=pending['item']
     root=Path(config['spool_dir'])/'dispatch'/item['id']
     from .model_settings import application_selection
-    effective_settings=service.settings_view()['values']
-    child_config=dict(application_selection(config,effective_settings),
-                      identity_id=item['identity_id'],resume_asset_id=item['resume_asset_id'],
-                      concurrency_limit=limit)
     from .application_deadline import freeze,Deadline,dispatch_expired
-    child_config=freeze(child_config,effective_settings,service.now())
+    if 'config' not in pending:
+        effective_settings=service.settings_view()['values']
+        child_config=dict(application_selection(config,effective_settings),
+                          identity_id=item['identity_id'],resume_asset_id=item['resume_asset_id'],
+                          concurrency_limit=pending['limit'])
+        pending['config']=freeze(child_config,effective_settings,item.get('started_at') or service.now())
+    child_config=dict(pending['config'])
     deadline=Deadline(child_config['application_deadline'])
     child_config['config_path']=str(root/'runtime.json')
     process=None
@@ -195,19 +220,36 @@ def dispatch_one(config, service, *, launcher=subprocess.Popen, wait=True):
                          stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,shell=False,
                          **({'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {'start_new_session':True}))
         identity=process_identity(process.pid)
-        with service.tx() as db:
-            db.execute('UPDATE dispatch_queue SET executor_identity_json=? WHERE id=?',(dumps(identity or {}),item['id']))
+        # Retain ownership BEFORE any fallible persistence after launch. A busy
+        # DB resumes this exact identity write; it never launches another child.
+        if not hasattr(service,'dispatch_processes'):service.dispatch_processes={}
+        if not hasattr(service,'dispatch_clocks'):service.dispatch_clocks={}
+        if not hasattr(service,'dispatch_identity_pending'):service.dispatch_identity_pending={}
+        if not hasattr(service,'dispatch_items'):service.dispatch_items={}
+        service.dispatch_processes[item['id']]=process
+        service.dispatch_clocks[item['id']]=deadline
+        service.dispatch_identity_pending[item['id']]=identity or {}
         item=dict(item,executor_identity_json=dumps(identity or {}))
+        service.dispatch_items[item['id']]=item
+        service.dispatch_preparation={}
+        try:
+            with service.tx() as db:
+                db.execute('UPDATE dispatch_queue SET executor_identity_json=? WHERE id=?',(dumps(identity or {}),item['id']))
+            service.dispatch_identity_pending.pop(item['id'],None)
+        except sqlite3.OperationalError as exc:
+            if not database_busy(exc):raise
+            logging.getLogger(__name__).warning('sqlite_contention operation=dispatch_identity; executor retained')
         if not wait:
-            if not hasattr(service,'dispatch_processes'):service.dispatch_processes={}
-            if not hasattr(service,'dispatch_clocks'):service.dispatch_clocks={}
-            service.dispatch_processes[item['id']]=process
-            service.dispatch_clocks[item['id']]=deadline
             return {'state':'dispatched','item_id':item['id']}
         while process.poll() is None:
-            expired=dispatch_expired(service,item,clock=deadline)
-            service.queue_heartbeat(process_identity(os.getpid()),current_item=item['id'],
-                detail='Application time limit reached; stopping executor and cleaning up' if expired else 'In progress')
+            try:
+                recover_dispatch(service)
+                expired=dispatch_expired(service,item,clock=deadline)
+                service.queue_heartbeat(process_identity(os.getpid()),current_item=item['id'],
+                    detail='Application time limit reached; stopping executor and cleaning up' if expired else 'In progress')
+            except sqlite3.OperationalError as exc:
+                if not database_busy(exc):raise
+                logging.getLogger(__name__).warning('sqlite_contention operation=dispatch_wait; executor retained')
             time.sleep(2)
         finished=settle(service,item)
         return {'state':'finished' if finished else 'closing_browser','item_id':item['id'],'executor_exit_code':process.returncode}
@@ -217,6 +259,7 @@ def dispatch_one(config, service, *, launcher=subprocess.Popen, wait=True):
             raise
         code=getattr(exc,'code',type(exc).__name__)
         service.queue_complete(item['id'],outcome='failed',detail='Executor launch failed: '+code)
+        service.dispatch_preparation={}
         return {'state':'launch_failed','item_id':item['id'],'error':code}
 
 
@@ -228,39 +271,44 @@ def watch(config, service, *, once=False):
         service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}
         next_answer_review=0
         while True:
-            service.queue_heartbeat(process_identity(os.getpid()))
-            if time.monotonic()>=next_answer_review:
-                service.reconcile_answers(identity_id=config['identity_id'])
-                next_answer_review=time.monotonic()+60
-            import_answer_retries(config,service)
-            service.queue_reconcile(**service.dispatch_selection)
-            status=service.queue_status()
-            now=datetime.fromisoformat(service.now())
-            due=not status['next_automatic_at'] or now>=datetime.fromisoformat(status['next_automatic_at'])
-            # Cleanup is observed even with scheduling paused.
-            recover_dispatch(service)
-            if status['automation_paused']:
-                service.queue_heartbeat(process_identity(os.getpid()),detail='Paused; waiting for Resume JobBot')
-                if once:return {'state':'paused'}
-            elif once or status['wake_requested'] or status['immediate_count'] or (status['enabled'] and due):
-                if once:result=dispatch_one(config,service)
-                else:
-                    # Fill available slots without waiting for any executor. Every
-                    # launch re-reads pause, capacity and the latest model settings.
-                    while True:
-                        result=dispatch_one(config,service,wait=False)
-                        if result['state']!='dispatched':break
-                        latest=service.queue_status()
-                        # A manual Run next / Apply now is still its original
-                        # request. Fill more slots only for due automatic work or
-                        # remaining explicitly queued immediate requests.
-                        if not ((latest['enabled'] and due) or latest['immediate_count']):break
-                if result['state'] not in ('paused','waiting_for_browser','waiting_for_executor_or_cleanup'):
-                    with service.tx() as db:
-                        db.execute('UPDATE dispatch_control SET wake_requested=0,next_automatic_at=? WHERE id=1 AND automation_paused=0',
-                                   ((datetime.fromisoformat(service.now())+timedelta(seconds=interval)).isoformat(),))
-                service.queue_heartbeat(process_identity(os.getpid()),detail=result['state'])
-                if once:return result
+            try:
+                supervise_cached_dispatches(service)
+                service.queue_heartbeat(process_identity(os.getpid()))
+                if time.monotonic()>=next_answer_review:
+                    service.reconcile_answers(identity_id=config['identity_id'])
+                    next_answer_review=time.monotonic()+60
+                import_answer_retries(config,service)
+                service.queue_reconcile(**service.dispatch_selection)
+                status=service.queue_status()
+                now=datetime.fromisoformat(service.now())
+                due=not status['next_automatic_at'] or now>=datetime.fromisoformat(status['next_automatic_at'])
+                # Cleanup is observed even with scheduling paused.
+                recover_dispatch(service)
+                if status['automation_paused']:
+                    service.queue_heartbeat(process_identity(os.getpid()),detail='Paused; waiting for Resume JobBot')
+                    if once:return {'state':'paused'}
+                elif once or status['wake_requested'] or status['immediate_count'] or (status['enabled'] and due):
+                    if once:result=dispatch_one(config,service)
+                    else:
+                        # Fill available slots without waiting for any executor. Every
+                        # launch re-reads pause, capacity and the latest model settings.
+                        while True:
+                            result=dispatch_one(config,service,wait=False)
+                            if result['state']!='dispatched':break
+                            latest=service.queue_status()
+                            # A manual Run next / Apply now is still its original
+                            # request. Fill more slots only for due automatic work or
+                            # remaining explicitly queued immediate requests.
+                            if not ((latest['enabled'] and due) or latest['immediate_count']):break
+                    if result['state'] not in ('paused','waiting_for_browser','waiting_for_executor_or_cleanup'):
+                        with service.tx() as db:
+                            db.execute('UPDATE dispatch_control SET wake_requested=0,next_automatic_at=? WHERE id=1 AND automation_paused=0',
+                                       ((datetime.fromisoformat(service.now())+timedelta(seconds=interval)).isoformat(),))
+                    service.queue_heartbeat(process_identity(os.getpid()),detail=result['state'])
+                    if once:return result
+            except sqlite3.OperationalError as exc:
+                if not database_busy(exc):raise
+                logging.getLogger(__name__).warning('sqlite_contention operation=queue_watch; retrying bookkeeping')
             time.sleep(2)
 
 

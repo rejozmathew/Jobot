@@ -7,7 +7,7 @@ from .workspace_process import process_matches
 
 class DiscoveryServices:
     def discovery_status(self):
-        with self.tx() as db:
+        with self.read() as db:
             settings=self._settings_record(db)['values']
             installed=bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_runs'").fetchone())
             row=db.execute('SELECT * FROM discovery_runs ORDER BY rowid DESC LIMIT 1').fetchone() if installed else None

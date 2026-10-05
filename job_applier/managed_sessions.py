@@ -123,7 +123,7 @@ class SessionServices:
             return dict(self._get(db,'application_sessions',sid))
 
     def session(self, session_id):
-        with self.tx() as db:return dict(self._get(db,'application_sessions',session_id))
+        with self.read() as db:return dict(self._get(db,'application_sessions',session_id))
 
     def session_human_input(self,session_id,driver_id,capabilities):
         """Record the attached harness's observed messaging availability, not browser authority."""
@@ -139,16 +139,20 @@ class SessionServices:
         return normalized
 
     def session_status(self, session_id):
-        with self.tx() as db:
+        with self.read() as db:
             s=dict(self._get(db,'application_sessions',session_id))
             workspace=dict(self._get(db,'browser_workspaces',s['workspace_id'])) if s['workspace_id'] else None
             attempt=dict(self._get(db,'application_attempts',s['attempt_id'])) if s['attempt_id'] else None
-            steps=[{**dict(row),'payload':json.loads(row['payload_json'])} for row in db.execute(
-                "SELECT event_type,observed_at,payload_json FROM managed_events WHERE attempt_id=? AND stale=0 AND event_type IN ('phase_changed','navigation_verified','account_verified','recovery','outcome') ORDER BY recorded_at DESC,id DESC LIMIT 12",
-                (s['attempt_id'],))] if attempt else []
-            for step in steps:step.pop('payload_json')
             events=[dict(row) for row in db.execute('SELECT * FROM managed_events WHERE attempt_id=? ORDER BY rowid',(s['attempt_id'],))] if attempt else []
             actions=[dict(row) for row in db.execute('SELECT * FROM managed_actions WHERE attempt_id=?',(s['attempt_id'],))] if attempt else []
+        return self._session_status_record(s,workspace,attempt,events,actions)
+
+    def _session_status_record(self,s,workspace,attempt,events,actions):
+        """Build projections after releasing the read snapshot; no browser/DB I/O."""
+        recent=sorted((e for e in events if not e['stale'] and e['event_type'] in
+            ('phase_changed','navigation_verified','account_verified','recovery','outcome')),
+            key=lambda e:(e['recorded_at'],e['id']),reverse=True)[:12]
+        steps=[{k:e[k] for k in ('event_type','observed_at')}|{'payload':json.loads(e['payload_json'])} for e in recent]
         from .managed_reports import application_progress
         progress=application_progress(events,actions=actions,now=self.now(),ended_at=s['ended_at'])
         autofill_times=[event['observed_at'] for event in events if not event['stale'] and
@@ -357,6 +361,11 @@ class SessionServices:
                     and not explicit_job_conflict(source,canonical))
             if not alias and not is_same_application_scope(job['url'],canonical) and not correlated:
                 raise ProtocolError('target_job_mismatch')
+            from .managed_identity import observed_posting_key
+            posting_key=observed_posting_key(canonical)
+            if posting_key:
+                db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',
+                    (posting_key,job['id'],'observed_posting_identity'))
             occupied=db.execute("SELECT * FROM owned_targets WHERE profile=? AND target_id=? AND state!='closed'",
                                 (attempt['browser_profile'],new_target_id)).fetchone()
             if occupied and occupied['attempt_id']!=attempt_id:raise ProtocolError('target_owned_elsewhere')
@@ -440,9 +449,22 @@ class SessionServices:
             return {'namespace':namespace,'state':'released' if release else 'available','session_id':session_id}
 
     def sessions_view(self):
-        with self.tx() as db:
+        from collections import defaultdict
+        with self.read() as db:
             if not self._has_local_schema(db):return {'sessions':[],'workspaces':[]}
-            ids=[r[0] for r in db.execute('SELECT id FROM application_sessions ORDER BY requested_at DESC LIMIT 100')]
-            workspaces=[dict(r) for r in db.execute('SELECT id,state,reason,host_seen_at,config_json FROM browser_workspaces')]
-        return {'sessions':[self.session_status(sid) for sid in ids],
-                'workspaces':[{**w,'config':json.loads(w.pop('config_json'))} for w in workspaces]}
+            sessions=[dict(r) for r in db.execute('SELECT * FROM application_sessions ORDER BY requested_at DESC LIMIT 100')]
+            workspaces={r['id']:dict(r) for r in db.execute('SELECT * FROM browser_workspaces')}
+            ids=[s['attempt_id'] for s in sessions if s['attempt_id'] is not None]
+            attempts={};events=defaultdict(list);actions=defaultdict(list)
+            if ids:
+                placeholders=','.join('?' for _ in ids)
+                attempts={r['id']:dict(r) for r in db.execute(f'SELECT * FROM application_attempts WHERE id IN ({placeholders})',ids)}
+                for row in db.execute(f'SELECT * FROM managed_events WHERE attempt_id IN ({placeholders}) ORDER BY rowid',ids):
+                    events[row['attempt_id']].append(dict(row))
+                for row in db.execute(f'SELECT * FROM managed_actions WHERE attempt_id IN ({placeholders})',ids):
+                    actions[row['attempt_id']].append(dict(row))
+        public_workspaces=[{k:w[k] for k in ('id','state','reason','host_seen_at','config_json')}|
+            {'config':json.loads(w['config_json'])} for w in workspaces.values()]
+        return {'sessions':[self._session_status_record(s,workspaces.get(s['workspace_id']),attempts.get(s['attempt_id']),
+                    events[s['attempt_id']],actions[s['attempt_id']]) for s in sessions],
+                'workspaces':public_workspaces}

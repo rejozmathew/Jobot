@@ -139,7 +139,7 @@ class QueueServices:
         return {'items':items, **({'queue':self.queue_status()} if start_now else {})}
 
     def queue_status(self):
-        with self.tx() as db:
+        with self.read() as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='dispatch_queue'").fetchone():
                 return {'installed':False,'enabled':False,'worker_online':False,'counts':{},'items':[]}
             control=dict(db.execute('SELECT * FROM dispatch_control WHERE id=1').fetchone())

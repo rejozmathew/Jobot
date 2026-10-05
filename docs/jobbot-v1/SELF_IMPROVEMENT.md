@@ -404,3 +404,43 @@ run, with isolated recheck evidence retained. The earlier five-window startup
 timeout also passed unchanged in isolation. The four-slot submission replay and
 final edited credential/navigation checks passed. These environment failures are
 recorded rather than hidden or addressed by loosening application behavior.
+
+### Self-improvement #009 — 2026-10-04
+
+Tag: `self-improvement-009-2026-10-04`. The annotated tag identifies the validated
+code checkpoint, deployment timestamp and final test counts. Matching private
+Ubuntu notes retain source hashes, backups, synthetic reports and queue state.
+
+The evening review found repeated SQLite contention crashing queue/host supervision
+and interrupting applications with time remaining. Read-only projections now use
+deferred read snapshots, hot history lookups have non-unique indexes, session
+history loads in one batch, and hidden dashboards stop polling. Busy supervision
+retains owned sessions and executors, including a reserved launch or pending
+process-identity write. Cached deadlines remain effective when bookkeeping is busy;
+unfinished browser preparation reclaims only its owned targets before retrying.
+
+Observed navigation now preserves LinkedIn notification posting identity, public
+password-reset requests, embedded posting links and assessment invitations through
+the existing shared handoff. Verified posting aliases link intake and reporting.
+Retry context retains meaningful earlier obstacles and current saved answers when
+later interruptions obscure them. Activity reporting separates explicit prior-
+application evidence and deduplicated postings while retaining raw recorded counts.
+Helper screens retain controls, facts, policy and recovery operations with less
+repeated guidance. No application restriction or new retry limit is introduced.
+
+Synthetic regressions reproduced the contention, route, history and reporting
+failures before implementation. The focused Windows browser/recovery suite passed
+all 84 cases, including the unchanged four-slot submission/admission control.
+A separate test with 80,000 events and 49,000 actions preserved four writers during
+dashboard polling. The same hot lookup used about 240,000 SQLite VM steps without
+its index and fewer than 100 with it. This is a database mechanism comparison,
+not an end-to-end application throughput claim. Antigravity runs the final managed
+suite and isolated Ubuntu checks; logs and JUnit are inspected independently.
+
+Deployment occurs while pickup is paused and applications are idle, preserving
+the deployed operator route-reconciliation bridge and private configuration.
+Confirmed ended-session browser targets can be reclaimed using durable ownership
+and browser incarnation evidence. Services are verified before pickup resumes.
+The historical counterfactual remains conditional: fixing a prerequisite does not
+prove that a particular employer would have accepted the application. Production
+submission-rate and capacity improvements require subsequent matched evidence.

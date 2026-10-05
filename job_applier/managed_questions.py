@@ -193,7 +193,7 @@ class QuestionServices:
             groups=[g for g in groups if term in ' '.join([g.get('company') or '',g.get('title') or '',g['email'],
                 *(q['question']+' '+str(q['answer']) for q in g['questions'])]).casefold()]
         selected=groups[offset:offset+limit]
-        with self.tx() as db:
+        with self.read() as db:
             for group in selected:
                 for question in group['questions']:
                     question['answer_history']=[dict(r,answer=json.loads(r['answer_json'])) for r in db.execute(
@@ -202,7 +202,7 @@ class QuestionServices:
         return {'groups':selected,'total':len(groups),'offset':offset,'limit':limit}
 
     def _answer_queue_groups(self,identity_id=None):
-        with self.tx() as db:
+        with self.read() as db:
             if not self._has_question_schema(db):return []
             where='WHERE q.identity_id=?' if identity_id else ''
             rows=db.execute('''SELECT DISTINCT q.job_id,q.identity_id,j.url,j.company,j.title,j.status,j.disposition,c.email
@@ -254,7 +254,7 @@ class QuestionServices:
             return {'requests':requests,'instruction':'The next application harness can pick up these requests. Browser startup still verifies ownership, history and the configured profile.'}
 
     def answer_retries(self,identity_id=None):
-        with self.tx() as db:
+        with self.read() as db:
             if not self._has_question_schema(db):return {'requests':[]}
             query="SELECT r.*,j.url,j.company,j.title FROM answer_retry_requests r JOIN jobs j ON j.id=r.job_id WHERE r.state='queued'"
             rows=db.execute(query+(' AND r.identity_id=?' if identity_id else '')+' ORDER BY r.requested_at,r.id',

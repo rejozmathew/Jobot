@@ -260,7 +260,7 @@ class AnswerLibraryServices(AnswerLearningServices):
             return entry
 
     def answer_library(self, identity_id=None, include_history=True):
-        with self.tx() as db:
+        with self.read() as db:
             if not self._has_library_schema(db):return {'entries':[], 'suggestions':[]}
             identities = [identity_id] if identity_id else [r[0] for r in db.execute('SELECT id FROM candidates')]
             entries = []

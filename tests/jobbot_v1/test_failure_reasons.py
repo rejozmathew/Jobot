@@ -491,6 +491,7 @@ function getEl(id) {{
 const context = {{
   console,
   document: {{
+      addEventListener: () => {{}},
     getElementById: (id) => getEl(id),
     createElement: (tag) => new FakeElement(tag),
     createTextNode: (text) => new FakeElement('SPAN', text),

@@ -8,11 +8,13 @@ from contextlib import closing, nullcontext
 from datetime import datetime
 import hashlib
 import json
+import logging
 import math
 from multiprocessing.connection import Client as PipeClient, Listener
 import os
 from pathlib import Path
 import subprocess
+import sqlite3
 import sys
 import threading
 import time
@@ -21,13 +23,14 @@ import urllib.request
 
 from .application_runtime import REPOSITORY, error_detail, handle, resolve_config
 from .managed import Service
+from .managed_migrations import database_busy
 from .managed_client import LocalClient
 from .managed_shared import ProtocolError, uid
 from .workspace_process import FileLock, OwnedProcess, detached_launch, process_identity, process_matches
 
 
 def workspace_record(service, workspace_id):
-    with service.tx() as db:return dict(service._get(db,'browser_workspaces',workspace_id))
+    with service.read() as db:return dict(service._get(db,'browser_workspaces',workspace_id))
 
 
 def lock_path(workspace):return Path(workspace['user_data_dir'])/'.jobbot-host.lock'
@@ -150,7 +153,7 @@ class WorkspaceHost:
         return sessions[0] if sessions else None
 
     def active_sessions(self):
-        with self.service.tx() as db:
+        with self.service.read() as db:
             return [dict(row) for row in db.execute('SELECT * FROM application_sessions WHERE workspace_id=? AND ended_at IS NULL ORDER BY rowid',(self.workspace_id,))]
 
     def operation_lock(self, session_id):
@@ -172,8 +175,13 @@ class WorkspaceHost:
         """Cancellation/target closure cannot wait behind a blocked browser helper."""
         from .application_deadline import request_stop,REASON
         from .hermes_desktop import cancel_driver,native_driver_id
-        request_stop(self.service,[session])
         try:
+            stop_recorded=True
+            try:request_stop(self.service,[session])
+            except sqlite3.OperationalError as exc:
+                if not database_busy(exc):raise
+                stop_recorded=False
+                logging.getLogger(__name__).warning('sqlite_contention operation=deadline_stop; cancelling owned executor')
             native_id=native_driver_id(session)
             cancelled=cancel_driver(self.config,session['driver_id'],native_id)
             # Preparation observes stop and owns any as-yet-unrecorded launch.
@@ -181,7 +189,7 @@ class WorkspaceHost:
             if session['id'] in self.preparing:
                 if self.existing_browser:asyncio.run(self.close_application_tabs(session))
                 return
-            if not cancelled:
+            if not cancelled or not stop_recorded:
                 # Stop browser activity, but retain supervision until native
                 # cancellation is confirmed. Do not report completed cleanup.
                 if self.existing_browser:asyncio.run(self.close_application_tabs(session))
@@ -400,7 +408,7 @@ class WorkspaceHost:
             # without holding up already connected tabs and their executors.
             with self.operation_lock(session['id']), (self.busy if self.existing_browser else nullcontext()):
                 session=self.service.session(session['id'])
-                with self.service.tx() as db:control=self.service._get(db,'runs',session['run_id'])['control']
+                with self.service.read() as db:control=self.service._get(db,'runs',session['run_id'])['control']
                 # Another preparation can finish after the monitor's snapshot.
                 # Recheck under the operation lock before creating another window.
                 if session['ended_at'] or session['state']!='preparing':return
@@ -408,6 +416,15 @@ class WorkspaceHost:
                     self.stop_session(session,session['reason'] or control,paused=control in ('pause_requested','paused'))
                     return
                 if self.session_deadline(session).expired():raise ProtocolError('application_time_limit')
+                if session['id'] in getattr(self,'preparation_cleanup',set()):
+                    # A busy readiness write may leave a prepared, owned target.
+                    # Reclaim it through the normal ownership checks before retry.
+                    if self.existing_browser:asyncio.run(self.close_application_tabs(session))
+                    elif self.browser:
+                        self.browser.stop()
+                        if process_matches(self.browser.identity):raise ProtocolError('owned_browser_stop_unconfirmed')
+                        self.browser=None
+                    self.preparation_cleanup.discard(session['id'])
                 recovery=json.loads(session['metadata_json']).get('browser_restart')
                 if recovery:
                     # Close acknowledgements and browser readiness can span helper
@@ -419,22 +436,29 @@ class WorkspaceHost:
                         if process_matches(self.browser.identity):raise ProtocolError('owned_browser_stop_unconfirmed')
                         self.browser=None
                     if not self.service.session_restart_closed(session['id'],self.host_id):
-                        with self.service.tx() as db:control=self.service._get(db,'runs',session['run_id'])['control']
+                        with self.service.read() as db:control=self.service._get(db,'runs',session['run_id'])['control']
                         self.stop_session(session,control,paused=control in ('pause_requested','paused'))
                         return
                     session=self.service.session(session['id'])
                 self.start_browser()
                 target,ready=asyncio.run(self.prepare_target(session))
                 current=self.service.session(session['id'])
-                with self.service.tx() as db:control=self.service._get(db,'runs',current['run_id'])['control']
+                with self.service.read() as db:control=self.service._get(db,'runs',current['run_id'])['control']
                 if self.session_deadline(session).expired():raise ProtocolError('application_time_limit')
                 if control!='running':raise ProtocolError('startup_cancelled')
                 self.service.session_connected(session['id'],self.host_id,target,ready)
         except Exception as exc:
+            if isinstance(exc,sqlite3.OperationalError) and database_busy(exc):
+                if not hasattr(self,'preparation_cleanup'):self.preparation_cleanup=set()
+                if not hasattr(self,'preparation_retry_at'):self.preparation_retry_at={}
+                self.preparation_cleanup.add(session['id'])
+                self.preparation_retry_at[session['id']]=time.monotonic()+1
+                logging.getLogger(__name__).warning('sqlite_contention operation=browser_preparation; owned session retained')
+                return
             detail=error_detail(exc)
             current=self.service.session(session['id'])
             meta=json.loads(current['metadata_json'])
-            with self.service.tx() as db:control=self.service._get(db,'runs',current['run_id'])['control']
+            with self.service.read() as db:control=self.service._get(db,'runs',current['run_id'])['control']
             if meta.get('browser_restart') and not current['ended_at'] and control=='running' and not self.session_deadline(current).expired():
                 # Retry only owned browser preparation, never replay form or Submit
                 # actions. The saved application deadline still ends recovery.
@@ -655,6 +679,13 @@ class WorkspaceHost:
 
     def supervise_session(self,session):
         sid=session['id']
+        # The cached monotonic deadline is independent of DB availability.
+        if self.session_deadline(session).expired():
+            if sid not in self.deadline_cleanups:
+                self.deadline_cleanups.add(sid)
+                thread=threading.Thread(target=self.expire_session,args=(session,),daemon=True)
+                thread.start();self.threads.append(thread)
+            return
         from .hermes_desktop import native_driver_id
         if (isinstance(self.config.get('hermes_desktop'),dict) and
             not native_driver_id(session) and sid not in self.native_bindings and
@@ -662,13 +693,7 @@ class WorkspaceHost:
             self.native_bindings.add(sid);self.last_native_bindings[sid]=time.monotonic()
             thread=threading.Thread(target=self.remember_native_driver,args=(session,),daemon=True)
             thread.start();self.threads.append(thread)
-        with self.service.tx() as db:run=dict(self.service._get(db,'runs',session['run_id']))
-        if self.session_deadline(session).expired():
-            if sid not in self.deadline_cleanups:
-                self.deadline_cleanups.add(sid)
-                thread=threading.Thread(target=self.expire_session,args=(session,),daemon=True)
-                thread.start();self.threads.append(thread)
-            return
+        with self.service.read() as db:run=dict(self.service._get(db,'runs',session['run_id']))
         # Preparation owns the target until it observes a pending stop request.
         if sid in self.preparing:return
         lock=self.operation_lock(sid)
@@ -727,25 +752,33 @@ class WorkspaceHost:
                 server=threading.Thread(target=self.serve_requests,args=(listener,),daemon=True);server.start()
                 last_seen=0
                 idle_since=None
+                sessions=[]
                 try:
                     while not self.exit.wait(.25):
-                        sessions=self.active_sessions()
-                        if time.monotonic()-last_seen>5:
-                            self.service.host_seen(self.workspace_id,self.host_id,self.browser.identity if self.browser else None);last_seen=time.monotonic()
-                        if not sessions:
-                            idle_since=idle_since or time.monotonic()
-                            if self.retire and not self.requests and not self.busy.locked():
-                                with FileLock(str(lock_path(self.workspace))+'.startup'):
-                                    if not self.active_session():
-                                        with self.service.tx() as db:
-                                            db.execute("UPDATE browser_workspaces SET state='offline' WHERE id=? AND host_id=?",(self.workspace_id,self.host_id))
-                                        break
-                            if time.monotonic()-idle_since>60 and not self.requests and not self.preparing:break
-                            continue
-                        idle_since=None
-                        for session in sessions:self.supervise_session(session)
-                        self.threads[:]=[thread for thread in self.threads if thread.is_alive()]
+                        try:
+                            sessions=self.active_sessions()
+                            if time.monotonic()-last_seen>5:
+                                self.service.host_seen(self.workspace_id,self.host_id,self.browser.identity if self.browser else None);last_seen=time.monotonic()
+                            if not sessions:
+                                idle_since=idle_since or time.monotonic()
+                                if self.retire and not self.requests and not self.busy.locked():
+                                    with FileLock(str(lock_path(self.workspace))+'.startup'):
+                                        if not self.active_session():
+                                            with self.service.tx() as db:
+                                                db.execute("UPDATE browser_workspaces SET state='offline' WHERE id=? AND host_id=?",(self.workspace_id,self.host_id))
+                                            break
+                                if time.monotonic()-idle_since>60 and not self.requests and not self.preparing:break
+                                continue
+                            idle_since=None
+                            for session in sessions:self.supervise_session(session)
+                            self.threads[:]=[thread for thread in self.threads if thread.is_alive()]
+                        except sqlite3.OperationalError as exc:
+                            if not database_busy(exc):raise
+                            logging.getLogger(__name__).warning('sqlite_contention operation=host_monitor; owned sessions retained')
+                            for session in sessions:
+                                if self.session_deadline(session).expired():self.supervise_session(session)
                 finally:
+                    logging.getLogger(__name__).warning('host_exit at=%s active_sessions=%d',self.service.now(),len(sessions))
                     self.exit.set()
                     if self.browser:self.browser.stop()
                     if self.existing_browser:

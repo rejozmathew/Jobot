@@ -668,7 +668,7 @@ function renderActivity(stats){
  $('activity-cohort').textContent=`${dates} · ${stats.timezone}${span} · Updated ${stamp(stats.as_of)}`;
  $('activity-metrics').replaceChildren();
  for(const [value,label] of [[number(stats.attempts),'Application attempts'],[number(stats.dispatches),'Queue dispatches'],[number(stats.jobs),'Distinct jobs'],
-  [number(stats.outcomes.applied||0),'New submissions'],[rate(stats.submission_rate_per_attempt),'New submissions / attempts'],[rate(stats.submission_rate_per_job),'Jobs with new submission / jobs']]){
+  [number(stats.submitted_jobs??stats.outcomes.applied??0),'Jobs with new submissions'],[rate(stats.submission_rate_per_attempt),'New submissions / attempts'],[rate(stats.submission_rate_per_job),'Jobs with new submission / jobs']]){
   const metric=el('div',undefined,'stat');metric.append(el('strong',value),el('span',label));$('activity-metrics').append(metric);
  }
  $('activity-outcomes').replaceChildren();
@@ -1138,4 +1138,5 @@ $('profile-resume-form').onsubmit=async e=>{
   await refresh();
  }catch(err){notice(err.message,true);}
 };
-setInterval(()=>{if(state.instance&&!state.busy)refresh();},1500);
+setInterval(()=>{if(state.instance&&!state.busy&&!document.hidden)refresh();},5000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.instance)refresh();});

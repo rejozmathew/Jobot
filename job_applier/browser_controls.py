@@ -230,15 +230,13 @@ def inventory(observed, package):
     if isinstance(settings,str):settings=json.loads(settings)
     strategy=('Use the selected native filling strategy and respect any active writer. ' if settings.get('autofill')=='native' else
         'Open the application and handle access/login if needed; on every accessible form step run available Simplify Autofill first and wait for settlement. ')
-    result['instruction']=(strategy+'Use helpers for residual work, followed by field-by-field assessment and actual screenshot inspection/recovery. '
-        'Use observed refs with browser select, check, fill, press or click. Values come from approved facts or explicit user choices. '
-        'Use browser repair with fields:[{method:fill|select|check,ref,value}] to fix routine fields together and return verified results plus a fresh screen. '
-        'Upload uses method:upload,ref,asset_id from selected_documents. Complete required questions using answer_context.standard_answers, answer_context.identity, approved profile facts, current scoped answer_library and saved answers before requesting human input. Shared request_answers checks current knowledge against fresh choices.  '
-        'A helper mismatch or failed selection is a recovery handoff, not an application outcome. Inspect actual options, refresh stale controls, '
-        'if an expected control is missing, take and visually inspect an owned screenshot immediately, inspect embedded frames and scroll containers, then try another supported interaction. '
-        'Before concluding that recovery is exhausted, inspect a fresh screenshot and attempt the remaining plausible actions. Keep the session open and continue after progress. '
-        'Missing Simplify or an unusable page calls for browser_recovery: inspect loading, reload when appropriate, restart if needed and continue. '
-        'Use browser submit for the final action; it captures confirmation before closing.')
+    result['instruction']=(strategy+'Assess each residual field using observed refs and approved facts or explicit user choices. '
+        'Use select/check/fill/press/click, or supported_operations.repair for a verified batch and fresh screen; '
+        'upload a selected_documents asset with supported_operations.upload. Resolve questions from answer_context, '
+        'approved profile facts, scoped answer_library and saved answers before requesting human input. '
+        'Shared request_answers checks current knowledge against fresh choices. A helper mismatch is a recovery handoff, not an outcome: '
+        'inspect options, refresh stale controls and follow browser_recovery, including immediate visual inspection when a control is missing. '
+        'Continue in this session after progress. Use browser submit for the final action and confirmation capture.')
     profile=package['attempt'].get('profile_json') or {}
     if isinstance(profile,str):profile=json.loads(profile)
     identity=profile.get('identity') or {}

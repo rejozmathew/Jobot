@@ -14,6 +14,34 @@ def instant(value):
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
+def reported_outcome(attempt):
+    """Keep raw history; distinguish affirmative prior-application evidence."""
+    if not attempt.get('completed_at'):return 'active'
+    result=attempt.get('outcome') or 'unrecorded'
+    evidence=attempt.get('evidence') or ''
+    if result=='applied' and re.search(
+        r"\b(?:you(?:'ve| have)?|the candidate has|the applicant has) (?:already|previously) applied\b|"
+        r"\bapplication (?:has been |was |is )?already (?:submitted|received|on file)\b|"
+        r"^(?:(?:employer|simplify|user_reported):\s*)?already applied\b",evidence,re.I):
+        return 'already_applied'
+    return result
+
+
+def posting_groups(db):
+    """Connected observed aliases, including links through records outside a cohort."""
+    parents={};seen={}
+    def root(job):
+        parents.setdefault(job,job)
+        while parents[job]!=job:
+            parents[job]=parents[parents[job]];job=parents[job]
+        return job
+    for row in db.execute('SELECT identity_key,job_id FROM job_identity_keys'):
+        key,job=row
+        if key in seen:parents[root(job)]=root(seen[key])
+        else:seen[key]=job;root(job)
+    return {job:root(job) for job in parents}
+
+
 def union_seconds(spans):
     merged=[]
     for start,end in sorted(spans):
@@ -134,32 +162,43 @@ class ReportServices:
         where='(? IS NULL OR julianday(started_at)>=julianday(?)) AND julianday(started_at)<julianday(?) AND julianday(started_at)<=julianday(?)'
         parameters=(begin,begin,end,now.isoformat())
         outcome="CASE WHEN completed_at IS NULL THEN 'active' ELSE COALESCE(NULLIF(outcome,''),'unrecorded') END"
-        with self.tx() as db:
+        with self.read() as db:
             totals=db.execute(f'''SELECT COUNT(*) AS attempts,COUNT(DISTINCT job_id) AS jobs,
                 MIN(id) AS first,MAX(id) AS last,
                 COUNT(DISTINCT CASE WHEN completed_at IS NOT NULL AND outcome='applied' THEN job_id END) AS submitted_jobs
                 FROM application_attempts WHERE {where}''',parameters).fetchone()
-            outcomes={r['outcome']:r['count'] for r in db.execute(f'''SELECT {outcome} AS outcome,COUNT(*) AS count
+            recorded_outcomes={r['outcome']:r['count'] for r in db.execute(f'''SELECT {outcome} AS outcome,COUNT(*) AS count
                 FROM application_attempts WHERE {where} GROUP BY 1''',parameters)}
+            cohort=[dict(r) for r in db.execute(f'SELECT id,job_id,outcome,completed_at,evidence FROM application_attempts WHERE {where}',parameters)]
+            groups=posting_groups(db)
+            from collections import Counter
+            classified={r['id']:reported_outcome(r) for r in cohort}
+            outcomes=dict(Counter(classified.values()))
+            posting=lambda job:groups.get(job,job)
+            distinct_jobs=len({posting(r['job_id']) for r in cohort})
+            submitted_jobs=len({posting(r['job_id']) for r in cohort if classified[r['id']]=='applied'})
             dispatches=db.execute(f'SELECT COUNT(*) FROM dispatch_queue WHERE {where}',parameters).fetchone()[0]
             recent=[dict(r) for r in db.execute(f'''SELECT a.id,a.job_id,a.started_at,a.completed_at,
                 CASE WHEN a.completed_at IS NULL THEN 'active' ELSE COALESCE(NULLIF(a.outcome,''),'unrecorded') END AS outcome,j.company,j.title,j.url
                 FROM (SELECT id,job_id,started_at,completed_at,outcome FROM application_attempts WHERE {where}
                 ORDER BY julianday(started_at) DESC,id DESC LIMIT ? OFFSET ?) a
                 JOIN jobs j ON j.id=a.job_id ORDER BY julianday(a.started_at) DESC,a.id DESC''',parameters+(limit,offset))]
-        attempts=totals['attempts'];jobs=totals['jobs']
+        for row in recent:
+            row['recorded_outcome']=row['outcome'];row['outcome']=classified[row['id']]
+        attempts=totals['attempts'];jobs=distinct_jobs
         return {'period':period,'timezone':zone_name,'as_of':now.isoformat(),
             'start_date':first.isoformat() if first else None,'end_date':last.isoformat(),
-            'attempts':attempts,'jobs':jobs,'dispatches':dispatches,
+            'attempts':attempts,'jobs':jobs,'recorded_jobs':totals['jobs'],'dispatches':dispatches,
             'attempt_ids':{'first':totals['first'],'last':totals['last']},'outcomes':outcomes,
-            'submitted_jobs':totals['submitted_jobs'],
+            'submitted_jobs':submitted_jobs,'recorded_outcomes':recorded_outcomes,
+            'counting_method':'Observed posting aliases; explicit already-applied evidence is separate. Raw records are preserved.',
             'submission_rate_per_attempt':100*outcomes.get('applied',0)/attempts if attempts else None,
-            'submission_rate_per_job':100*totals['submitted_jobs']/jobs if jobs else None,
+            'submission_rate_per_job':100*submitted_jobs/jobs if jobs else None,
             'recent_attempts':recent,'offset':offset,'limit':limit}
 
     def attempt_report(self,attempt_id,worker_id=None):
         now=instant(self.now())
-        with self.tx() as db:
+        with self.read() as db:
             row=db.execute('SELECT a.*, j.company, j.title as job_title, j.url as job_url, j.metadata_json as job_metadata_json FROM application_attempts a JOIN jobs j ON j.id=a.job_id WHERE a.id=?',(attempt_id,)).fetchone()
             if row is None:raise ProtocolError('not_found')
             a=dict(row)

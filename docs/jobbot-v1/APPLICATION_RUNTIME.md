@@ -1,5 +1,37 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 4: contention recovery and compact projections
+
+`Service.read` opens a read-only, deferred SQLite snapshot; reviewed dashboard,
+session, history, settings and queue projections use it without reserving the
+writer. `Service.tx` retains immediate write transactions and records slow waits
+and contention without SQL or private values. Migration 28 adds non-unique
+attempt/session/dispatch lookup indexes and observed posting aliases. Session
+history is projected from a single batched snapshot, and visible dashboards poll
+every five seconds; hidden dashboards wait until visible again.
+
+The queue watcher and workspace monitor retain owned work after SQLite BUSY or
+LOCKED. Queue preparation resumes the same reservation, and launched executors
+are retained before their process identity is persisted. Cached deadlines run
+before fallible bookkeeping. Browser preparation reclaims its owned unfinished
+targets before retrying readiness. These paths neither replay application actions
+nor reset the operator's deadline. Other database errors remain visible.
+
+Existing shared navigation recognizes LinkedIn notification posting URLs, observed
+public password-reset request routes, explicit embedded posting links and observed
+assessment invitations. Current navigation correlation, account selection and job
+conflict checks still apply. Verified employer posting aliases feed intake, retry
+context and distinct-posting reporting without rewriting original job/attempt rows.
+Reporting separates affirmative already-applied evidence from new submissions and
+also exposes recorded counts. Retry context retains the latest actual obstacle
+and current saved question answers when later host interruptions obscure them.
+
+`browser_controls.inventory` retains observed controls, answer facts, policies,
+recovery operations and verification details while referring to its existing
+structured recovery guidance instead of repeating it. No helper or caller is
+added or removed, and no application restriction, approval gate or retry limit
+is introduced.
+
 ## October 3: preserve observed application routes through authentication
 
 The shared navigation helper used by ordinary browser actions and iCIMS continues

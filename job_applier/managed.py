@@ -9,9 +9,12 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import hashlib
 import json
+import logging
+import sys
+import time
 import uuid
 
-from .managed_migrations import connect, migrate
+from .managed_migrations import connect, migrate, database_busy
 
 
 from .managed_shared import ProtocolError, uid, dumps, sanitize_legacy_profile
@@ -39,7 +42,7 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity, linkedin_identity, ats_posting_key
+from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity, linkedin_identity, ats_posting_key, observed_posting_key
 
 
 class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices, AnswerLibraryServices, QueueServices, DiscoveryServices):
@@ -49,7 +52,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if not p.is_file(): raise ProtocolError('instance_not_initialized')
         self.db_path=p.resolve()
         self.now=now_fn
-        with self.tx() as db:
+        with self.read() as db:
             try: row=db.execute('SELECT * FROM instance').fetchone()
             except Exception as exc: raise ProtocolError('instance_not_initialized') from exc
             if row is None or (instance_id and row['id']!=instance_id): raise ProtocolError('instance_mismatch')
@@ -77,31 +80,52 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
 
     @contextmanager
     def tx(self):
+        started=time.monotonic();acquired=None
+        operation=sys._getframe(2).f_code.co_name  # Caller of contextlib.__enter__.
         db=connect(self.db_path)
         try:
             db.execute('BEGIN IMMEDIATE')
+            acquired=time.monotonic()
             yield db
             db.commit()
-        except Exception:
+        except Exception as exc:
             db.rollback()
+            if database_busy(exc):
+                logging.getLogger(__name__).warning('sqlite_contention operation=%s phase=%s elapsed_seconds=%.3f',
+                    operation,'write' if acquired is not None else 'acquire',time.monotonic()-started)
             raise
         finally:
             db.close()
+            elapsed=time.monotonic()-started
+            if elapsed>=1:
+                logging.getLogger(__name__).warning('sqlite_slow_transaction operation=%s elapsed_seconds=%.3f lock_wait_seconds=%.3f',
+                    operation,elapsed,(acquired or time.monotonic())-started)
+
+    @contextmanager
+    def read(self):
+        """A consistent read snapshot without reserving the single SQLite writer."""
+        db=connect(self.db_path,readonly=True)
+        try:
+            db.execute('BEGIN')
+            yield db
+        finally:
+            db.rollback()
+            db.close()
 
     def health(self):
-        with self.tx() as db:
+        with self.read() as db:
             settings=json.loads(db.execute('SELECT settings_json FROM instance WHERE id=?',(self.instance_id,)).fetchone()[0])
             schema=db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
         return {'instance_id':self.instance_id,'db_path':str(self.db_path),'submission_mode':settings['submission_mode'],'settings':settings,'schema_version':schema,**code_evidence()}
 
     def job(self, job_id):
-        with self.tx() as db:
+        with self.read() as db:
             r=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
             if not r: raise ProtocolError('job_not_found')
             return dict(r,assessment=self._assessment(db,job_id))
 
     def sources(self, job_id):
-        with self.tx() as db:
+        with self.read() as db:
             return self._source_rows(db,job_id)
 
     def _source_rows(self, db, job_id):
@@ -125,6 +149,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         if namespace and requisition_id and not identity_evidence: raise ProtocolError('identity_evidence_required')
         supplied_key=job_key(canonical,namespace,requisition_id)
         posting_key=ats_posting_key(canonical,namespace=namespace if identity_evidence else None,source_id=source_id)
+        observed_key=observed_posting_key(canonical)
         key=posting_key or supplied_key
         url_key=job_key(canonical)
         compare_identity=linkedin_identity if linkedin_identity(canonical) else workday_identity if workday_identity(canonical) else greenhouse_query_identity
@@ -142,6 +167,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                         db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',
                             (posting_key,historical['id'],'consistent_ats_posting_identity'))
             row=db.execute('SELECT j.* FROM jobs j JOIN job_identity_keys k ON k.job_id=j.id WHERE k.identity_key IN (?,?) ORDER BY (j.url=?) DESC,j.created_at,j.id LIMIT 1',(key,url_key,canonical)).fetchone()
+            if not row and observed_key:
+                row=db.execute('SELECT j.* FROM jobs j JOIN job_identity_keys k ON k.job_id=j.id WHERE k.identity_key=? ORDER BY j.created_at,j.id LIMIT 1',(observed_key,)).fetchone()
             if not row and posting_key and supplied_key!=key:
                 # Keep older verified aliases, but a stale requisition label must
                 # not combine two explicitly different ATS postings.
@@ -176,6 +203,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                         db.execute('UPDATE jobs SET namespace=?,requisition_id=? WHERE id=?',(namespace,str(requisition_id),job_id))
             for alias_key in {key,url_key}:
                 db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(alias_key,job_id,safe_text(identity_evidence or 'normalized_url')))
+            if observed_key:
+                db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',(observed_key,job_id,'observed_posting_identity'))
             if row and (company is not None or title is not None):
                 self._enrich_job(db,row,company=company,title=title,source='explicit_intake',url=canonical)
             if row:
@@ -313,7 +342,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             return dict(self._get(db,'candidates',identity_id))
 
     def candidate(self, identity_id):
-        with self.tx() as db:
+        with self.read() as db:
             cand = dict(self._get(db, 'candidates', identity_id))
             cand['profile'] = json.loads(cand['profile_json'])
             asset = db.execute("SELECT * FROM document_assets WHERE identity_id=? AND kind='resume' ORDER BY created_at DESC LIMIT 1", (identity_id,)).fetchone()
@@ -498,7 +527,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         return db.execute('INSERT INTO application_attempts(job_id,platform,workflow,started_at,run_id,identity_id,worker_id,session_id,browser_profile,fence,heartbeat_at,progress_at,settings_json,profile_json,versions_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',args).lastrowid
 
     def attempt(self, attempt_id):
-        with self.tx() as db:
+        with self.read() as db:
             attempt=dict(self._get(db,'application_attempts',attempt_id))
             return dict(attempt,submission_pending=self._submission_pending(db,attempt))
 

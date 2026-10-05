@@ -9,7 +9,11 @@ def canonical_url(url):
     p = urlsplit(str(url).strip())
     if p.scheme not in ('https','http') or not p.hostname or p.username or p.password:
         raise ProtocolError('invalid_job_url')
-    if any(s in p.path.lower() for s in ('reset-password','password-reset','verify-email','oauth/','signin/callback')):
+    # Auth0's reset-request screen contains no reset token. It remains reachable
+    # only through the ordinary observed-route proof; signed reset links retain
+    # their existing treatment and never become public posting identities.
+    reset_request=bool(re.fullmatch(r'/u/reset-password/request(?:/hs-\d+)?/?',p.path))
+    if not reset_request and any(s in p.path.lower() for s in ('reset-password','password-reset','verify-email','oauth/','signin/callback')):
         raise ProtocolError('sensitive_url')
     query = parse_qsl(p.query, keep_blank_values=True)
     if any(k.lower() in ('access_token','refresh_token','otp','password','reset_token','authorization_code') for k,v in query):
@@ -69,6 +73,37 @@ def ats_posting_identity(url, *, namespace=None, source_id=None):
 def ats_posting_key(url, *, namespace=None, source_id=None):
     identity=ats_posting_identity(url,namespace=namespace,source_id=source_id)
     return hashlib.sha256(dumps(['ats_posting',identity]).encode()).hexdigest() if identity else None
+
+
+def observed_posting_key(url):
+    """Explicit posting IDs only; a login or board URL cannot merge job records."""
+    key=ats_posting_key(url)
+    if key:return key
+    try:
+        p=urlsplit(canonical_url(url))
+        if (p.hostname or '').endswith('.ultipro.com'):
+            values=[v.casefold() for k,v in parse_qsl(p.query) if k.casefold()=='opportunityid']
+            tenant=p.path.strip('/').split('/')[0].casefold()
+            if tenant and values and len(set(values))==1 and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',values[0]):
+                return hashlib.sha256(dumps(['ukg',p.hostname,tenant,values[0]]).encode()).hexdigest()
+        identity=form_route_identity(url)
+        if identity:return hashlib.sha256(dumps(['observed_posting',identity]).encode()).hexdigest()
+    except (ValueError,ProtocolError):pass
+    return None
+
+
+def retain_observed_posting_aliases(db):
+    """Backfill only explicit IDs in retained host-verified application routes."""
+    import json
+    for job in db.execute('SELECT id,url FROM jobs').fetchall():
+        urls=[job['url']]
+        for row in db.execute('SELECT metadata_json FROM application_sessions WHERE job_id=?',(job['id'],)):
+            metadata=json.loads(row[0] or '{}')
+            urls.extend(metadata.get(k) for k in ('application_identity_url','application_route_url') if metadata.get(k))
+        for url in urls:
+            key=observed_posting_key(url)
+            if key:db.execute('INSERT OR IGNORE INTO job_identity_keys VALUES (?,?,?)',
+                (key,job['id'],'observed_posting_identity'))
 
 
 def application_start_url(url):
@@ -142,7 +177,7 @@ def linkedin_identity(url):
     try:
         p=urlsplit(canonical_url(url));host=p.hostname or ''
         if host!='linkedin.com' and not host.endswith('.linkedin.com'):return None
-        match=re.fullmatch(r'/jobs/view/(?:[^/]*-)?(\d+)',p.path)
+        match=re.fullmatch(r'/(?:comm/)?jobs/view/(?:[^/]*-)?(\d+)',p.path)
         values=[v for k,v in parse_qsl(p.query) if k=='currentJobId']
         if values and (len(set(values))!=1 or not values[0].isdigit()):return None
         if match:

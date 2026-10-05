@@ -143,7 +143,7 @@ class ViewServices:
     def view(self,run_id=None,include_archived=False):
         if type(include_archived) is not bool:raise ProtocolError('invalid_archive_filter')
         now=datetime.fromisoformat(self.now())
-        with self.tx() as db:
+        with self.read() as db:
             jobs=[dict(r) for r in db.execute('SELECT * FROM jobs ORDER BY created_at DESC,id')]
             archived={r[0] for r in db.execute('SELECT job_id FROM job_archives')}
             jobs=[dict(j,archived=j['id'] in archived) for j in jobs if include_archived or j['id'] not in archived]

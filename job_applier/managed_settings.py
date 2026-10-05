@@ -75,7 +75,7 @@ class SettingsServices:
         return {'version':1,'values':dict(DEFAULTS)|original}
 
     def settings_view(self):
-        with self.tx() as db:result=self._settings_record(db)
+        with self.read() as db:result=self._settings_record(db)
         return dict(result,supported=CHOICES,budget_ranges=BOUNDS,
             notes={'reasoning':'Requested selection; only an attested matching external worker can accept.',
                    'field_seconds':'Measured tools use a semantic field_context milestone; without one, only attempt/no-progress budgets apply.',
