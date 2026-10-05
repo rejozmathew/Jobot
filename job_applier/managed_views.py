@@ -74,6 +74,17 @@ def resolve_failure_reason(db, attempt, events=None):
         ev = (attempt.get('evidence') or '').strip()
         return ev if ev else 'Submit clicked; employer confirmation was not recorded. A new application request starts a separate attempt.'
 
+    generic = (
+        'worker exited before submission; owned target absence verified',
+        'owned target absence verified',
+        'worker_exit',
+    )
+    terminal_reason = (attempt.get('evidence') or '').strip()
+    if terminal_reason.lower() in generic:
+        terminal_reason = ''
+    elif terminal_reason.lower().endswith('; owned target absence verified'):
+        terminal_reason = terminal_reason[:-len('; owned target absence verified')].strip()
+
     ev_rows = events
     if ev_rows is None and db is not None:
         ev_rows = [dict(r) for r in db.execute(
@@ -94,6 +105,21 @@ def resolve_failure_reason(db, attempt, events=None):
             elif p is None:
                 p = {}
             ev_type = row.get('event_type')
+            if terminal_reason:
+                # A completed attempt describes the remaining obstacle. Earlier
+                # helper exceptions describe recovery, not its terminal cause.
+                # Explicit later reconciliation can still refine the projection
+                # without changing the original attempt or its completion time.
+                if ev_type != 'outcome':
+                    continue
+                try:
+                    observed = datetime.fromisoformat(row.get('observed_at') or row.get('recorded_at') or '')
+                    completed = datetime.fromisoformat(attempt.get('completed_at') or '')
+                    if observed.tzinfo is None: observed = observed.replace(tzinfo=timezone.utc)
+                    if completed.tzinfo is None: completed = completed.replace(tzinfo=timezone.utc)
+                    if observed < completed: continue
+                except (TypeError, ValueError):
+                    continue
             status = p.get('status')
             code = p.get('reason_code') or p.get('fallback_reason') or p.get('error_type') or ''
             evidence = (p.get('evidence') or '').strip()
@@ -106,11 +132,7 @@ def resolve_failure_reason(db, attempt, events=None):
                 continue
 
             if ev_type == 'outcome' or status in ('failed', 'blocked', 'interrupted', 'submission_unknown', 'error', 'aborted') or (code and status != 'resolved'):
-                if evidence and evidence.lower() not in (
-                    'worker exited before submission; owned target absence verified',
-                    'owned target absence verified',
-                    'worker_exit',
-                ):
+                if evidence and evidence.lower() not in generic:
                     return evidence
 
                 if code == 'browser_writer_busy':
@@ -121,20 +143,8 @@ def resolve_failure_reason(db, attempt, events=None):
                     op = p.get('operation') or p.get('tool_name')
                     return f"{code} during {op}" if op else str(code)
 
-    ev = (attempt.get('evidence') or '').strip()
-    if ev:
-        generic = (
-            'worker exited before submission; owned target absence verified',
-            'owned target absence verified',
-            'worker_exit',
-        )
-        if ev.lower() in generic:
-            return 'No specific failure reason was recorded.'
-        if ev.lower().endswith('; owned target absence verified'):
-            cause = ev[:-len('; owned target absence verified')].strip()
-            if cause:
-                return cause
-        return ev
+    if terminal_reason:
+        return terminal_reason
 
     return 'No specific failure reason was recorded.'
 

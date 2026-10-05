@@ -48,7 +48,7 @@ submit.onclick=async e=>{if(!e.isTrusted)return;counts.submitted++;
 
 
 @asynccontextmanager
-async def fixture_browser(tmp_path, mode='cross', *, entry_url=None, submit_outcome=None):
+async def fixture_browser(tmp_path, mode='cross', *, entry_url=None, submit_outcome=None, browser_args=()):
     executable = os.environ.get('JOBBOT_BROWSER_TEST_EXE')
     if not executable:
         pytest.skip('Explicit isolated browser executable required')
@@ -97,7 +97,8 @@ async def fixture_browser(tmp_path, mode='cross', *, entry_url=None, submit_outc
     profile.mkdir()
     process = OwnedProcess.launch([
         executable, '--headless=new', '--disable-gpu', '--no-first-run', '--no-proxy-server',
-        '--site-per-process', '--remote-debugging-port=0', '--user-data-dir=' + str(profile), url,
+        '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
+        '--site-per-process', '--remote-debugging-port=0', '--user-data-dir=' + str(profile), *browser_args, url,
     ], stdout_path=tmp_path / ('browser-' + mode + '.out'), stderr_path=tmp_path / ('browser-' + mode + '.err'))
     browser = None
     try:

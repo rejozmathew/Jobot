@@ -130,6 +130,11 @@ accepted Simplify confirmation, or an explicit user-reported reconciliation wher
 applicable. A `submission_ledger` entry and its associated attempt evidence matter;
 a process exit code or screenshot filename alone is insufficient.
 
+Failure projections prefer specific completed-attempt evidence over helper errors.
+An explicit outcome observed at or after completion can refine that projection;
+generic worker cleanup still falls back to diagnostic events. This changes the
+displayed reason, not the recorded outcome, completion time or event history.
+
 Activity aggregates attempts by their start-date cohort in the selected timezone.
 It distinguishes raw attempts, deduplicated postings, new submissions,
 already-applied results and dispatch counts. See [Activity statistics](jobbot-v1/ACTIVITY_STATS.md).

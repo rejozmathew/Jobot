@@ -279,6 +279,14 @@ an Apply action. `workspace_host.prepare_target` and
 to `managed_sessions.handoff_target`. Public redirect chains retain the original
 posting and reject conflicting known requisitions. Popup selection still requires
 its exact expected destination; a different popup is never inferred from its opener.
+After that correlation, `cdp_client.observe_popup_document`, called by the shared
+Apply helper, follows the same target through its first document commit using
+the remainder of the existing five-second observation window. An observed public
+redirect becomes the handoff route through the existing identity checks. A ready
+document adds no fixed wait; same-tab and ordinary field actions do not call it.
+Slow, disconnected, private or conflicting destinations retain the original
+handoff for executor recovery. The application deadline is unchanged. This does
+not establish ownership for emailed private reset links or unrelated popups.
 Greenhouse API posting URLs start at the matching hosted application form.
 
 `managed_sessions.application_job` projects the verified current route from the

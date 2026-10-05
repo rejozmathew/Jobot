@@ -336,7 +336,7 @@ def external_apply_destination(control,current_url):
 async def click_and_follow_external_apply(browser,page,control,activate,client,ownership,target_id,*,cdp_url=None,control_target=None):
     """Follow observed Apply or authentication navigation in the owned session."""
     import asyncio
-    from .cdp_client import arm_target_observation,wait_for_apply_target,NavigationTrace
+    from .cdp_client import arm_target_observation,wait_for_apply_target,observe_popup_document,NavigationTrace
     current=await page.evaluate('location.href')
     destination=external_apply_destination(control,current)
     label=str(control.get('text') or control.get('label') or '')
@@ -381,6 +381,8 @@ async def click_and_follow_external_apply(browser,page,control,activate,client,o
         found=await wait_for_apply_target(observation,current_url=lambda:page.evaluate('location.href'),
                                          navigation=navigation,timeout=5.0)
         if not found:return result
+        if found.get('kind')=='popup' and getattr(page,'_session',None):
+            found=await observe_popup_document(browser,observation,found,source_url=current)
         proof={'expected_url':destination}
         if found.get('navigation_chain'):
             proof={'source_url':current,'navigation_chain':found['navigation_chain']}

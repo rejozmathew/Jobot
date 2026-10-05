@@ -191,6 +191,9 @@ start-date cohort. A job-level submission rate is not the same as an attempt rat
 lists attempts in the selected period; select one to open its evidence and timeline
 under **Attempt details**. The timeline distinguishes stages, actions, waits and
 recorded outcomes. It is the place to inspect the actual reason a run ended.
+Failure summaries prefer the specific final obstacle recorded for the attempt.
+Earlier helper errors remain in the timeline; an explicit later outcome can
+refine the summary without rewriting the original attempt.
 
 **Advanced run controls & diagnostics** exposes run selection, Request pause,
 Resume, Request stop, ownership details, targets and legacy budget-extension

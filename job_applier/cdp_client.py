@@ -190,6 +190,54 @@ async def wait_for_apply_target(observation, *, inventory=None, current_url=None
         await asyncio.sleep(poll_interval)
 
 
+async def observe_popup_document(browser, observation, found, *, source_url, timeout=5.0):
+    """Retain an already-correlated popup through its first document commit.
+
+    TargetInfo can advertise the Apply URL while the new page is still blank or
+    loading an HTTP redirect. That provisional URL is useful ownership evidence,
+    but closing observation there loses the actual application document. Reuse
+    the existing observation window; a slow page still retains its original
+    handoff and ordinary executor recovery. No delay is added after readiness.
+    """
+    if found.get('kind') != 'popup':
+        return found
+    from .managed_identity import canonical_url, explicit_job_conflict
+    child = None
+    deadline = observation.armed_at + timeout
+    if time.monotonic() >= deadline:
+        return found
+    try:
+        child = await CDPBrowser.connect(browser.base_url, target_id=found['target_id'],
+                                         expected_mode=browser.observed_mode)
+        page = await child.get_current_page()
+        while True:
+            try:
+                state = await page.evaluate('({url:location.href,ready:document.readyState})',
+                                            timeout=max(.1, min(1.0, deadline-time.monotonic())))
+                url = state['url']
+                if _public_destination(url) and state['ready'] in ('interactive', 'complete'):
+                    if _public_destination(url) == _public_destination(found['url']):
+                        return found
+                    canonical_url(url)  # Private reset links do not become public posting identities.
+                    # Both URLs were read from the same new, correlated target.
+                    # Keep the original handoff if the transition introduces a
+                    # conflicting job or cannot represent a public application.
+                    if not any(explicit_job_conflict(base, url) for base in (source_url, found['url'])):
+                        return dict(found, url=url,
+                                    navigation_chain=[source_url, found['url'], url])
+                    return found
+            except (RuntimeError, asyncio.TimeoutError):
+                pass  # Execution contexts disappear during document commit.
+            if time.monotonic() >= deadline:
+                return found
+            await asyncio.sleep(.05)
+    except (OSError, RuntimeError, ValueError, asyncio.TimeoutError):
+        return found
+    finally:
+        if child:
+            await child.close()
+
+
 # ---------------------------------------------------------------------------
 # Low-level WebSocket frame reader/writer (no external deps beyond stdlib).
 # CDP frames are text (JSON) or binary. We implement a minimal RFC6455 client

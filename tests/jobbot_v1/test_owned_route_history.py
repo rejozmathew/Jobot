@@ -14,12 +14,14 @@ SCREENING = 'https://applications.example.test/screening'
 async def owned_page(tmp_path, html_for=None, metadata=None, settings=None):
     from test_embedded_forms import fixture_browser
     from test_local_sessions import setup, connect
+    from job_applier.cdp_client import _WS, _CDPSession
+    from job_applier.workspace_host import endpoint_info
     async with fixture_browser(tmp_path, 'top') as (page, _, __):
         pending = set()
-        async def fulfill(event):
+        async def fulfill(event, channel=None):
             body = '<html><body><label>Full name<input required name="name"></label><button type="button">Next</button></body></html>'
             if html_for: body = html_for(event['request']['url'])
-            await page._session.call('Fetch.fulfillRequest', {'requestId': event['requestId'],
+            await (channel or page._session).call('Fetch.fulfillRequest', {'requestId': event['requestId'],
                 'responseCode': 200, 'responseHeaders': [{'name': 'Content-Type', 'value': 'text/html'}],
                 'body': base64.b64encode(body.encode()).decode()})
         def paused(event):
@@ -27,6 +29,27 @@ async def owned_page(tmp_path, html_for=None, metadata=None, settings=None):
             task.add_done_callback(pending.discard)
         remove = page._session.subscribe('Fetch.requestPaused', paused)
         await page._session.call('Fetch.enable', {'patterns': [{'urlPattern': '*'}]})
+        # A page-scoped Fetch subscription does not intercept a newly opened
+        # popup. Pause synthetic new pages before their first request and fulfill
+        # them locally too; no placeholder ATS hostname reaches the network.
+        wire = _CDPSession(await _WS.connect(endpoint_info(page.fixture_endpoint)['webSocketDebuggerUrl']))
+        await wire.start()
+        popup_subscriptions = []
+        async def attach_popup(event):
+            channel = wire.channel(event['sessionId'])
+            if event['targetInfo']['targetId'] != page.target_id:
+                def popup_paused(request):
+                    task = asyncio.create_task(fulfill(request, channel))
+                    pending.add(task); task.add_done_callback(pending.discard)
+                popup_subscriptions.append(channel.subscribe('Fetch.requestPaused', popup_paused))
+                await channel.call('Fetch.enable', {'patterns':[{'urlPattern':'*'}]})
+            await channel.call('Runtime.runIfWaitingForDebugger')
+        def attached(event):
+            task = asyncio.create_task(attach_popup(event))
+            pending.add(task); task.add_done_callback(pending.discard)
+        remove_attached = wire.subscribe('Target.attachedToTarget', attached)
+        await wire.call('Target.setAutoAttach', {'autoAttach':True, 'waitForDebuggerOnStart':True,
+                                                'flatten':True, 'filter':[{'type':'page'}]})
         try:
             await page.goto(SOURCE)
             service, asset, _, workspaces, config = setup(tmp_path / 'ledger')
@@ -45,6 +68,10 @@ async def owned_page(tmp_path, html_for=None, metadata=None, settings=None):
         finally:
             if pending: await asyncio.gather(*pending)
             await page._session.call('Fetch.disable'); remove()
+            await wire.call('Target.setAutoAttach', {'autoAttach':False,'waitForDebuggerOnStart':False,'flatten':True})
+            remove_attached()
+            for unsubscribe in popup_subscriptions: unsubscribe()
+            await wire.close()
 
 
 async def gate(page, service, owner):

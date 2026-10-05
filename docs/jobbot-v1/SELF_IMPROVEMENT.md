@@ -444,3 +444,47 @@ and browser incarnation evidence. Services are verified before pickup resumes.
 The historical counterfactual remains conditional: fixing a prerequisite does not
 prove that a particular employer would have accepted the application. Production
 submission-rate and capacity improvements require subsequent matched evidence.
+
+### Self-improvement #010 — 2026-10-05
+
+Tag: `self-improvement-010-2026-10-05`. The annotated tag and private Ubuntu run
+notes retain the validated source checkpoint, test counts and deployment evidence.
+
+The morning review found provisional popup URLs becoming the owned application
+route before an HTTP redirect committed. The shared Apply helper now observes the
+already-correlated popup through document readiness within its existing observation
+window. The mechanism contains no employer, role or portal-specific branch. It
+preserves normal recovery when the popup is slow or disconnected, and retains
+existing public-route and job-identity checks. It adds no application restriction,
+retry limit or deadline reset. Emailed private reset-link recovery remains outside
+this fix; fixing a public redirect does not establish private-link ownership.
+
+Failure summaries now prefer a specific final obstacle over earlier helper errors.
+Explicit later outcome reconciliation remains visible, generic cleanup can still
+use diagnostic events, and recorded attempts and success counts are unchanged.
+
+Before implementation, two isolated browser fixtures with different synthetic
+host pairs reproduced the redirect mismatch; both now fill and submit successfully.
+The normal-popup control also submits. Reporting regressions reproduced stale
+helper errors hiding final obstacles. Additional controls cover ready-document
+latency, the existing observation window, identity conflicts, disconnected targets,
+private URLs, successful outcomes, deadlines and four-slot submission/admission.
+The browser fixture now intercepts new popup requests as well as parent requests;
+synthetic hostnames cannot accidentally resolve to live employer pages.
+
+Antigravity executes focused and final managed checks; the primary agent inspects
+logs and JUnit. The capacity replay checks independent submissions and admission,
+not production throughput. A ready popup adds a CDP observation but no fixed sleep;
+ordinary fields and same-tab actions add no popup observation. Popup correlation
+before an unobserved redirect and redirects after document readiness remain outside
+this bounded repair. Synthetic recovery is not a promise of employer acceptance or
+a measured production submission-rate improvement. Deployment preserves active
+applications, operator route overlays and private configuration at an idle boundary.
+
+Windows validation: 80 focused checks passed; one new test-clock fixture issue was
+corrected and all six popup observation unit cases passed in the final suite.
+The managed suite recorded 1,256 passes, 159 skips and one external Hermes startup
+timeout. That unchanged integration case passed in isolation in 7.66 seconds.
+This is complete passing coverage across the full run and recheck, not a claim
+that the full run had no failures. Exact Ubuntu validation and rollout results
+are retained in the annotated tag and private deployment manifest.
