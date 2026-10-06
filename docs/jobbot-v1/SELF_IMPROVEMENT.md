@@ -488,3 +488,40 @@ timeout. That unchanged integration case passed in isolation in 7.66 seconds.
 This is complete passing coverage across the full run and recheck, not a claim
 that the full run had no failures. Exact Ubuntu validation and rollout results
 are retained in the annotated tag and private deployment manifest.
+
+
+### Self-improvement #011 — 2026-10-06
+
+Tag: `self-improvement-011-2026-10-06`. The tag identifies executable checkpoint
+`1e8d9726aa4e37a77dbb15e3f85fd30b663efbd1`, implemented and deployed by the
+authorized answer-reuse task. This publication assigns its numbered run identity
+without rewriting the existing code commit. The documentation checkpoint is
+separate from the deployed executable. Matching private Ubuntu notes retain the
+original deployment manifest, verification and this publication record.
+
+Company templates now reuse approved answers across employer-name changes while
+keeping company and application exceptions authoritative. Learned Yes/No sentences
+map back to Boolean choices, and pending semantic wording matches can progress
+despite unfinished synthesis work. Answer history retains changed library
+revisions. The dashboard distinguishes matched questions from recorded form uses;
+neither count establishes employer acceptance.
+
+Focused checks passed all 56 cases. The final Windows managed suite recorded
+1,263 passes, 159 skips and one installed-Hermes startup timeout. The unchanged
+integration case passed separately in 9.00 seconds; the full run is not described
+as failure-free. Ubuntu passed all 60 relevant checks after the validation runner
+was corrected to include its installed Node. Release-file hashes, served assets,
+health, preserved private configuration and restored queue controls were verified
+on October 6 at 14:06:10 UTC. These checks do not establish a production speed or
+submission-rate gain, or complete coverage of every employer recovery mechanism.
+
+The daily review froze the previous day's application evidence and inspected
+retained screenshots, authentication failures and slow confirmed recoveries.
+Private emailed reset-link ownership and incompatible retained credentials remain
+separate investigations. The existing public-route and popup fixes do not establish
+private reset-link scope. No new application-execution restriction, shortened
+deadline or retry limit was added. Detailed application findings stay private.
+
+The publication also completes the previously missing GitHub push for #010.
+Both executable changes were already deployed; publication does not start another
+runtime deployment or interrupt an active application.
