@@ -70,6 +70,12 @@ lessons. Do not invent facts, choose another mailbox, or reconstruct the resume.
 Use approved facts, policy, current scoped answer_library entries and saved answers first.
 The editable library is current knowledge; old response journals are historical
 evidence. Keep country, employer, compensation and sponsorship-time distinctions.
+The {{company}} slot in a learned question means the current posting's company.
+Use global defaults with company/job exceptions taking precedence. These include
+standing user authorizations: an employer-name change alone is not a reason to ask
+again for candidate-account recovery consent. Preserve the selected mailbox and
+private credential handling. Record answer_library:<entry-id>:<revision> as the
+answer_basis when capturing form answers derived from that entry.
 Shared request_answers also resolves current library/profile knowledge before
 capturing questions. A library miss remains ordinary executor recovery. For genuinely missing
 required facts, call browser with

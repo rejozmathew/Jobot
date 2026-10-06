@@ -76,7 +76,12 @@ def applicability(question, job):
 
 
 def matches(entry, question, job):
-    identities = {question_identity(entry['question']), *(question_identity(q) for q in entry.get('aliases', []))}
+    # A literal company slot expresses the operator's cross-company default.
+    # Bind it only to the actual posting company, never to an arbitrary substring.
+    company = job.get('company') or ''
+    wordings = [entry['question'], *entry.get('aliases', [])]
+    identities = {question_identity(q.replace('{company}', company)) for q in wordings
+                  if '{company}' not in q or company}
     if question_identity(question['question']) not in identities:return False
     if entry['scope'] == 'job' and entry['scope_key'] != job.get('id'):return False
     if entry['scope'] == 'company' and entry['scope_key'] != company_key(job.get('company') or ''):return False
@@ -87,12 +92,18 @@ def matches(entry, question, job):
 def option_answer(question, answer):
     """Map an approved meaning to this form's current option labels and values."""
     from .application_answers import match_answer_to_option
+    # Older synthesized answers often retain an explicit Yes/No followed by
+    # explanation. Keep that text for text fields and use its stated polarity
+    # for Boolean controls after trying the complete label first.
+    prefix = re.match(r'^\s*(yes|no)\s*(?:[,.:;!]|$)', answer, re.I) if isinstance(answer,str) else None
+    polarity = prefix[1].capitalize() if prefix else answer
     if question['kind'] == 'check':
         if type(answer) is bool:return answer
-        return {'yes':True, 'no':False}.get(str(answer).casefold())
+        return {'yes':True, 'no':False}.get(str(polarity).casefold())
     if question['kind'] in ('select', 'radio'):
         choices = question.get('options', [])
         index = match_answer_to_option(answer, [o['label'] for o in choices])
+        if index is None and prefix:index = match_answer_to_option(polarity, [o['label'] for o in choices])
         return {k:choices[index][k] for k in ('value', 'label')} if index is not None else None
     return ('Yes' if answer else 'No') if type(answer) is bool else str(answer)
 
@@ -277,7 +288,70 @@ class AnswerLibraryServices(AnswerLearningServices):
             for entry in entries if self._has_learning_schema(db) else []:
                 entry['sources'] = [json.loads(r[0]) for r in db.execute(
                     "SELECT payload_json FROM answer_learning_sources WHERE entry_id=? AND state IN ('learned','context_only','conflict') ORDER BY updated_at DESC", (entry['id'],))]
+            self._answer_usage(db, entries)
             return {'entries':entries, 'suggestions':learning.pop('activity'), 'learning':learning}
+
+    def _answer_usage(self, db, entries):
+        """Project existing response and private form evidence, never infer submission."""
+        from pathlib import Path
+        indexed = {e['id']:e for e in entries}
+        counts = {e['id']:set() for e in entries}
+        applications = {e['id']:set() for e in entries}
+        for entry in entries:
+            entry['usage'] = dict(resolved_questions=0, recorded_form_uses=0, applications=0, last_used_at=None, recent=[])
+
+        def retain(entry, item):
+            usage = entry['usage']; applications[entry['id']].add(item['job_id'])
+            usage['recent'].append(item)
+            usage['recent'].sort(key=lambda r:r['at'] or '', reverse=True)
+            del usage['recent'][20:]
+            usage['last_used_at'] = max(usage['last_used_at'] or '', item['at'] or '') or None
+
+        for row in db.execute('''SELECT a.library_entry_id,a.library_revision,a.created_at AS at,
+                q.id AS question_id,q.question,q.job_id,j.company,j.title,j.url
+                FROM application_question_answers a JOIN application_questions q ON q.id=a.question_id
+                JOIN jobs j ON j.id=q.job_id WHERE a.source='answer_library'
+                AND a.answer_json IS NOT NULL AND a.answer_json!='null' ORDER BY a.created_at DESC'''):
+            item = dict(row); entry = indexed.get(item.pop('library_entry_id'))
+            if not entry or item['question_id'] in counts[entry['id']]:continue
+            counts[entry['id']].add(item['question_id']);retain(entry, dict(item, kind='resolved'))
+        spool = (getattr(self, 'executor_config', {}) or {}).get('spool_dir')
+        cache = getattr(self, '_answer_usage_cache', {})
+        current_cache = {}
+        if spool:
+            identities = {e['identity_id'] for e in entries}
+            for row in db.execute('''SELECT a.id,a.identity_id,a.job_id,j.company,j.title,j.url
+                    FROM application_attempts a JOIN jobs j ON j.id=a.job_id'''):
+                attempt = dict(row)
+                if attempt['identity_id'] not in identities:continue
+                path = Path(spool)/'answers'/f"attempt-{attempt['id']}.json"
+                try:
+                    stat = path.stat();key = (str(path), stat.st_mtime_ns, stat.st_size)
+                    history = cache.get(key)
+                    if history is None:history = json.loads(path.read_text(encoding='utf-8'))
+                    if not isinstance(history,dict):continue
+                    current_cache[key] = history
+                    if (history.get('attempt_id')!=attempt['id'] or history.get('identity_id')!=attempt['identity_id']
+                            or history.get('job_id')!=attempt['job_id']):continue
+                    seen = set()
+                    for record in reversed(history.get('answers', [])):
+                        if not isinstance(record,dict):continue
+                        match = re.fullmatch(r'answer_library:([^:]+):(\d+)', str(record.get('answer_basis') or ''))
+                        if not match:continue
+                        entry = indexed.get(match[1])
+                        if not entry or entry['identity_id']!=attempt['identity_id']:continue
+                        identity = (match[1], match[2], record.get('page'), record.get('field'), record.get('question'))
+                        if identity in seen:continue
+                        seen.add(identity);entry['usage']['recorded_form_uses'] += 1
+                        retain(entry, dict(kind='form', job_id=attempt['job_id'], company=attempt['company'],
+                            title=attempt['title'], url=attempt['url'], attempt_id=attempt['id'],
+                            question=record.get('question'), library_revision=int(match[2]),
+                            at=record.get('observed_at'), source=record.get('source')))
+                except (OSError,ValueError,TypeError):continue
+        self._answer_usage_cache = current_cache
+        for entry in entries:
+            entry['usage']['resolved_questions'] = len(counts[entry['id']])
+            entry['usage']['applications'] = len(applications[entry['id']])
 
     @staticmethod
     def _answer_clusters(groups):

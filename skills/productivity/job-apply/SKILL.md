@@ -612,7 +612,12 @@ Routine account creation, relevant verification and approved uploads/submission
 follow standing configured authorization. Respect actual provider permissions.
 A genuinely unavailable CAPTCHA/MFA or unknown required fact blocks that job,
 without blocking unrelated work. Do not bypass challenges. Password recovery
-requires the applicable configured/user authorization. Do not use an unretained
+requires the applicable configured/user authorization. Current global learned
+authorization applies across employers, with company/job exceptions taking
+precedence; a `{company}` slot names the current posting's employer. Reuse that
+standing authorization instead of asking again merely because the employer
+changed. Record `answer_library:<entry-id>:<revision>` as `answer_basis` when
+capturing form answers derived from learned knowledge. Do not use an unretained
 provider-generated password; use the configured reusable employer credential.
 
 ## Stop, attach and retry

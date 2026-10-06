@@ -84,7 +84,7 @@ def _save_answer_history(config,package,attempt_id,answers,*,page,source,basis=N
         try:reject_secrets(row)
         except ValueError:continue
         previous=next((r for r in reversed(history['answers']) if r['page']==row['page'] and r['field']==row['field'] and r['question']==row['question']),None)
-        if previous and previous['answer']==row['answer'] and (source not in ('greenhouse_fast','icims_fast') or
+        if previous and previous['answer']==row['answer'] and previous.get('answer_basis')==row['answer_basis'] and (source not in ('greenhouse_fast','icims_fast') or
             previous.get('verified') and previous.get('question_key')==row.get('question_key')):continue
         row['observed_at']=datetime.now(timezone.utc).isoformat()
         history['answers'].append(row);added+=1

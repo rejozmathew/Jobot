@@ -1,5 +1,26 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 6: company templates and visible answer reuse
+
+The existing shared `managed_answer_library.matches` resolver binds `{company}`
+in learned questions/aliases to the posting company. Global defaults retain the
+existing company/job exception precedence, choice mapping and conditions. Semantic
+wording learning retains company slots for existing templates and runs between
+synthesis units so a history backlog cannot starve pending question matching.
+Existing learned sentences with an explicit leading Yes/No map to Boolean controls
+after full-label matching; text controls keep the complete response.
+Synthesis retains direct Yes/No answers for choice mapping and distinguishes
+explicit cross-employer defaults from facts about just one employer.
+
+`AnswerLibraryServices.answer_library` now projects matched-question and recorded
+form-use evidence from response history and existing private answer journals.
+It shows counts, recent applications, answer revisions and last use. Context-only
+reads omit this projection; journal parsing is cached by file timestamp/size.
+The existing journal writer retains changes in answer provenance even when the
+selected answer stays the same. The executor brief and canonical skill explain
+company templates, standing recovery authorization and form-journal attribution.
+No helper or caller is added or removed; submission evidence policy is unchanged.
+
 Start with the [architecture guide](../ARCHITECTURE.md) for a component overview,
 the [user guide](../USER_GUIDE.md) for dashboard behavior, and
 [configuration](../CONFIGURATION.md) for current setting scope. This detailed

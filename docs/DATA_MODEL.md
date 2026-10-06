@@ -103,6 +103,15 @@ job-wide retry ban. See [Retry policy](jobbot-v1/RETRY_POLICY.md).
 
 ## Answers: response history versus current knowledge
 
+The dashboard projects reuse evidence from existing `application_question_answers`
+and the configured private spool's per-attempt answer journals. Distinct questions
+resolved by the library and recorded form uses are separate counts. Journals must
+match the authoritative attempt, candidate and job and name a library ID/revision.
+Recent evidence retains the version actually used; edits do not rewrite it. These
+counts do not imply submission or capture unrecorded model reasoning. No new table
+or duplicated answer store is introduced. `{company}` in question wording binds
+to the posting's company; existing scope precedence handles exceptions.
+
 Human responses belong first to the actual application questions. Revisions retain
 the original wording, choices and answer provenance. A candidate-scoped library
 stores current reusable knowledge separately, with global, company or job scope

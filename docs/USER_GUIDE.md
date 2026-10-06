@@ -149,6 +149,17 @@ response still maps to it. Answered retries use the normal queue and pause polic
 
 ## Learned answers
 
+Use `{company}` in a question or alternate wording for an explicitly shared answer,
+such as “Do you own stock in {company}?” → “No”. Choose **All matching applications**
+for the default; save **This company** or **This application** for exceptions, which
+take precedence. A reply about one employer alone is not a fact about every employer.
+
+Each answer shows matched-question and recorded-form-use counts, applications
+covered, last use, and up to 20 recent evidence records with company, position,
+original question and answer version. Matches were selected for saved questions;
+form uses come from private application journals. Neither proves submission.
+Agent use without recorded provenance is not counted, so old evidence can undercount.
+
 This page holds current reusable knowledge and its source history. The views are
 **Current**, **Retired** and **Learning activity**. Search by question, answer,
 company or position; select one entry for its details and original responses.

@@ -14,6 +14,18 @@ w.draw(v);w.noRefresh();w.drawAnswers(v);
 '''
 
 
+def test_learned_answer_shows_distinct_matching_and_form_use_evidence():
+    dashboard_check(FIXTURE + r'''
+v.answer_library={entries:[{id:'used',identity_id:'candidate',question:'Do you own stock in {company}?',answer:'No',scope:'global',state:'active',revision:2,history:[],
+usage:{resolved_questions:4,recorded_form_uses:2,applications:3,last_used_at:'2026-10-06T12:00:00Z',recent:[{kind:'form',job_id:'job-a',company:'Example',title:'Role A',question:'Do you own stock in Example?',library_revision:1,attempt_id:42,at:'2026-10-06T12:00:00Z'}]}}],suggestions:[]};
+w.drawAnswers(v);doc.querySelector('nav [data-tab=learned]').click();
+const text=doc.getElementById('learned-detail').textContent;
+assert(text.includes('4 matched questions')&&text.includes('2 recorded form uses'),'Reuse counts missing');
+assert(text.includes('Example')&&text.includes('Attempt 42')&&text.includes('Version 1'),'Evidence lost its application/version');
+assert(text.includes('Neither proves submission'),'Matching is misrepresented as submission');
+''')
+
+
 def test_grouped_inbox_saves_application_replies_without_adding_raw_library_entries():
     dashboard_check(FIXTURE + r'''
 const input=doc.getElementById('answer-q1');input.value='After two weeks notice';input.oninput();
