@@ -818,6 +818,79 @@ function renderModelSelection(){
   ?'Model list unavailable. Your selection is preserved; retry Refresh models or enter Custom IDs.'
   :catalog.status==='manual'?'This worker does not expose a model catalog. Use Custom IDs or its default.':'Loading available models…')+current;
  updateModelControls();
+ renderTaskModelSettings();
+}
+function taskModelSummary(task){
+ const draft=state.taskModelDraft?.[task];if(!draft)return;
+ const app=state.modelDraft||{},catalog=state.modelCatalog||{};
+ const shared=draft.mode==='same_application';
+ const provider=shared?(app.override?app.provider:catalog.provider):draft.provider;
+ const model=shared?(app.override?app.model:catalog.model):draft.model;
+ const target=$(task+'-model-summary');
+ if(target)target.textContent=`${shared?'Same as application model':'Separate model'}: ${provider&&model?provider+' / '+model:'executor default (not yet resolved)'}. Applies to the next ${task==='discovery'?'discovery run':'answer-learning or matching call'}.`;
+}
+function rememberTaskModelSelection(task){
+ if(!$(task+'-model-mode'))return;
+ const provider=$(task+'-provider').value,model=$(task+'-model').value;
+ state.taskModelDraft[task]={mode:$(task+'-model-mode').value,
+  provider:provider==='__manual__'?$(task+'-custom-provider').value.trim():provider,
+  model:provider==='__manual__'||model==='__manual__'?$(task+'-custom-model').value.trim():model,
+  effort:$(task+'-effort').value||'low',manual:provider==='__manual__'};
+ taskModelSummary(task);
+}
+function renderTaskModelSettings(){
+ const box=$('task-model-settings');if(!box||!state.taskModelDraft)return;
+ box.replaceChildren();
+ for(const task of ['discovery','learning']){
+  const draft=state.taskModelDraft[task],providers=state.modelCatalog?.providers||[];
+  box.append(el('h3',task==='discovery'?'Discovery model':'Answer learning model'));
+  const modeLabel=el('label','Model choice'),mode=el('select');mode.id=task+'-model-mode';modeLabel.append(mode);box.append(modeLabel);
+  choice(mode.id,[['same_application','Same as application model'],['separate','Separate model']],draft.mode);
+  const fields=el('div',undefined,'settings-grid');fields.id=task+'-model-fields';fields.hidden=draft.mode!=='separate';box.append(fields);
+  for(const [suffix,labelText,isInput] of [['provider','Provider'],['model','Model'],['custom-provider','Custom provider',true],['custom-model','Model ID',true],['effort','Reasoning effort']]){
+   const label=el('label',labelText),input=el(isInput?'input':'select');label.id=task+'-'+suffix+'-label';input.id=task+'-'+suffix;label.append(input);fields.append(label);
+  }
+  const provider=draft.manual?'__manual__':providers.some(p=>p.id===draft.provider)?draft.provider:draft.provider?'__manual__':'';
+  choice(task+'-provider',[['','Choose provider'],...providers.map(p=>[p.id,p.name]),['__manual__','Custom…']],provider);
+  $(task+'-custom-provider').value=draft.provider||'';$(task+'-custom-model').value=draft.model||'';
+  choice(task+'-effort',['low','medium','high','xhigh'].map(x=>[x,x]),draft.effort||'low');
+  const summary=el('p');summary.id=task+'-model-summary';summary.setAttribute('role','status');box.append(summary);
+  updateTaskModelControls(task);taskModelSummary(task);
+  mode.onchange=()=>{draft.mode=mode.value;state.taskModelDraft[task].mode=mode.value;fields.hidden=mode.value!=='separate';taskModelSummary(task);};
+  $(task+'-provider').onchange=()=>{
+   state.taskModelDraft[task]={...state.taskModelDraft[task],provider:$(task+'-provider').value,model:''};
+   $(task+'-custom-provider').value='';$(task+'-custom-model').value='';updateTaskModelControls(task);rememberTaskModelSelection(task);
+  };
+  $(task+'-model').onchange=()=>{rememberTaskModelSelection(task);updateTaskModelVisibility(task);};
+  for(const suffix of ['custom-provider','custom-model','effort'])$(task+'-'+suffix).oninput=()=>rememberTaskModelSelection(task);
+ }
+}
+function updateTaskModelControls(task){
+ const draft=state.taskModelDraft[task],provider=$(task+'-provider').value;
+ const row=state.modelCatalog?.providers?.find(p=>p.id===provider);
+ const models=(row?.models||[]).map(m=>[m,m]);
+ if(draft.model&&!models.some(m=>m[0]===draft.model))models.unshift([draft.model,draft.model+' (saved)']);
+ models.push(['__manual__','Enter model ID…']);choice(task+'-model',models,draft.model);
+ updateTaskModelVisibility(task);
+}
+function updateTaskModelVisibility(task){
+ const provider=$(task+'-provider').value,model=$(task+'-model').value;
+ $(task+'-model-label').hidden=!provider||provider==='__manual__';
+ $(task+'-custom-provider-label').hidden=provider!=='__manual__';
+ $(task+'-custom-model-label').hidden=!provider||(provider!=='__manual__'&&model!=='__manual__');
+ const row=state.modelCatalog?.providers?.find(p=>p.id===provider);
+ $(task+'-effort-label').hidden=!provider||row?.capabilities?.[model]?.reasoning===false;
+}
+function taskModelSettingsChanges(){
+ const changes={};
+ for(const task of ['discovery','learning']){
+  rememberTaskModelSelection(task);const draft=state.taskModelDraft[task];
+  if(draft.mode==='separate'&&(!draft.provider||!draft.model))throw Error(`Choose a provider and model for ${task}.`);
+  changes[task+'_model_mode']=draft.mode;
+  changes[task+'_provider']=draft.provider||null;changes[task+'_model']=draft.provider?(draft.model||null):null;
+  changes[task+'_effort']=draft.effort;
+ }
+ return changes;
 }
 function updateModelControls(){
  const provider=$('settings-provider').value,draft=state.modelDraft;
@@ -838,12 +911,13 @@ function rememberModelSelection(){
  state.modelDraft={provider:provider==='__manual__'?$('settings-custom-provider').value.trim():provider,
   model:provider?((provider==='__manual__'||$('settings-model').value==='__manual__')?$('settings-custom-model').value.trim():$('settings-model').value):'',
   effort:$('settings-effort').value,override:Boolean(provider),manual:provider==='__manual__'};
+ for(const task of ['discovery','learning'])taskModelSummary(task);
 }
 function modelSettingsChanges(){
  rememberModelSelection();const draft=state.modelDraft;
  if(draft.override&&(!draft.provider||!draft.model))throw Error('Choose a provider and model, or use the executor default.');
  return {reasoning_provider:draft.provider||null,reasoning_model:draft.model||null,
-  reasoning_effort:draft.effort||'low',application_model_override:draft.override};
+  reasoning_effort:draft.effort||'low',application_model_override:draft.override,...taskModelSettingsChanges()};
 }
 $('settings-provider').onchange=()=>{
  const provider=$('settings-provider').value;
@@ -868,6 +942,10 @@ function renderSettings(s){
  $('settings-concurrency').value=s.values.application_concurrency??1;
  state.modelDraft={provider:s.values.reasoning_provider,model:s.values.reasoning_model,
   effort:s.values.reasoning_effort,override:s.values.application_model_override};
+ state.taskModelDraft={};
+ for(const task of ['discovery','learning'])state.taskModelDraft[task]={
+  mode:s.values[task+'_model_mode']||'same_application',provider:s.values[task+'_provider'],
+  model:s.values[task+'_model'],effort:s.values[task+'_effort']||'low'};
  choice('settings-worker',(s.supported?.worker||['external','hermes']).map(x=>[x,x]),s.values.worker);
  choice('settings-effort',(s.supported?.reasoning_effort||['low','medium','high','xhigh']).map(x=>[x,x]),s.values.reasoning_effort);
  renderModelSelection();
@@ -886,6 +964,7 @@ function renderSettings(s){
  const discoveryLabels={discovery_batch_size:'Maximum jobs per discovery run',discovery_interval_hours:'Discover jobs every (hours)'};
  for(const [key,value]of Object.entries(s.values)){const label=el('label',discoveryLabels[key]||key.replaceAll('_',' '));let input;
   if(['worker','reasoning_provider','reasoning_model','reasoning_effort','application_model_override','application_time_limit_minutes','application_concurrency'].includes(key))continue;
+  if(['discovery','learning'].some(task=>['model_mode','provider','model','effort'].some(field=>key===task+'_'+field)))continue;
   if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const o=el('option',x);o.value=x;input.append(o);}input.value=value;}
   else {input=el('input');if(typeof value==='boolean'){input.type='checkbox';input.checked=value;}else if(typeof value==='number'){input.type='number';input.value=value;const range=s.budget_ranges?.[key];if(range){input.min=range[0];input.max=range[1];}}else{input.type='text';input.value=Array.isArray(value)?value.join(', '):(value??'');}}
   if(key==='discovery_batch_size'){input.min=1;input.max=100;input.step=1;}

@@ -36,6 +36,15 @@ def executor_command(config, prompt_file):
     result=[part.replace('{prompt_file}',str(prompt_file)) for part in command]
     from .model_settings import executor_kind
     if executor_kind(config)=='hermes_cli' and config.get('application_model'):
+        # Replace earlier explicit flags instead of relying on a CLI parser's
+        # duplicate-option precedence. Preserve profile and unrelated arguments.
+        filtered=[];skip=False
+        for part in result:
+            if skip:skip=False;continue
+            if part in ('--provider','--model','-m','--reasoning'):skip=True;continue
+            if part.startswith(('--provider=','--model=','--reasoning=')):continue
+            filtered.append(part)
+        result=filtered
         result.extend(['--provider',config['application_provider'],'--model',config['application_model']])
         if config.get('application_effort'):result.extend(['--reasoning',config['application_effort']])
     return result

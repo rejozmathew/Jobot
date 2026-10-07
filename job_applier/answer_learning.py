@@ -103,7 +103,7 @@ def model_generate(config, instruction, payload):
         command=command[:-2]+['-c','import runpy; '+dispatch]
     else:raise ProtocolError('learning_model_unavailable')
     request = dict(instruction=instruction, payload=payload,
-                   provider=options.get('provider'), model=options.get('model'))
+                   provider=options.get('provider'), model=options.get('model'), effort=options.get('effort'))
     result = subprocess.run(command, input=dumps(request),
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8',
         env=environment, timeout=180, check=True, **flags)
@@ -113,6 +113,10 @@ def model_generate(config, instruction, payload):
 
 
 class AnswerLearningServices:
+    def _learning_config(self):
+        from .model_settings import task_selection
+        return task_selection(getattr(self,'executor_config',{}),self.settings_view()['values'],'learning')
+
     @staticmethod
     def _has_learning_schema(db):
         return bool(db.execute("SELECT 1 FROM sqlite_master WHERE name='answer_learning_sources'").fetchone())
@@ -267,7 +271,7 @@ class AnswerLearningServices:
             if type(model_source['answer']) is bool:model_source['answer']='Yes' if model_source['answer'] else 'No'
             inputs=dict(sources=[model_source],entries=[e for e in current_entries if e['id']!=payload.get('entry_id')])
             instruction=COMPANY_SYNTHESIS if source['kind']=='company_history' else SYNTHESIS
-            output=generator(inputs) if generator else model_generate(getattr(self,'executor_config',{}),instruction,inputs)
+            output=generator(inputs) if generator else model_generate(self._learning_config(),instruction,inputs)
             if not isinstance(output,dict) or type(output.get('reusable')) is not bool:raise ValueError('invalid_synthesis')
             if not output['reusable']:return self._finish_learning(source,'context_only',output)
             if type(output.get('source_equivalent')) is not bool:raise ValueError('invalid_equivalence')
@@ -364,7 +368,7 @@ class AnswerLearningServices:
         if not targets:return {'matched':0}
         try:
             inputs=dict(entries=entries,questions=targets)
-            output=generator(inputs) if generator else model_generate(getattr(self,'executor_config',{}),MATCHING,inputs)
+            output=generator(inputs) if generator else model_generate(self._learning_config(),MATCHING,inputs)
             matches=output['matches']
             if not isinstance(matches,list) or len(matches)>len(targets):raise ValueError('invalid_matches')
             grouped={};seen=set()

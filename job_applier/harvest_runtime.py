@@ -153,7 +153,13 @@ def run_harvest(config, service, *, enqueue=False, scheduled=False, launcher=sub
                 discovery_run_id=run_id,producer='hermes_scheduled_discovery' if scheduled else 'hermes_manual_discovery'))
             # Desktop routing is for application sessions. Discovery retains its
             # explicitly configured profile/CLI and its own output-file contract.
-            executor_config=dict(config)
+            from .model_settings import task_selection
+            settings=service.settings_view()['values']
+            executor_config=task_selection(config,settings,'discovery')
+            private_write(root/'model-selection.json',json.dumps({
+                'mode':settings['discovery_model_mode'],
+                **{field:executor_config.get('application_'+field) for field in ('provider','model','effort')}
+            },indent=2))
             executor_config.pop('hermes_desktop',None)
             if 'harvest_hermes_command' in config:
                 if config['harvest_hermes_command'] is None:raise ProtocolError('invalid_hermes_command')

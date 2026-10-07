@@ -134,6 +134,28 @@ auxiliary inference client without tools or a browser. It reads durable learning
 work and preserves application responses even when inference is unavailable.
 This is distinct from activated procedural lessons and application executors.
 
+Settings exposes **Discovery model** and **Answer learning model** independently;
+both default to **Same as application model**. Explicit separate selections use
+the installed Hermes credentials and provider catalog. JobBot does not change the
+global Hermes profile when these settings change.
+
+### Model call inventory
+
+| Path | Model selection |
+|---|---|
+| Queued application / Hermes Desktop or CLI | Application model setting; otherwise the configured executor default |
+| Discovery search, assessment and intake generation | Discovery model setting; shares the application model by default |
+| Answer synthesis, company knowledge and semantic answer matching | Answer learning model setting; shares the application model by default |
+| Hermes internal tool inference, vision and compression | Hermes auxiliary routing, active model context and installed task overrides/fallback configuration |
+| Managed HTTP worker / native compatibility runner | Attested request settings; these are not additional discovery workers |
+| Original browser-use application | Legacy `OPENAI_MODEL` environment setting (the historical `.env.example` names Qwen); separate from the managed dashboard |
+| Browser helpers, Simplify bridge, mailbox/notification plumbing, external Harvester import | No JobBot-owned model call; external products retain their own configuration |
+
+The catalog may list local Qwen models without selecting them. Hermes auxiliary
+overrides and fallbacks are owned by the installed Hermes configuration, not this
+dashboard. Audit those alongside the primary selections when investigating observed
+model traffic; a static code search alone cannot establish the deployed model.
+
 Optional `hermes_notifications.py` reads confirmed new submissions and uses the
 installed `hermes send` integration. Delivery receipts/retries live in the private
 spool. It does not send candidate answers, resumes or full transcripts, and does

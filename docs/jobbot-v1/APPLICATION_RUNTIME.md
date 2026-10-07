@@ -466,6 +466,17 @@ inherit their executor default until an operator explicitly saves a model overri
 Custom external commands retain their own model configuration; legacy worker
 requests still use the existing settings/capability matching contract.
 
+`model_settings.task_selection` also resolves discovery and answer-learning choices
+from fresh settings. Both default to `same_application`; `separate` uses an explicit
+provider/model/effort pair. `harvest_runtime.run_harvest` resolves before stripping
+Desktop routing, keeps the discovery CLI profile, replaces stale CLI model flags,
+and records a private immutable `model-selection.json`. `AnswerLearningServices`
+calls the same resolver for synthesis and matching. `answer_learning_model` supplies
+the selected authenticated runtime as the auxiliary client's main-model context so
+recovery does not inherit an unrelated profile default. Existing attempts are not
+changed and no application-execution gate is introduced. See the current model
+inventory in [Integrations](../INTEGRATIONS.md#model-call-inventory).
+
 The canonical job-apply prompt also carries the user's approved earliest-start
 fallback: calculate 14 calendar days from the current date when no more specific
 approved availability exists, formatted for the employer's date control.

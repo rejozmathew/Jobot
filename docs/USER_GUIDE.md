@@ -234,8 +234,17 @@ The upload endpoint accepts PDF, DOCX, DOC, TXT and RTF files, up to 10 MiB.
 
 **Application model** selects the executor/provider, model and supported effort.
 **Refresh models** refreshes the installed catalog. Save before requesting new
-work; running applications keep their selected model. Discovery has its own
-executor configuration.
+work; running applications keep their selected model.
+
+**Discovery model** defaults to **Same as application model**. Choose **Separate
+model** to select a different provider, model and reasoning effort for job search.
+The shared choice follows later application-model changes automatically. Discovery
+keeps its own tools and profile, while receiving the selected model explicitly.
+
+**Answer learning model** has the same choices and default. It controls both
+generalizing saved responses and matching reusable answers to new questions.
+The displayed summaries identify the selected provider/model. Save settings to
+apply changes to the next discovery run or learning call; existing work continues.
 
 **Simultaneous applications** selects 1–5, default 1. Existing browser mode uses
 separate application windows in the retained profile. Lowering capacity allows

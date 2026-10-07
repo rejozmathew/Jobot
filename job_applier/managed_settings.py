@@ -14,10 +14,16 @@ DEFAULTS={'mode':'development','submission_mode':'review','worker':'external','a
     'notifications':'none','excluded_companies':[],'market_countries':['US'],'browser_mode':'headed',
     'discovery_batch_size':5,'discovery_interval_hours':4,'application_time_limit_minutes':30,
     'application_concurrency':1}
+for _task in ('discovery','learning'):
+    DEFAULTS.update({f'{_task}_model_mode':'same_application', f'{_task}_provider':None,
+                     f'{_task}_model':None, f'{_task}_effort':'low'})
 CHOICES={'mode':('development','pilot'),'submission_mode':('review','submit'),
     'worker':('external','hermes'),'autofill':('simplify','native'),'trigger':('manual',),
     'allowed_fallback':('targeted','block'),'learning_activation':('manual',),'notifications':('none',),
     'browser_mode':('headed','headless'),'reasoning_effort':('low','medium','high','xhigh')}
+for _task in ('discovery','learning'):
+    CHOICES[f'{_task}_model_mode']=('same_application','separate')
+    CHOICES[f'{_task}_effort']=CHOICES['reasoning_effort']
 BOUNDS={'field_seconds':(1,300),'no_progress_seconds':(1,600),'attempt_seconds':(1,3600),'lease_seconds':(10,600)}
 PUBLIC_ID=re.compile(r'^[A-Za-z0-9_.:/-]{1,250}$')
 
@@ -47,6 +53,13 @@ def validate_settings(values):
     for key in ('reasoning_provider','reasoning_model'):
         if out[key] is not None and (not isinstance(out[key],str) or not PUBLIC_ID.fullmatch(out[key])):raise ProtocolError('invalid_reasoning_selection')
     if bool(out['reasoning_provider'])!=bool(out['reasoning_model']):raise ProtocolError('incomplete_reasoning_selection')
+    for task in ('discovery','learning'):
+        provider,model=(out[f'{task}_{field}'] for field in ('provider','model'))
+        for value in (provider,model):
+            if value is not None and (not isinstance(value,str) or not PUBLIC_ID.fullmatch(value)):
+                raise ProtocolError('invalid_'+task+'_selection')
+        if bool(provider)!=bool(model) or (out[f'{task}_model_mode']=='separate' and not model):
+            raise ProtocolError('incomplete_'+task+'_selection')
     for key in ('excluded_companies','market_countries'):
         if not isinstance(out[key],list) or len(out[key])>100 or any(not isinstance(x,str) or not x.strip() or len(x)>100 for x in out[key]):raise ProtocolError('invalid_market_policy')
     return out

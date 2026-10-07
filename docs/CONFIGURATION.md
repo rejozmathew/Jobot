@@ -102,6 +102,10 @@ another edit. Application snapshots preserve the choices with which work began.
 | `reasoning_provider`, `reasoning_model` | unset | Use configured executor selection until an explicit supported selection is saved |
 | `reasoning_effort` | `low` | Requested effort; UI adapts to executor/provider capabilities |
 | `application_model_override` | `false` | Whether the application model overrides executor defaults |
+| `discovery_model_mode`, `learning_model_mode` | `same_application` | Follow the effective application model, or use `separate` |
+| `discovery_provider`, `discovery_model` | unset | Explicit provider/model pair required in separate discovery mode |
+| `learning_provider`, `learning_model` | unset | Explicit provider/model pair required in separate answer-learning mode |
+| `discovery_effort`, `learning_effort` | `low` | Separate-mode reasoning effort; shared mode follows the application selection |
 | `discovery_batch_size` | `5` | Up to 1–100 qualifying jobs per discovery run |
 | `discovery_interval_hours` | `4` | 1–168 hours between scheduled discovery runs |
 | `timezone` | `UTC` | Reporting/calendar timezone |
@@ -112,6 +116,25 @@ another edit. Application snapshots preserve the choices with which work began.
 The current default values are defined in source. The model catalog reflects the
 installed executor/provider configuration; a model label in static HTML is not
 proof that the model is available or selected.
+
+Discovery and answer learning read fresh saved settings before each new run/call.
+Shared mode resolves the application override first, then the configured application
+executor default (Desktop catalog or CLI profile and flags). Discovery still uses
+`harvest_hermes_command` for its tools/profile, but replaces conflicting model flags
+with the resolved choice. Each run saves requested model metadata in its private
+`model-selection.json`; this records routing intent, not proof of successful inference.
+Answer learning applies the same choice to synthesis and semantic matching, including
+the auxiliary client's main-model recovery context. Legacy `answer_learning` model
+values do not override a resolved Settings selection; its launcher remains usable.
+Custom external commands retain their own model contract and are not rewritten.
+If the Desktop default cannot be resolved, discovery/learning reports the lookup
+failure rather than silently using a different profile model. An explicit saved
+application selection still works without a catalog lookup; applying is unchanged.
+
+No Qwen model is hardcoded into the managed runtime. An installed Hermes profile,
+an explicit separate selection or external executor can still select one. Existing
+settings revisions acquire the shared defaults without a database schema migration.
+Saved separate choices are retained while shared mode is selected, for later reuse.
 
 Older worker settings include `field_seconds`, `no_progress_seconds`,
 `attempt_seconds` and `lease_seconds`. The legacy HTTP worker consumes these
