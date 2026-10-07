@@ -71,8 +71,11 @@ def test_scheduled_brief_includes_actual_run_and_profile(tmp_path):
     from job_applier.harvest_runtime import run_harvest
     s, _, _, _, cfg = runtime_fixture(tmp_path)
     cfg['harvest_hermes_command'] = ['hermes', '--profile', 'jobbot-discovery', 'chat', '--query-file', '{prompt_file}']
+    # Use a synthetic selection rather than inheriting the machine's Hermes profile.
+    s.configure({'application_model_override': True, 'reasoning_provider': 'fixture',
+                 'reasoning_model': 'fixture-model'}, expected_version=s.settings_view()['version'])
     def launch(command, **kwargs):
-        task = Path(command[-1])
+        task = Path(command[command.index('--query-file')+1])
         text = task.read_text(encoding='utf-8')
         assert '--producer' in text and 'hermes_scheduled_discovery' in text
         assert '--discovery-run-id' in text and task.parent.name in text
