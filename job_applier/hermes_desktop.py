@@ -14,7 +14,7 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 from websockets.sync.client import connect
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from .application_runtime import REPOSITORY
 from .workspace_process import process_identity, process_matches
@@ -73,8 +73,9 @@ class RPCRejected(ValueError):
 
 
 class RPC:
-    def __init__(self, socket):
+    def __init__(self, socket, *, timeout=60):
         self.socket=socket
+        self.timeout=timeout
         self.sequence=0
         self.terminal_events={}
 
@@ -82,7 +83,7 @@ class RPC:
         self.sequence+=1
         rid=self.sequence
         self.socket.send(json.dumps({'jsonrpc':'2.0','id':rid,'method':method,'params':params}))
-        deadline=time.monotonic()+60
+        deadline=time.monotonic()+self.timeout
         while True:
             remaining=deadline-time.monotonic()
             if remaining<=0:raise TimeoutError('Hermes desktop RPC response timed out')
@@ -177,9 +178,9 @@ def continuation_accepted(rpc,receipt,state):
 
 
 @contextmanager
-def connection(options):
+def connection(options, *, timeout=15, rpc_timeout=60):
     url,owner=discover_backend(options)
-    with httpx.Client(trust_env=False,timeout=15) as client:
+    with httpx.Client(trust_env=False,timeout=timeout) as client:
         response=client.get(url+'/')
         response.raise_for_status()
     # Same short-lived loopback bootstrap credential used by the installed desktop.
@@ -187,8 +188,18 @@ def connection(options):
     if not match:raise ValueError('Hermes desktop bootstrap credential is unavailable')
     token=json.loads(match.group(1))
     websocket_url='ws'+url[4:]+'/api/ws?'+urlencode({'token':token})
-    with connect(websocket_url,proxy=None,max_size=None,open_timeout=15) as socket:
-        yield RPC(socket),owner
+    with connect(websocket_url,proxy=None,max_size=None,open_timeout=timeout,close_timeout=min(timeout,10)) as socket:
+        yield RPC(socket,timeout=rpc_timeout),owner
+
+
+def backend_ready(options):
+    """Observe startup readiness without creating a native application session."""
+    try:
+        with connection(options,timeout=2,rpc_timeout=2) as (rpc,_):
+            result=rpc.call('session.active_list',{})
+            return isinstance(result,dict) and isinstance(result.get('sessions'),list)
+    except (OSError,ValueError,httpx.HTTPError,WebSocketException):
+        return False
 
 
 def write_receipt(path, receipt):

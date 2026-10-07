@@ -1,0 +1,23 @@
+[Unit]
+Description=JobBot retained application browser
+After=graphical-session.target
+Requisite=graphical-session.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Adapt to the existing checkout and private config, as with jobbot-queue.service.
+WorkingDirectory=%h/git/auto-job-applier
+Environment=JOBBOT_CONFIG=%h/.config/jobbot/runtime.json
+ExecStart=%h/git/auto-job-applier/.venv/bin/python -m job_applier.workspace_attachment
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=30
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

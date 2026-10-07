@@ -69,6 +69,15 @@ that applications are being dispatched. Local `start` needs neither a running
 dashboard nor HTTP API credentials. It does need the selected private config,
 managed instance, candidate, resume and browser workspace.
 
+For the Hermes desktop transport, the dispatcher verifies the native backend and
+an available configured retained-browser connection before reserving a ready
+queue item. A dependency still starting leaves the request queued, with a visible
+worker heartbeat, unchanged retry lineage and no application deadline yet.
+These short read-only probes run outside database transactions; active work is
+still supervised first. Other transports and managed browser allocation retain
+their existing startup path. On Ubuntu, the optional browser service starts the
+retained profile at graphical login and orders the queue after its launcher.
+
 ## One queued application
 
 ```mermaid

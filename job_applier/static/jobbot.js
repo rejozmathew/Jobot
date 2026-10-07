@@ -411,8 +411,9 @@ function renderDispatcher(v){
   const selected=$('queue-resume').value||((q.selection?.identity_id===candidate)?q.selection?.resume_asset_id:null);
   choice('queue-resume',options,selected);
  }
+ const startupWait=q.worker_online&&!paused?({waiting_for_executor_startup:'Waiting for Hermes to finish starting. Jobs stay queued and resume automatically.',waiting_for_browser_startup:'Waiting for the application browser to become available. Jobs stay queued and resume automatically.'}[q.detail]||''):'';
  if($('dispatcher-status'))$('dispatcher-status').textContent=!q.installed?'Queue upgrade required: restart with the current queue dashboard launcher.':
-  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.active_count??q.counts?.dispatched??0} of ${q.concurrency_limit||1} applications active · ${paused?'JobBot paused. Queued jobs are saved until you resume.':`Automatic queue ${q.enabled?'on':'paused'}. Available application slots fill automatically from the queue.`}`;
+  `${q.worker_online?'Worker online':'Worker offline — start the JobBot queue service'} · ${q.ready_count??q.counts?.queued??0} ready · ${q.scheduled_count||0} scheduled retries · ${q.active_count??q.counts?.dispatched??0} of ${q.concurrency_limit||1} applications active · ${paused?'JobBot paused. Queued jobs are saved until you resume.':startupWait||`Automatic queue ${q.enabled?'on':'paused'}. Available application slots fill automatically from the queue.`}`;
  if($('application-schedule'))$('application-schedule').textContent=
   paused?'New applications are paused, including Queue selected, Apply now and Wake existing queue requests. Current work finishes normally.':
   `${q.counts?.dispatched?'Applications are running. Ready jobs start as slots become available. ':''}`+

@@ -55,6 +55,19 @@ assert(doc.querySelectorAll('#queue-rows tr')[2].cells[2].querySelector('.badge'
 ''')
 
 
+def test_queue_explains_startup_wait_without_claiming_application_progress():
+    dashboard_check(r'''
+v.dispatch_queue.detail='waiting_for_executor_startup';
+v.dispatch_queue.ready_count=2;v.dispatch_queue.active_count=0;w.draw(v);
+assert(doc.getElementById('dispatcher-status').textContent.includes('Waiting for Hermes'),'Missing executor startup wait');
+assert(doc.getElementById('dispatcher-status').textContent.includes('stay queued'),'Startup must retain requests');
+v.dispatch_queue.detail='waiting_for_browser_startup';w.draw(v);
+assert(doc.getElementById('dispatcher-status').textContent.includes('Waiting for the application browser'),'Missing browser startup wait');
+v.dispatch_queue.automation_paused=true;w.draw(v);
+assert(!doc.getElementById('dispatcher-status').textContent.includes('Waiting for the application browser'),'Pause must supersede stale startup status');
+''')
+
+
 def test_run_next_feedback_uses_fresh_server_counts_without_blocking_request():
     dashboard_check(r'''
 w.draw(v);w.noRefresh();

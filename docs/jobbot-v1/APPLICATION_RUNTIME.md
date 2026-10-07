@@ -1,5 +1,23 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 7: desktop startup preserves queued requests
+
+`queue_runtime.dispatch_startup` observes the Hermes desktop backend and a usable
+configured retained browser before `queue_take` reserves a request. The backend
+probe uses the existing authenticated loopback connection and a read-only
+`session.active_list` RPC with short timeouts. Browser checks reuse profile/process
+and CDP verification. An unavailable dependency returns a worker startup-wait
+state; the watcher keeps its heartbeat, wake request and due check while leaving
+request identity, retries and application deadlines untouched. Active dispatch
+supervision still runs first, and custom executor/managed-browser paths remain.
+The dashboard displays the specific dependency being awaited.
+
+The optional `jobbot-browser.service` calls the existing retained-browser launcher
+at graphical login. Its queue drop-in orders service startup without replacing
+the existing Hermes desktop autostart. It reuses an already-open configured
+browser, and is independent of queue-service restarts. No ATS helper, candidate
+data, submission policy, retry count or memory allocation is changed.
+
 ## October 7: popup observation for page-only helper callers
 
 The shared popup document observer uses the already-armed loopback endpoint and
@@ -1090,13 +1108,13 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | email_routing.py | Optional private Greenhouse route resolution, copied profile/contact-email answers and mailbox guidance; application_brief, managed_context, greenhouse_fast and hermes_gmail call it. No mailbox access or persistent writes; absent/disabled configuration preserves default behavior. |
 | managed.py / migration 21 / managed_redaction.provenance_text / managed_views.py | Optional per-source process/run observations and per-queue-entry origin; numeric run identifiers remain intact, secret-bearing labels are redacted, and missing attribution does not affect eligibility. Dashboard/manual CLI/application startup and discovery supply process identities at their own boundary; rediscovery retains prior observations. Operator `reconcile_job_route` validates a bridge source/evidence before adding an external application alias and changing only a safe, non-running job's future execution URL; Easy Apply retains the posting URL. See SOURCE_PROCESS_ATTRIBUTION.md. |
 | managed_queue.py / queue_runtime.py / migrations 22, 25 | Automatic active-intake pickup from worker and Run next; operator-selected concurrent dispatch and six-attempt retry lineage. Dashboard queue_enqueue(start_now=True) atomically promotes the chosen job and wakes the worker, bypassing its retry delay; durable immediate requests start in request order even with automatic scheduling paused, without interrupting active applications or rewriting attempt history. |
-| hermes_desktop.py / application_brief.py | Optional application dispatcher transport creates a native session in the existing Hermes desktop backend; desktop resume and correction use that same owner. A private receipt reconnects the monitor without replaying the prompt; queue recovery checks the native turn after a monitor crash. The brief exposes the exact selected candidate email for comparison with observed form values. |
+| hermes_desktop.py / application_brief.py | Optional application dispatcher transport creates a native session in the existing Hermes desktop backend; desktop resume and correction use that same owner. queue_runtime.dispatch_startup calls backend_ready for a bounded, read-only startup probe before reserving work. A private receipt reconnects the monitor without replaying the prompt; queue recovery checks the native turn after a monitor crash. The brief exposes the exact selected candidate email for comparison with observed form values. |
 | managed_discovery.py / migration 20 | Selected-instance discovery run/check history and last/next-run reporting for the dashboard and harvest scheduler; no application dispatch or browser ownership |
 | harvest_runtime.py / managed_settings.py / jobbot-harvest.timer | Minute schedule checks launch fresh Hermes discovery only when the saved interval is due; dashboard settings own batch size and interval; the existing harvest lock prevents overlapping discovery; optional harvest_hermes_command selects a discovery profile, and unfinished private checkpoints carry verified leads into the next run for revalidation |
 | application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, pre-click external Apply and authentication target observation/handoff, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
 | managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed. The host-only target handoff atomically retains the prior owned tab and changes the session target after correlated Apply or authentication navigation; the latter retains the verified employer account URL. |
 | workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, durable same-attempt restart preparation through verified close/reopen, employer-origin cleanup for managed-process retries only, concurrent JSON dispatch per owned session in shared browsers. prepare_target creates a visible window per application and calls arrange_application_windows to tile only its owned windows for Simplify's visibility-dependent filling; no model or five-second busy veto. |
-| workspace_attachment.py / workspace_host.py / managed_sessions.session_browser_attachment | Optional existing-browser launcher and verified attachment; durable application-tab ownership, tab-only cleanup/recovery, and observed navigator.webdriver. Called by the manual launcher and local host; managed process lifecycle remains available. |
+| workspace_attachment.py / workspace_host.py / managed_sessions.session_browser_attachment | Optional existing-browser launcher and verified attachment; durable application-tab ownership, tab-only cleanup/recovery, and observed navigator.webdriver. Called by the manual launcher, optional jobbot-browser.service and local host; queue_runtime.dispatch_startup reuses read-only profile/process and endpoint checks before native desktop dispatch. Managed process lifecycle remains available. |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | static/jobbot.js / managed_api.py / managed.py.update_job_url | Operator URL corrections retain the job number, added date, outcomes, source references and old identity aliases; save normalized replacement aliases and an audit trail on the same job. Sorting and filters use existing job data in the dashboard. |
 | static/jobbot.js / managed_queue.py | Queue selected sends visible selection in table order as one immediate request; queued items are reused and receipt insertion order breaks equal-time ties. Repeated requests retain their original position; a new manual selection can reorder its waiting jobs. Current applications continue, automatic scheduling remains enabled or paused as configured. |

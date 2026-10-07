@@ -65,6 +65,14 @@ The equivalent command is:
 .venv/bin/python -m job_applier.workspace_attachment --config /absolute/path/to/runtime.json
 ```
 
+An unattended Ubuntu desktop can use the optional `jobbot-browser.service` and
+queue drop-in described in [Operations](../OPERATIONS.md#desktop-startup-ordering)
+to run this launcher at graphical login. The Hermes desktop queue observes backend
+and retained-browser readiness before reserving a job. While either is starting,
+the dashboard explains the wait and requests stay queued without consuming retry
+attempts or starting application deadlines. No fixed startup delay or retry limit
+is used; pickup resumes automatically when the dependencies answer.
+
 Workspace `startup_urls` can contain the local dashboard URL followed by
 `https://mail.google.com/`. A second launcher invocation on an already connected
 browser does not duplicate them. A browser opened normally must be closed and

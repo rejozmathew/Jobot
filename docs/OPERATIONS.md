@@ -20,6 +20,7 @@ display. Examples below assume the existing user's service manager.
 |---|---|---|
 | `jobbot-dashboard.service` | `queue_runtime serve`; API, UI and answer learner | No dashboard/learning process; independent queue work may continue |
 | `jobbot-queue.service` | `queue_runtime watch` | New saved requests wait; inspect existing executor ownership before changing processes |
+| `jobbot-browser.service` | Optional retained-browser launcher at graphical login | Desktop queue waits for its configured browser; startup does not consume requests or application deadlines |
 | Workspace host(s) | Per-workspace owned browser operations and supervision | Browser readiness or session recovery needs investigation |
 | Retained browser launcher | Configured existing browser profile and CDP | Existing-mode applications cannot attach until available |
 | `jobbot-harvest.timer` / `.service` | Schedule separate discovery runs | No scheduled discovery; existing intake remains |
@@ -29,6 +30,31 @@ display. Examples below assume the existing user's service manager.
 The queue unit's historical description may say “sequential”; the current
 dispatcher implements the operator-selected concurrency. The selected settings
 and code determine behavior, not the unit's display name.
+
+### Desktop startup ordering
+
+For an existing-browser Hermes desktop installation, install the adapted
+[`jobbot-browser.service`](../deploy/systemd/jobbot-browser.service) and
+[`existing-browser.conf`](../deploy/systemd/jobbot-queue.service.d/existing-browser.conf)
+queue drop-in in the existing user service directory. Use the installation's
+checkout/interpreter and private config. Enable the browser unit for
+`graphical-session.target`; keep one existing Hermes desktop autostart entry.
+Disable any duplicate browser desktop-autostart entry for that same profile.
+Reload the user service manager and start the browser unit at an idle boundary.
+It reuses a correctly configured running browser without duplicating its tabs.
+Do not restart this browser unit while applications are active: it owns browsers
+it launches, whereas starting it against an already-open browser only adopts the
+connection. The desktop session supplies the display and authorization environment.
+
+The queue stays online while Hermes is starting and shows a specific startup
+wait in the dashboard. It checks the native backend with a short, read-only RPC
+and verifies the configured retained browser before reserving a ready request.
+Startup waits retain request IDs, wake requests and retry timing; they do not
+consume attempts or start application deadlines. Checks repeat automatically
+without a new retry limit. Existing application supervision continues normally.
+Managed browser workspaces and other executor transports retain their existing
+startup path. This ordering does not make a logged-out graphical desktop available
+or solve memory exhaustion; inspect the desktop and kernel logs for those failures.
 
 ## Read-only health checks
 
@@ -77,6 +103,7 @@ manual and discovery work.
 |---|---|---|
 | Empty or unexpected job history | Wrong runtime/configuration | Instance ID, resolved `db_path`, current versus legacy server |
 | UI works; jobs wait | Dispatcher/schedule/capacity | Worker online state, global pause, automatic setting, due times and active cleanup |
+| Queue says it is waiting for Hermes/browser startup | Desktop dependencies | Native backend, graphical session, browser unit and its CDP/profile connection; queued requests remain intact |
 | Manual request is saved but waits | Global pause or occupied capacity | Banner, earlier explicit requests and active windows |
 | Existing browser cannot attach | Browser launch/profile/CDP | Configured launcher, loopback endpoint, profile path and browser process |
 | Recovery seems stuck | Current owned page or pending lifecycle operation | Session status, fresh screenshot actually inspected, overlays/frames and available recovery |

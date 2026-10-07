@@ -192,6 +192,27 @@ def dispatch_capacity(config, service):
     return limit,manual,items,browser_available
 
 
+def dispatch_startup(config):
+    """Keep desktop startup delays outside dispatch attempts and their deadlines."""
+    if not isinstance(config.get('hermes_desktop'),dict):return None
+    from .hermes_desktop import backend_ready
+    if not backend_ready(config['hermes_desktop']):return 'waiting_for_executor_startup'
+    from .workspace_attachment import existing_profile_process,verify_connection_process
+    from .workspace_host import endpoint_info
+    for workspace in config['workspaces']:
+        # Managed workspaces start their own browser after application admission.
+        if workspace.get('connection_mode')!='existing':return None
+        try:
+            pid=existing_profile_process(workspace)
+            if not pid:continue
+            verify_connection_process(workspace,pid)
+            info=endpoint_info(workspace['cdp_url'])
+            if isinstance(info,dict) and info.get('webSocketDebuggerUrl'):return None
+        except (OSError,ValueError,ProtocolError):
+            continue
+    return 'waiting_for_browser_startup'
+
+
 def dispatch_one(config, service, *, launcher=subprocess.Popen, wait=True):
     service.desktop_dispatch_spool=config['spool_dir']
     recover_dispatch(service)
@@ -201,6 +222,12 @@ def dispatch_one(config, service, *, launcher=subprocess.Popen, wait=True):
         if len(items)>=limit:return {'state':'waiting_for_executor_or_cleanup'}
         if len(items)+manual>=limit or not browser_available:
             return {'state':'waiting_for_browser'}
+        if isinstance(config.get('hermes_desktop'),dict):
+            status=service.queue_status()
+            if status['automation_paused']:return {'state':'paused'}
+            if not status['ready_count']:return {'state':'empty'}
+            startup=dispatch_startup(config)
+            if startup:return {'state':startup}
         item=service.queue_take(concurrency_limit=limit-manual)
         if not item:return {'state':'paused' if service.queue_status()['automation_paused'] else 'empty'}
         pending=service.dispatch_preparation={'item':item,'limit':limit}
@@ -309,7 +336,8 @@ def watch(config, service, *, once=False):
                             # request. Fill more slots only for due automatic work or
                             # remaining explicitly queued immediate requests.
                             if not ((latest['enabled'] and due) or latest['immediate_count']):break
-                    if result['state'] not in ('paused','waiting_for_browser','waiting_for_executor_or_cleanup'):
+                    if result['state'] not in ('paused','waiting_for_browser','waiting_for_executor_or_cleanup',
+                                               'waiting_for_executor_startup','waiting_for_browser_startup'):
                         with service.tx() as db:
                             db.execute('UPDATE dispatch_control SET wake_requested=0,next_automatic_at=? WHERE id=1 AND automation_paused=0',
                                        ((datetime.fromisoformat(service.now())+timedelta(seconds=interval)).isoformat(),))

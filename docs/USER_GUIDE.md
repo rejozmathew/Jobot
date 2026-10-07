@@ -45,6 +45,14 @@ The queue card shows whether the worker is online, active capacity, application
 scheduling and discovery state. A reachable dashboard with an offline worker can
 save requests but cannot dispatch them until the worker returns.
 
+During desktop startup, the worker can be online while the card says **Waiting
+for Hermes to finish starting** or **Waiting for the application browser to become
+available**. Jobs stay queued and begin automatically when those components are
+ready. This wait does not consume an attempt or any application time limit. A
+persistent message calls for checking the desktop/browser services in
+[Operations](OPERATIONS.md#desktop-startup-ordering), rather than repeatedly
+clicking Apply now.
+
 Expand **Candidate, resume and application options** to inspect the candidate,
 active resume, browser profile, model/effort, submission mode and browser mode.
 **Review only** records readiness for review instead of submitting. **Submit when

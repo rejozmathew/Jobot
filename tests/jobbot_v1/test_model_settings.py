@@ -53,10 +53,11 @@ def test_catalog_failure_keeps_saved_selection_and_sanitizes_error(tmp_path, mon
     assert s.settings_view() == before
 
 
-def test_dispatch_reads_saved_model_at_launch_and_snapshots_it(tmp_path):
+def test_dispatch_reads_saved_model_at_launch_and_snapshots_it(tmp_path, monkeypatch):
     from job_applier.queue_runtime import dispatch_one
     s, asset, jobs, _, cfg = runtime_fixture(tmp_path)
     cfg['hermes_desktop'] = {}
+    monkeypatch.setattr('job_applier.hermes_desktop.backend_ready', lambda _: True)
     enqueue(s, asset, [jobs[0]])
     other = Service(s.db_path, instance_id=s.instance_id)
     other.configure({'application_model_override': True, 'reasoning_provider': 'custom',
