@@ -1,5 +1,21 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 7: popup observation for page-only helper callers
+
+The shared popup document observer uses the already-armed loopback endpoint and
+correlated child target when a helper owns a page without borrowing the browser
+wrapper. The iCIMS Apply and authentication-Continue callers use that contract.
+Previously a newly correlated popup could raise NoneType.base_url before its
+first document was observed, returning otherwise supported navigation to the
+executor as an exception.
+
+The original observation window, public destination/identity checks and ordinary
+same-session recovery are retained. Normal browser callers keep their observed
+browser mode. No helper or caller is added or removed, and there is no change to
+Simplify order, confirmation sources, operator stops, deadlines or retry policy.
+This correction does not reconcile an unrelated posting incorrectly adopted
+during authentication; that separate identity finding remains under investigation.
+
 ## October 6: company templates and visible answer reuse
 
 The existing shared `managed_answer_library.matches` resolver binds `{company}`

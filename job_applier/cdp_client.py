@@ -207,8 +207,12 @@ async def observe_popup_document(browser, observation, found, *, source_url, tim
     if time.monotonic() >= deadline:
         return found
     try:
-        child = await CDPBrowser.connect(browser.base_url, target_id=found['target_id'],
-                                         expected_mode=browser.observed_mode)
+        # Helpers may own a page/CDP connection without borrowing its browser
+        # wrapper. The armed observation already pins the validated loopback
+        # endpoint and correlated child target; retain that same evidence.
+        endpoint = browser.base_url if browser is not None else observation.cdp_url
+        child = await CDPBrowser.connect(endpoint, target_id=found['target_id'],
+                                         expected_mode=getattr(browser, 'observed_mode', None))
         page = await child.get_current_page()
         while True:
             try:

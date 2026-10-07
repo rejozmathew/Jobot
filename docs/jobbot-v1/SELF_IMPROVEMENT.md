@@ -525,3 +525,40 @@ deadline or retry limit was added. Detailed application findings stay private.
 The publication also completes the previously missing GitHub push for #010.
 Both executable changes were already deployed; publication does not start another
 runtime deployment or interrupt an active application.
+
+
+### Self-improvement #012 — 2026-10-07
+
+Tag: [self-improvement-012-2026-10-07](https://github.com/rejozmathew/auto-job-applier/releases/tag/self-improvement-012-2026-10-07).
+The annotated tag identifies the exact validated code commit, Ubuntu deployment
+time and verification results. Matching private run notes retain the redacted
+review, source/file manifests, baseline/candidate logs and JUnit.
+
+An iCIMS helper can own a page without borrowing a browser wrapper. After a
+correlated popup Apply or authentication Continue, the shared document observer
+previously accessed the absent wrapper and raised NoneType.base_url. It now uses
+the already-armed loopback endpoint and correlated child target for that caller.
+Normal browser callers retain their observed mode. The original observation
+window, destination/identity rules, ordinary recovery, Simplify order, accepted
+confirmation sources and operator stop/deadline behavior are unchanged.
+
+Five synthetic regressions reproduced the fault. Ubuntu's same 95 checks changed
+from 90 passing plus five reproduced failures to 95 passing, with no lost baseline
+passing checks. Real synthetic Apply and Continue popups recover through native
+submission in the same attempt. Existing four-slot recovery preserves the
+successful controls and next admission. These checks do not cover every production
+portal/complexity or a complete popup-specific capacity queue.
+
+Windows focused validation covers 115 checks across the focused run and an isolated
+recheck of one unrelated Node/jsdom timeout. The standard final managed suite
+passed 1,267 tests with 161 skips. An optional whole-suite browser sweep stalled;
+its log was retained and it is not counted as passing. No live application or
+private profile was used as a fixture.
+
+This bounded correction removes a demonstrated helper exception. The review
+separately identified generic form/account-route failures, expensive repeated
+observation and an unrelated-posting identity adoption. Those larger changes are
+deferred pending safe synthetic reproductions; production records are preserved.
+No additional production submission or speed gain is claimed. Deployment changes
+only the intended source, synthetic tests and current run/runtime notes, at an
+idle application boundary, with prior queue state restored afterward.

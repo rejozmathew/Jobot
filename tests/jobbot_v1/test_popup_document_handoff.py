@@ -135,3 +135,37 @@ def test_normal_popup_still_submits_without_a_redirect_wait(tmp_path):
                                                  {'method':'submit','selector':'button'})
             assert submitted['status'] == 'applied' and receipts == ['/submitted']
     asyncio.run(run())
+
+@pytest.mark.parametrize('control_label', ['Apply', 'Continue'])
+def test_browserless_helper_popup_handoff_resumes_same_attempt_to_submission(tmp_path, control_label):
+    """Exercise the iCIMS caller contract without mocking popup observation."""
+    from job_applier.application_runtime import click_and_follow_external_apply
+    from job_applier.browser_controls import inspect_control, click_control
+
+    async def run():
+        async with popup_fixture(tmp_path) as (page,s,session,own,client,cfg,entry,final,receipts):
+            before = s.attempt(own['attempt_id'])
+            package = s.application_context(own['attempt_id'])
+            page.application_package = package
+            if control_label == 'Continue':
+                # Native access forms may open a correlated application popup.
+                await page.evaluate("document.body.insertAdjacentHTML('afterbegin','<label>Email<input type=email value=candidate@example.test></label>');document.querySelector('a').textContent='Continue';document.querySelector('a').href=" + json.dumps(entry+'?gh_jid=123'))
+            control = await inspect_control(page, {'selector':'a'})
+            result = await click_and_follow_external_apply(None,page,control,
+                lambda:click_control(page,{'selector':'a'}),client,own,page.target_id,
+                cdp_url=cfg['cdp_url'],control_target={'selector':'a'})
+            target = result['target_handoff']['target_id']
+            assert target != page.target_id
+            package = s.application_context(own['attempt_id'])
+            assert package['job']['url'] == final
+            filled = await asyncio.to_thread(browser_action,cfg,client,own,package,target,
+                {'method':'fill','selector':'#name','value':'Synthetic Candidate'})
+            assert filled['committed']
+            submitted = await asyncio.to_thread(browser_action,cfg,client,own,package,target,
+                {'method':'submit','selector':'button'})
+            assert submitted['status'] == 'applied', submitted
+            assert receipts == ['/submitted']
+            assert s.attempt(own['attempt_id'])['started_at'] == before['started_at']
+            assert s.session(session['id'])['attempt_id'] == own['attempt_id']
+            assert s.job(session['job_id'])['url'].endswith('/jobs/123')
+    asyncio.run(run())

@@ -13,7 +13,8 @@ from job_applier import cdp_client as cdp
     ('https://jobs.example.test/jobs/999', False),
     ('https://forms.example.test/reset-password?reset_token=private', False),
 ])
-def test_ready_popup_has_no_sleep_and_preserves_identity_rules(monkeypatch, destination, accepted):
+@pytest.mark.parametrize('borrowed_browser', [True, False])
+def test_ready_popup_has_no_sleep_and_preserves_identity_rules(monkeypatch, destination, accepted, borrowed_browser):
     found = {'kind': 'popup', 'target_id': 'child', 'url': 'https://jobs.example.test/apply/123'}
     page = SimpleNamespace(evaluate=AsyncMock(return_value={'url': destination, 'ready': 'complete'}))
     child = SimpleNamespace(get_current_page=AsyncMock(return_value=page), close=AsyncMock())
@@ -27,12 +28,13 @@ def test_ready_popup_has_no_sleep_and_preserves_identity_rules(monkeypatch, dest
     sleep = AsyncMock()
     monkeypatch.setattr(cdp.asyncio, 'sleep', sleep)
     result = asyncio.run(cdp.observe_popup_document(
-        SimpleNamespace(base_url='http://127.0.0.1:9222', observed_mode='headless'),
-        SimpleNamespace(armed_at=10), found, source_url='https://jobs.example.test/jobs/123'))
+        SimpleNamespace(base_url='http://127.0.0.1:9222', observed_mode='headless') if borrowed_browser else None,
+        SimpleNamespace(armed_at=10, cdp_url='http://127.0.0.1:9222'), found,
+        source_url='https://jobs.example.test/jobs/123'))
     assert result['url'] == (destination if accepted else found['url'])
     sleep.assert_not_awaited()
     child.close.assert_awaited_once()
-    connect.assert_awaited_once_with('http://127.0.0.1:9222', target_id='child', expected_mode='headless')
+    connect.assert_awaited_once_with('http://127.0.0.1:9222', target_id='child', expected_mode='headless' if borrowed_browser else None)
 
 
 @pytest.mark.parametrize('kind,armed_at', [('same_tab', 10), ('popup', 4)])
