@@ -100,7 +100,7 @@ another edit. Application snapshots preserve the choices with which work began.
 | `autofill` | `simplify` | Selected autofill strategy; native capability also exists |
 | `browser_mode` | `headed` | Requested browser mode |
 | `application_concurrency` | `1` | Operator-selectable 1–5 simultaneous queued applications |
-| `duplicate_matching_mode` | `shadow` | `off`, show-only `shadow`, or `enforce` high-confidence matches to recorded candidate success; never suppresses because an earlier attempt failed |
+| `duplicate_matching_mode` | `shadow` | `off`, show-only `shadow`, or `enforce` high-confidence matches to recorded candidate success or explicit operator cancellation; never suppresses because an earlier attempt failed |
 | `application_time_limit_minutes` | `30` | 1–1440 minutes, or `0` for Off; excludes time waiting in queue |
 | `reasoning_provider`, `reasoning_model` | unset | Use configured executor selection until an explicit supported selection is saved |
 | `reasoning_effort` | `low` | Requested effort; UI adapts to executor/provider capabilities |

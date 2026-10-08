@@ -182,7 +182,7 @@ def save_match(db,match,now):
         (dumps(match['evidence']),now,now))
 
 
-def matching_success(service,db,job_id,*,identity_id=None):
+def matching_suppression(service,db,job_id,*,identity_id=None):
     mode=service._settings_record(db)['values'].get('duplicate_matching_mode','shadow')
     if mode=='off':return None
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_duplicate_matches'").fetchone():return None
@@ -194,11 +194,18 @@ def matching_success(service,db,job_id,*,identity_id=None):
     if identity_id is None:
         candidates=db.execute("SELECT id FROM candidates WHERE state='active'").fetchall()
         identity_id=candidates[0]['id'] if len(candidates)==1 else None
+    canceled=None
     for match in matching_records(db,job_id=job_id,snapshot=context[1],embeddings=context[2]):
         # Eligibility also serves read-only question/dashboard views. Persist
         # decisions in the matcher refresh or an actual refused admission.
-        if mode!='enforce' or match['decision']!='confirmed' or match['operator_state']=='dismissed' or not identity_id:continue
+        if mode!='enforce' or match['decision']!='confirmed' or match['operator_state']=='dismissed':continue
         other=match['right_job_id'] if match['left_job_id']==job_id else match['left_job_id']
+        # Cancellation is an explicit posting-level operator choice. Re-read it
+        # rather than copying it to the match, so restoring the original works.
+        if db.execute(RELATED+'''SELECT 1 FROM related r JOIN jobs j ON j.id=r.id
+                WHERE j.disposition='canceled' LIMIT 1''',(other,)).fetchone():
+            canceled=(match,other,'job_canceled')
+        if not identity_id:continue
         # Success must belong to this candidate; unknown/failed history is eligible.
         success=db.execute(RELATED+'''SELECT 1 FROM related r JOIN submission_ledger l ON l.job_id=r.id
             JOIN candidates c ON c.person_key=l.person_key WHERE c.id=? LIMIT 1''',(other,identity_id)).fetchone()
@@ -206,24 +213,26 @@ def matching_success(service,db,job_id,*,identity_id=None):
             success=db.execute(RELATED+'''SELECT 1 FROM related r JOIN application_attempts a ON a.job_id=r.id
                 WHERE a.identity_id=? AND a.completed_at IS NOT NULL AND a.outcome IN ('applied','already_applied') LIMIT 1''',
                 (other,identity_id)).fetchone()
-        if success:return match,other
-    return None
+        if success:return match,other,'already_applied'
+    return canceled
 
 
-def duplicate_error(job_id,matched_job_id,*,match=None):
-    error=ProtocolError('already_applied','Recorded submission for the same posting')
+def duplicate_error(job_id,matched_job_id,*,match=None,code='already_applied'):
+    error=ProtocolError(code,'Matched posting explicitly canceled by operator' if code=='job_canceled'
+                        else 'Recorded submission for the same posting')
     error.duplicate_job_id=job_id;error.duplicate_of=matched_job_id;error.duplicate_match=match
     return error
 
 
 def record_skip(db,error,identity_id,now,source):
-    if error.code!='already_applied' or not getattr(error,'duplicate_job_id',None):return
+    if error.code not in ('already_applied','job_canceled') or not getattr(error,'duplicate_job_id',None):return
     match=getattr(error,'duplicate_match',None)
     if match:save_match(db,match,now)
     db.execute('''INSERT OR IGNORE INTO job_duplicate_skips
         (job_id,identity_id,matched_job_id,skipped_at,source,evidence_json) VALUES (?,?,?,?,?,?)''',
         (error.duplicate_job_id,identity_id or '',error.duplicate_of,now,source,
-         dumps(match['evidence'] if match else ['Existing recorded posting success'])))
+         dumps([*(match['evidence'] if match else []),
+                'Matched posting explicitly canceled by operator' if error.code=='job_canceled' else 'Existing recorded posting success'])))
 
 
 def audit_duplicate_admission(method):
@@ -232,7 +241,7 @@ def audit_duplicate_admission(method):
     def wrapped(self,*args,**kwargs):
         try:return method(self,*args,**kwargs)
         except ProtocolError as exc:
-            if exc.code=='already_applied' and getattr(exc,'duplicate_job_id',None):
+            if exc.code in ('already_applied','job_canceled') and getattr(exc,'duplicate_job_id',None):
                 with self.tx() as db:record_skip(db,exc,kwargs.get('identity_id'),self.now(),method.__name__)
             raise
     return wrapped

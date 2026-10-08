@@ -39,6 +39,14 @@ operator's expansion choices.
 
 ## Implementation and ownership
 
+October 8 extends this operator choice to corroborated company/title matches
+when duplicate matching is in `enforce` mode. A rediscovered matching listing is
+excluded as canceled, not already applied. Restoring the original or dismissing
+an incorrect pair removes this matching-based exclusion. The matcher never copies
+the canceled disposition, suppresses a job merely because an attempt failed, or
+stops an active dispatch for a different matching job. See
+[Cross-source matching](CROSS_SOURCE_IDENTITY.md).
+
 Migration 19 adds disposition, reason and change timestamp columns to `jobs`.
 Existing records default to active; no old application outcome is rewritten.
 `ArchiveServices.set_job_disposition` owns the operator mutation and updates

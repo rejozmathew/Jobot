@@ -16,7 +16,11 @@ attempts do not acquire this disposition automatically. See
 
 October 8 adds operator-approved company/title duplicate matching. In `enforce`
 mode, a corroborated high-confidence match to this candidate's recorded success
-also returns already applied. Embedding similarity alone, missing model access,
+also returns already applied. A corroborated match to an explicitly canceled
+posting (including "no longer interested") returns canceled until the original
+posting is restored or that pair is dismissed. Neither path copies dispositions,
+rewrites attempt history, or stops an active matching dispatch.
+Embedding similarity alone, missing model access,
 and failed/uncertain history do not suppress a request. Pair decisions are
 reversible and do not become browser-scope aliases. See
 [Cross-source matching](CROSS_SOURCE_IDENTITY.md#companytitle-matching--october-8-2026).

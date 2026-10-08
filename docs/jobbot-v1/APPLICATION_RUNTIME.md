@@ -1,11 +1,14 @@
 # Application runtime: ownership, helper map, and rationale
 
-## October 8: applied-posting matching and daily summary
+## October 8: applied/canceled-posting matching and daily summary
 
 Operator-approved company/title matching supplements observed URL identity.
 `job_duplicates.DuplicateMatcher` caches optional LM Studio embeddings outside
 database transactions; the shared admission check re-evaluates corroborating
-posting facts and candidate-specific success. Only `enforce` mode skips new
+posting facts and candidate-specific success or explicit operator cancellation.
+`matching_suppression` reads the original disposition at admission; restoring
+the original or dismissing an incorrect pair removes cancellation exclusion.
+Only `enforce` mode skips new
 admission; shadow results and failed/uncertain attempts remain eligible.
 Original jobs, attempts, outcomes and browser-scope aliases remain unchanged.
 See [Cross-source identity](CROSS_SOURCE_IDENTITY.md) for evidence requirements,
@@ -1149,7 +1152,7 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | managed_queue._settle_reconciled_queue | Called inside successful manual reconciliation; atomically settles only queued rows for the related job and same identity. Existing stopped-session/newer-attempt checks and dispatched/history rows remain intact. |
 | managed_answer_library.py / migration 26 | Current candidate-scoped knowledge, aliases, applicability, append-only revisions and synthesis provenance; called by profile writes, question capture, operator APIs, application context, shared saved_answer and the dispatcher minute reconciliation. No browser/helper outcome authority. |
 | answer_learning.py / answer_learning_model.py / migration 27 | Dashboard-owned background synthesis and equivalent wording review; uses the installed Hermes auxiliary inference client without application tools/sessions. Called by queue_runtime.serve; human saves enqueue durable inputs in the same database. No application/helper outcome authority. |
-| job_duplicates.py / migration 29 | Called by configured intake, the dashboard background worker and shared admission checks. Optional cached local embeddings propose same-company role matches; corroborated matches with candidate success suppress only new admissions in enforce mode. Stores reversible pair decisions and first actual skip receipts, without creating URL/ownership aliases. |
+| job_duplicates.py / migration 29 | Called by configured intake, the dashboard background worker and shared admission checks. Optional cached local embeddings propose same-company role matches; matching_suppression rechecks candidate success or explicit operator cancellation for new admissions in enforce mode. Stores reversible pair decisions and first actual skip receipts with the real reason, without creating URL/ownership aliases or copying dispositions. |
 | daily_summary.py / hermes_notifications.py | The existing notification watcher calls a read-only calendar-day projection at the configured morning time. Counts submissions, attempts, actual duplicate skips and sixth-dispatch exhaustion; private delivery receipts prevent ordinary restart replays. No application outcome authority. |
 | managed_questions.py / migrations 16 and 26 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |
 | application_answers.py | Shared label_has, match_answer_to_option, approved_answer, answer_action and saved_answer (re-exported by LinkedIn); approved Greenhouse plan journal restoration; interprets profile salary/privacy preferences and retains best-effort private question/answer history from shared browser writes, mapped recovery and Workday advancement; contains no personal answer defaults |

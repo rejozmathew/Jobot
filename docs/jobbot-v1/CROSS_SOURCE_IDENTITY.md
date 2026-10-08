@@ -3,11 +3,14 @@
 ## Company/title matching — October 8, 2026
 
 The operator approved an additional local matching layer for postings whose
-successful history is hidden behind different discovery URLs. Failed, blocked,
+successful history or explicit operator cancellation is hidden behind different discovery URLs. Failed, blocked,
 interrupted and uncertain attempts remain retryable under the existing policy.
 `duplicate_matching_mode` defaults to `shadow` (show matches only). `enforce`
 suppresses a new admission only when a high-confidence match has recorded success
-for the selected candidate. `off` disables this additional layer; established
+for the selected candidate or an explicit **Canceled** disposition, including
+"no longer interested." Cancellation remains a posting-level operator choice;
+failed attempts and stopped/canceled attempt outcomes do not set it automatically.
+`off` disables this additional layer; established
 URL-identity success/cancellation handling still applies.
 
 `job_duplicates.py` normalizes company legal suffixes, punctuation and common
@@ -26,11 +29,13 @@ No company names or live postings are hard-coded.
 
 Migration 29 adds model/input-keyed embedding cache rows, pair decisions and
 first duplicate-admission receipts. It does not merge/delete jobs, fabricate a
-submission, change cancellation, or insert semantic matches into URL/ownership
+submission, copy cancellation dispositions, or insert semantic matches into URL/ownership
 aliases. Pair decisions are recomputed against current metadata and stored with
 input hashes and reasons. An operator can choose **These are different jobs**
 on either job's match details; **Reconsider match** restores automatic matching.
 Dismissal does not itself enqueue a job or erase actual submission evidence.
+Restoring the original canceled posting or dismissing an incorrect match removes
+matching-based cancellation exclusion; ordinary queue eligibility still applies.
 
 The dashboard runs background embedding refreshes; configured intake also
 refreshes the incoming company's matches before returning. Model calls occur
@@ -40,8 +45,9 @@ Changing the endpoint, model, revision or input format selects another cache;
 vectors from different models are never compared. The current model's cached
 vectors remain usable through a temporary server outage.
 
-Queue reconciliation and admission recheck success in their transaction. Pending
-duplicates settle as `already_applied`; active dispatches are not stopped by a
+Queue reconciliation and admission recheck success and cancellation in their transaction. Pending
+duplicates settle as `already_applied` or `canceled`, preserving the actual reason;
+active dispatches are not stopped by a
 background match. Requests already underway can still discover success later.
 Each actually suppressed incoming job/candidate is counted once, on its first
 suppression date, rather than once per worker poll. Historical matches alone do

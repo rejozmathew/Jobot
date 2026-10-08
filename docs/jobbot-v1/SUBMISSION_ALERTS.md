@@ -33,6 +33,8 @@ Counts have deliberately different units:
   submission for those postings, including attempts on earlier days.
 - **Duplicate jobs skipped:** distinct incoming job records actually refused at
   admission, counted on their first recorded skip date for the candidate.
+  Includes high-confidence matches to recorded success or explicit cancellation;
+  a cancellation skip never counts as a successful or already-applied result.
   Matching old records during backfill is not a skipped application, and repeated
   reconciliation polls do not inflate the count.
 - **Already-applied results:** distinct postings with that reported result

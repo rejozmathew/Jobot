@@ -146,7 +146,7 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
                 AND s.state NOT IN ('paused','finishing') ORDER BY s.requested_at DESC LIMIT 1''',(job['id'],driver,identity_id)).fetchone()
     except ProtocolError as exc:
         from .job_duplicates import record_skip
-        if exc.code=='already_applied':
+        if exc.code in ('already_applied','job_canceled'):
             with service.tx() as db:record_skip(db,exc,identity_id,service.now(),'application_start')
         raise
     requested=request_id or (previous['request_id'] if previous else uid())

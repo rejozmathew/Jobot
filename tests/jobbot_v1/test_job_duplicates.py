@@ -139,6 +139,69 @@ def test_read_only_eligibility_checks_do_not_write_match_records(tmp_path):
         assert db.execute('SELECT count(*) FROM job_duplicate_matches').fetchone()[0]==0
 
 
+@pytest.mark.parametrize('reason',['No longer interested','Position canceled'])
+def test_explicit_cancellation_suppresses_matching_listing_without_claiming_success(tmp_path,reason):
+    service,asset,_,_,_=setup(tmp_path);enable(service)
+    first,second=pair(service)
+    service.set_job_disposition(job_ids=[first['id']],disposition='canceled',reason=reason)
+    for request in ('one','two'):
+        with pytest.raises(ProtocolError,match='job_canceled'):
+            service.queue_enqueue(job_ids=[second['id']],identity_id='candidate',resume_asset_id=asset['id'],request_id=request)
+    with service.read() as db:
+        assert db.execute('SELECT count(*) FROM job_duplicate_skips WHERE job_id=?',(second['id'],)).fetchone()[0]==1
+        assert not db.execute('SELECT 1 FROM submission_ledger').fetchone()
+        assert db.execute('SELECT disposition FROM jobs WHERE id=?',(second['id'],)).fetchone()[0]=='active'
+        evidence=json.loads(db.execute('SELECT evidence_json FROM job_duplicate_skips WHERE job_id=?',(second['id'],)).fetchone()[0])
+        assert 'Matched posting explicitly canceled by operator' in evidence
+
+
+@pytest.mark.parametrize('action',['restore','dismiss','shadow'])
+def test_canceled_matching_listing_becomes_eligible_after_operator_override(tmp_path,action):
+    service,asset,_,_,_=setup(tmp_path);enable(service)
+    first,second=pair(service)
+    service.set_job_disposition(job_ids=[first['id']],disposition='canceled',reason='No longer interested')
+    if action=='restore':service.set_job_disposition(job_ids=[first['id']],disposition='active')
+    elif action=='dismiss':
+        match=service.duplicate_matches(job_id=second['id'])['matches'][0]
+        service.set_duplicate_match_state(match_id=match['id'],state='dismissed')
+    else:enable(service,'shadow')
+    assert service.queue_enqueue(job_ids=[second['id']],identity_id='candidate',resume_asset_id=asset['id'],request_id=action)['items']
+
+
+def test_canceled_match_settles_pending_work_and_preserves_active_dispatch(tmp_path):
+    service,asset,_,_,_=setup(tmp_path);enable(service)
+    first,second=pair(service)
+    item=service.queue_enqueue(job_ids=[second['id']],identity_id='candidate',resume_asset_id=asset['id'],request_id='pending')['items'][0]
+    service.set_job_disposition(job_ids=[first['id']],disposition='canceled',reason='No longer interested')
+    service.queue_reconcile(identity_id='candidate',resume_asset_id=asset['id'])
+    assert service.queue_status()['latest_by_job'][second['id']]['outcome']=='canceled'
+    with service.tx() as db:db.execute("UPDATE dispatch_queue SET state='dispatched',outcome=NULL,ended_at=NULL WHERE id=?",(item['id'],))
+    service.queue_reconcile(identity_id='candidate',resume_asset_id=asset['id'])
+    assert service.queue_status()['latest_by_job'][second['id']]['state']=='dispatched'
+
+
+def test_canceled_possible_match_and_failed_attempt_still_allow_admission(tmp_path):
+    service,asset,_,_,_=setup(tmp_path);enable(service)
+    first,second=pair(service,location='',posted_at='')
+    service.set_job_disposition(job_ids=[first['id']],disposition='canceled',reason='No longer interested')
+    assert service.queue_enqueue(job_ids=[second['id']],identity_id='candidate',resume_asset_id=asset['id'],request_id='uncertain')['items']
+    service.set_job_disposition(job_ids=[first['id']],disposition='active')
+    with service.tx() as db:db.execute("UPDATE jobs SET status='failed' WHERE id=?",(first['id'],))
+    assert service.queue_enqueue(job_ids=[first['id']],identity_id='candidate',resume_asset_id=asset['id'],request_id='retry')['items']
+
+
+def test_dispatch_take_records_canceled_match_and_restore_allows_automatic_pickup(tmp_path):
+    service,asset,_,_,_=setup(tmp_path);enable(service)
+    first,second=pair(service)
+    service.queue_enqueue(job_ids=[second['id']],identity_id='candidate',resume_asset_id=asset['id'],request_id='pending')
+    service.set_job_disposition(job_ids=[first['id']],disposition='canceled',reason='No longer interested')
+    assert service.queue_take() is None
+    assert service.queue_status()['latest_by_job'][second['id']]['outcome']=='canceled'
+    service.set_job_disposition(job_ids=[first['id']],disposition='active')
+    service.queue_reconcile(identity_id='candidate',resume_asset_id=asset['id'])
+    assert service.queue_status()['latest_by_job'][second['id']]['state']=='queued'
+
+
 @pytest.mark.parametrize('vector',[[float('nan'),1.],[float('inf'),1.],[0.,0.],[]])
 def test_invalid_model_vectors_do_not_establish_duplicate(tmp_path,vector):
     from job_applier.job_duplicates import DuplicateMatcher

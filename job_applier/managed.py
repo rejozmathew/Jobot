@@ -34,7 +34,7 @@ from .managed_questions import QuestionServices
 from .managed_answer_library import AnswerLibraryServices
 from .managed_queue import QueueServices
 from .managed_discovery import DiscoveryServices
-from .job_duplicates import DuplicateServices, matching_success, duplicate_error, audit_duplicate_admission
+from .job_duplicates import DuplicateServices, matching_suppression, duplicate_error, audit_duplicate_admission
 from .managed_versions import code_evidence
 from .managed_redaction import safe_text, reject_secrets, provenance_text
 
@@ -414,8 +414,8 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         # A failed attempt never sets this disposition automatically.
         if db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id WHERE j.disposition='canceled' LIMIT 1",(job_id,)).fetchone():
             raise ProtocolError('job_canceled')
-        duplicate=matching_success(self,db,job_id,identity_id=identity_id)
-        if duplicate:raise duplicate_error(job_id,duplicate[1],match=duplicate[0])
+        duplicate=matching_suppression(self,db,job_id,identity_id=identity_id)
+        if duplicate:raise duplicate_error(job_id,duplicate[1],match=duplicate[0],code=duplicate[2])
 
     def _eligible(self, db, job_id, settings=None, exclude_session=None, identity_id=None):
         job=self._get(db,'jobs',job_id)

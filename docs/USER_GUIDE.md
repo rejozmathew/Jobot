@@ -86,10 +86,13 @@ Job rows can also show **Matching posting** or **Possible duplicate** with the
 other job's number and the matching evidence. **These are different jobs**
 dismisses that pair; **Reconsider match** restores automatic matching. Original
 jobs and attempts remain visible. Dismissal does not queue work automatically.
-In Settings, **Previously applied duplicate jobs** offers **Off**, **Show matches
-only**, and **Skip high-confidence applied duplicates**. The last option skips
-new work only when the matched posting already has this candidate's recorded
-success. Earlier failures still follow the existing retry schedule.
+In Settings, **Duplicate jobs** offers **Off**, **Show matches only**, and
+**Skip applied or canceled duplicates**. The last option skips new work when a
+high-confidence matched posting has this candidate's recorded success or an
+explicit **Canceled** disposition, including a "no longer interested" reason.
+Restoring the original canceled posting removes that exclusion; dismissing an
+incorrect pair removes matching-based exclusion. Earlier failures still follow
+the existing retry schedule. Canceled matches are not reported as submissions.
 
 The optional daily Discord summary arrives at 8:00 a.m. Central for the previous
 calendar day. It separates jobs submitted, jobs attempted, total attempts,

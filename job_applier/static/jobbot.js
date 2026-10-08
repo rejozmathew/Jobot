@@ -972,10 +972,10 @@ function renderSettings(s){
  if($('main-browser-mode'))$('main-browser-mode').value=s.values.browser_mode||'headed';
  const box=$('setting-fields');box.replaceChildren();const discoveryBox=$('discovery-setting-fields');discoveryBox?.replaceChildren();
  const discoveryLabels={discovery_batch_size:'Maximum jobs per discovery run',discovery_interval_hours:'Discover jobs every (hours)'};
- for(const [key,value]of Object.entries(s.values)){const label=el('label',key==='duplicate_matching_mode'?'Previously applied duplicate jobs':discoveryLabels[key]||key.replaceAll('_',' '));let input;
+ for(const [key,value]of Object.entries(s.values)){const label=el('label',key==='duplicate_matching_mode'?'Duplicate jobs':discoveryLabels[key]||key.replaceAll('_',' '));let input;
   if(['worker','reasoning_provider','reasoning_model','reasoning_effort','application_model_override','application_time_limit_minutes','application_concurrency'].includes(key))continue;
   if(['discovery','learning'].some(task=>['model_mode','provider','model','effort'].some(field=>key===task+'_'+field)))continue;
-  if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const name=key==='duplicate_matching_mode'?({off:'Off',shadow:'Show matches only',enforce:'Skip high-confidence applied duplicates'})[x]:x;const o=el('option',name);o.value=x;input.append(o);}input.value=value;}
+  if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const name=key==='duplicate_matching_mode'?({off:'Off',shadow:'Show matches only',enforce:'Skip applied or canceled duplicates'})[x]:x;const o=el('option',name);o.value=x;input.append(o);}input.value=value;}
   else {input=el('input');if(typeof value==='boolean'){input.type='checkbox';input.checked=value;}else if(typeof value==='number'){input.type='number';input.value=value;const range=s.budget_ranges?.[key];if(range){input.min=range[0];input.max=range[1];}}else{input.type='text';input.value=Array.isArray(value)?value.join(', '):(value??'');}}
   if(key==='discovery_batch_size'){input.min=1;input.max=100;input.step=1;}
   if(key==='discovery_interval_hours'){input.min=1;input.max=168;input.step='any';}

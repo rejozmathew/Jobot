@@ -206,7 +206,8 @@ class QueueServices:
                 except ProtocolError as exc:
                     record_skip(db,exc,row['identity_id'],self.now(),'queue_take')
                     db.execute("UPDATE dispatch_queue SET state='finished',outcome=?,detail=?,ended_at=? WHERE id=?",
-                               ('already_applied' if exc.code=='already_applied' else 'skipped',exc.code,self.now(),row['id']))
+                               ('already_applied' if exc.code=='already_applied' else 'canceled' if exc.code=='job_canceled'
+                                else 'skipped',exc.code,self.now(),row['id']))
                     continue
                 db.execute("UPDATE dispatch_queue SET state='dispatched',started_at=? WHERE id=?",(self.now(),row['id']))
                 return dict(self._get(db,'dispatch_queue',row['id']))
