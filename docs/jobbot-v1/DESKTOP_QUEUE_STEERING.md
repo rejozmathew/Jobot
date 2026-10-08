@@ -11,6 +11,12 @@ in Desktop attaches to the same live session. Ordinary busy-input behavior and
 the native `session.steer` / redirect controls remain Hermes responsibilities.
 JobBot does not remove ownership locks or run a second agent for corrections.
 
+New application prompts begin with the assigned company and role, which Hermes
+uses for the visible chat label. The desktop adapter keeps that heading before
+its task marker, skill list and conversation ID; those internal details remain
+in the prompt and receipt for ownership and reconnect handling. Testing only the
+unwrapped application brief does not cover this desktop title contract.
+
 Select it in the private runtime configuration:
 
 ```json

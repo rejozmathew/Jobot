@@ -307,7 +307,11 @@ def run_session(rpc, prompt, config, receipt_path, *, sleep=time.sleep, owner=No
             write_receipt(receipt_path,receipt)
             return receipt
         getattr(rpc,'terminal_events',{}).pop(receipt['session_id'],None)
-        try:rpc.call('prompt.submit',{'session_id':receipt['session_id'],'text':receipt['original_marker']+' '+prefix+prompt,'surface':'desktop'})
+        # Hermes derives an untitled chat's sidebar label from the first line.
+        # Keep the brief's job identity ahead of skills/ownership/idempotency data.
+        heading,separator,body=prompt.partition('\n')
+        text=heading+'\n\n'+receipt['original_marker']+' '+prefix+(body if separator else '')
+        try:rpc.call('prompt.submit',{'session_id':receipt['session_id'],'text':text,'surface':'desktop'})
         except RPCRejected:
             receipt['state']='created';write_receipt(receipt_path,receipt);raise
         receipt['state']='submitted'

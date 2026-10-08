@@ -36,6 +36,31 @@ def test_desktop_command_uses_native_backend_when_selected(tmp_path):
     assert command == [sys.executable, '-m', 'job_applier.hermes_desktop', str(prompt)]
 
 
+def test_native_prompt_keeps_job_heading_before_transport_metadata(tmp_path):
+    from job_applier.application_brief import application_brief
+    from job_applier.hermes_desktop import run_session
+    s, asset, jobs, _, cfg = runtime_fixture(tmp_path)
+    s.intake(url=jobs[0]['url'], company='Example Corp', title='Systems Engineer')
+    brief = application_brief(cfg, s, enqueue(s, asset, [jobs[0]])['items'][0])
+    calls = []
+    class RPC:
+        def call(self, method, params):
+            calls.append((method, params))
+            if method == 'session.create':
+                return {'session_id': 'live', 'stored_session_id': 'stored'}
+            if method == 'session.active_list':
+                return {'sessions': [{'id': 'live', 'status': 'idle'}]}
+            return {}
+    receipt = tmp_path/'receipt.json'
+    run_session(RPC(), brief, {'hermes_desktop': {'skills': ['browser-tab-hygiene']}}, receipt)
+    prompt = next(p['text'] for m, p in calls if m == 'prompt.submit')
+    assert prompt.startswith('# Apply to Example Corp for Systems Engineer\n')
+    assert prompt.count('# Apply to Example Corp for Systems Engineer') == 1
+    assert json.loads(receipt.read_text())['original_marker'] in prompt
+    assert 'Read these installed skills' in prompt and '--driver-id stored' in prompt
+    assert brief.split('\n', 1)[1] in prompt
+
+
 def test_native_session_is_visible_preserves_id_and_waits_through_user_input(tmp_path):
     from job_applier.hermes_desktop import run_session
     calls = []
