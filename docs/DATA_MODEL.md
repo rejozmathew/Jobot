@@ -56,6 +56,7 @@ single universal foreign key. Actual definitions live in
 | Postings and provenance | `jobs`, `job_sources`, `source_observations`, `job_identity_keys` | `managed.py`, `managed_identity.py`, `managed_discovery.py` |
 | Candidate and account | `candidates`, `company_portal_accounts`, `account_requests`, `account_namespace_aliases`, `account_coordination` | `managed_accounts.py`, `managed_credentials.py` |
 | Queue/discovery | `dispatch_queue`, `dispatch_control`, `dispatch_immediate_requests`, `discovery_runs`, `discovery_control` | `managed_queue.py`, `managed_discovery.py` |
+| Semantic posting matches | `job_embedding_cache`, `job_duplicate_model`, `job_duplicate_matches`, `job_duplicate_skips` | `job_duplicates.py`; migration 29 preserves original jobs and outcomes |
 | Runs and local sessions | `runs`, `run_jobs`, `application_attempts`, `application_sessions`, `browser_workspaces`, `run_sessions`, `run_checkpoints` | `managed.py`, `managed_sessions.py`, `managed_continuity.py` |
 | Browser ownership | `owned_targets`, `target_history`, `workspace_profile_aliases`, legacy `browser_leases` | `managed_runtime.py`, `managed_sessions.py` |
 | Execution evidence | `managed_events`, `managed_actions`, `submission_ledger` | `managed_events.py`, `managed_reports.py`, `managed_shared.py` |
@@ -65,7 +66,7 @@ single universal foreign key. Actual definitions live in
 | Procedural learning | `lessons`, `lesson_history`, `helper_versions`, `helper_history` | `managed_learning.py` |
 | Mail and archival | `mail_requests`, `attempt_mail_requests`, `job_archives` | `managed_accounts.py`, `managed_archive.py` |
 
-Schema version 28 is the reviewed baseline. Do not hard-code it as an installation's
+Schema version 29 is the reviewed baseline. Do not hard-code it as an installation's
 current version; inspect service health and the migration list.
 
 ## Posting and account identity are different

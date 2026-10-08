@@ -341,7 +341,27 @@ def migration_28(db):
     retain_observed_posting_aliases(db)
 
 
-MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23), (24, migration_24), (25, migration_25), (26, migration_26), (27, migration_27), (28, migration_28)]
+def migration_29(db):
+    # Advisory matching and admission receipts never replace application history.
+    db.execute('''CREATE TABLE job_embedding_cache (
+        model_key TEXT NOT NULL,text_hash TEXT NOT NULL,dimensions INTEGER NOT NULL,
+        vector_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(model_key,text_hash))''')
+    db.execute('''CREATE TABLE job_duplicate_model (
+        id INTEGER PRIMARY KEY CHECK(id=1),model_key TEXT NOT NULL,model_name TEXT NOT NULL,
+        threshold REAL NOT NULL,updated_at TEXT NOT NULL)''')
+    db.execute('''CREATE TABLE job_duplicate_matches (
+        id TEXT PRIMARY KEY,left_job_id TEXT NOT NULL REFERENCES jobs(id),right_job_id TEXT NOT NULL REFERENCES jobs(id),
+        left_hash TEXT NOT NULL,right_hash TEXT NOT NULL,decision TEXT NOT NULL,method TEXT NOT NULL,
+        similarity REAL,evidence_json TEXT NOT NULL,operator_state TEXT NOT NULL DEFAULT 'automatic',
+        created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(left_job_id,right_job_id))''')
+    db.execute('''CREATE TABLE job_duplicate_skips (
+        job_id TEXT NOT NULL REFERENCES jobs(id),identity_id TEXT NOT NULL,
+        matched_job_id TEXT NOT NULL REFERENCES jobs(id),skipped_at TEXT NOT NULL,
+        source TEXT NOT NULL,evidence_json TEXT NOT NULL,PRIMARY KEY(job_id,identity_id))''')
+    db.execute('CREATE INDEX duplicate_matches_right ON job_duplicate_matches(right_job_id)')
+
+
+MIGRATIONS = [(1, migration_1), (2, migration_2), (3, migration_3), (4, migration_4), (5, migration_5), (6, migration_6), (7, migration_7), (8, migration_8), (9, migration_9), (10, migration_10), (11, migration_11), (12, migration_12), (13, migration_13), (14, migration_14), (15, migration_15), (16, migration_16), (17, migration_17), (18, migration_18), (19, migration_19), (20, migration_20), (21, migration_21), (22, migration_22), (23, migration_23), (24, migration_24), (25, migration_25), (26, migration_26), (27, migration_27), (28, migration_28), (29, migration_29)]
 
 
 def migrate(path):

@@ -78,6 +78,22 @@ provisioning details; current runtime entry points are in [Getting started](GETT
 
 ## Scheduling controls
 
+For company/title matching, configure the private `duplicate_matching` endpoint
+and model, then inspect `duplicate_matches` in shadow mode before selecting
+**Skip high-confidence applied duplicates** in Settings. Migration 29 is additive
+and receives the ordinary `prepare_local` backup. Reload affected idle dashboard,
+queue and workspace processes through the deployment workflow; do not replace
+an active application to load matching code. Intake inference and the dashboard
+background worker fill the shared cache. Model outages retain cached/exact
+matching and do not block application work.
+
+The daily Discord report belongs to the existing `jobbot-notifications.service`.
+Set `submission_notifications.daily_summary` to the approved time and timezone
+and restart that observer. Retain `notifications/submissions.json`; deleting it
+loses delivery history. Preview counts with `python -m job_applier.daily_summary`
+before rollout, and inspect the next report date in the private receipt file.
+Changing report configuration does not require restarting application browsers.
+
 ```bash
 # Global persistent pause: current admitted work drains normally.
 ./.venv/bin/python -m job_applier.queue_runtime --config /absolute/runtime.json pause-all

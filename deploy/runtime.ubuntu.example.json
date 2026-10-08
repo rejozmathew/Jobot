@@ -18,6 +18,12 @@
   "hermes_command": ["/home/REPLACE/.local/bin/hermes", "chat", "--query-file", "{prompt_file}"],
   "harvest_hermes_command": ["/home/REPLACE/.local/bin/hermes", "--profile", "jobbot-discovery", "chat", "--oneshot", "--pass-session-id", "--query-file", "{prompt_file}"],
   "queue_interval_seconds": 10800,
+  "duplicate_matching": {
+    "base_url": "http://127.0.0.1:1234/v1",
+    "model": "REPLACE_WITH_LOADED_EMBEDDING_MODEL",
+    "model_revision": "1",
+    "title_threshold": 0.975
+  },
   "harvest_instructions": "Use the selected candidate's current leadership, location and work-authorization preferences. Verify each direct employer link is live. Do not requeue recorded successes.",
   "concurrency_limit": 1,
   "require_simplify": true,

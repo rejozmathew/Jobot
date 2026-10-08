@@ -11,6 +11,7 @@ from datetime import datetime
 from .managed_identity import RELATED
 from .managed_redaction import reject_secrets, safe_text
 from .managed_shared import ProtocolError, dumps, uid
+from .job_duplicates import audit_duplicate_admission
 
 
 def local_session(db, attempt_id):
@@ -57,6 +58,7 @@ class SessionServices:
                     db.execute('INSERT OR IGNORE INTO workspace_profile_aliases VALUES (?,?)',(profile,workspace['id']))
         return workspaces
 
+    @audit_duplicate_admission
     def reserve_session(self, *, request_id, job_id, identity_id, driver_id, workspace_ids,
                         concurrency_limit, metadata=None, resume_asset_id=None):
         if not request_id or not driver_id or not workspace_ids:
@@ -69,7 +71,7 @@ class SessionServices:
                 if old['request_key']!=key:raise ProtocolError('idempotency_conflict')
                 if old['state']!='capacity_wait':return dict(old)
             settings=self._settings_record(db)['values']
-            self._eligible(db,job_id,settings,old['id'] if old else None)
+            self._eligible(db,job_id,settings,old['id'] if old else None,identity_id=identity_id)
             candidate=self._get(db,'candidates',identity_id)
             if candidate['state']!='active':raise ProtocolError('identity_inactive')
             if not resume_asset_id:raise ProtocolError('configured_resume_required')
@@ -212,9 +214,9 @@ class SessionServices:
             if w['host_id']!=host_id:raise ProtocolError('stale_host')
             run=self._get(db,'runs',s['run_id'])
             if s['attempt_id']:
-                self._assert_not_suppressed(db,s['job_id']);job=self._get(db,'jobs',s['job_id'])
+                self._assert_not_suppressed(db,s['job_id'],identity_id=s['identity_id']);job=self._get(db,'jobs',s['job_id'])
             else:
-                job=self._eligible(db,s['job_id'],json.loads(run['settings_json']),s['id'])
+                job=self._eligible(db,s['job_id'],json.loads(run['settings_json']),s['id'],identity_id=s['identity_id'])
             candidate=self._get(db,'candidates',s['identity_id'])
             now=self.now()
             fence=db.execute('SELECT COALESCE(MAX(fence),0)+1 FROM application_attempts WHERE browser_profile=?',(s['workspace_id'],)).fetchone()[0]

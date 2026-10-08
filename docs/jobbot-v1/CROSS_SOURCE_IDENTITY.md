@@ -1,5 +1,60 @@
 # Cross-source duplicate matching
 
+## Company/title matching — October 8, 2026
+
+The operator approved an additional local matching layer for postings whose
+successful history is hidden behind different discovery URLs. Failed, blocked,
+interrupted and uncertain attempts remain retryable under the existing policy.
+`duplicate_matching_mode` defaults to `shadow` (show matches only). `enforce`
+suppresses a new admission only when a high-confidence match has recorded success
+for the selected candidate. `off` disables this additional layer; established
+URL-identity success/cancellation handling still applies.
+
+`job_duplicates.py` normalizes company legal suffixes, punctuation and common
+title abbreviations. Comparisons stay within a normalized company. Optional
+LM Studio embeddings compare the remaining title variations using the model's
+`clustering:` prefix. The initial title threshold is 0.975, a similarity score,
+not a probability. It is versioned with the configured model and input format.
+
+High confidence requires the same observed employer posting ID, or matching
+company/title (exact or above the embedding threshold), matching seniority, and
+the same location plus an identical explicit posting date or substantial
+description. Different employer requisitions override text similarity. Missing
+corroboration produces a possible match, not an application restriction. Source
+IDs such as LinkedIn posting IDs are not treated as conflicting employer IDs.
+No company names or live postings are hard-coded.
+
+Migration 29 adds model/input-keyed embedding cache rows, pair decisions and
+first duplicate-admission receipts. It does not merge/delete jobs, fabricate a
+submission, change cancellation, or insert semantic matches into URL/ownership
+aliases. Pair decisions are recomputed against current metadata and stored with
+input hashes and reasons. An operator can choose **These are different jobs**
+on either job's match details; **Reconsider match** restores automatic matching.
+Dismissal does not itself enqueue a job or erase actual submission evidence.
+
+The dashboard runs background embedding refreshes; configured intake also
+refreshes the incoming company's matches before returning. Model calls occur
+outside database transactions, with a five-second HTTP timeout. Unavailable or
+invalid embeddings leave exact matching and ordinary eligibility available.
+Changing the endpoint, model, revision or input format selects another cache;
+vectors from different models are never compared. The current model's cached
+vectors remain usable through a temporary server outage.
+
+Queue reconciliation and admission recheck success in their transaction. Pending
+duplicates settle as `already_applied`; active dispatches are not stopped by a
+background match. Requests already underway can still discover success later.
+Each actually suppressed incoming job/candidate is counted once, on its first
+suppression date, rather than once per worker poll. Historical matches alone do
+not count as skipped applications. See [Submission alerts](SUBMISSION_ALERTS.md)
+for daily counts and [Retry policy](RETRY_POLICY.md) for unchanged failed retries.
+
+Synthetic coverage: `test_job_duplicates.py`, `test_daily_summary.py`, existing
+cross-source identity/admission tests and the managed suite. Read-only evaluation
+of real metadata is separate from these fixtures; a finite comparison set does
+not establish perfect future matching accuracy.
+
+## Existing URL identity
+
 Shared intake identifies supported ATS postings independently of discovery feed,
 company display name, title and mutable imported requisition labels. This applies
 to every employer; there are no company names, employer domains or live job IDs

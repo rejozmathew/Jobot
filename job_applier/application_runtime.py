@@ -80,6 +80,7 @@ def prepare_local(config):
                         if check.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise ProtocolError('migration_backup_invalid')
                     migrate(path)
     service=Service(path,instance_id=config['instance_id'])
+    service.executor_config=config
     service.configure_workspaces(config.get('workspaces'))
     return service
 
@@ -136,12 +137,18 @@ def start(config, *, url=None, job_id=None, driver_id=None, request_id=None, met
     # Reuse this request, not every other application for the same posting.
     # Distinct requests own distinct tabs in a shared browser, or managed workspaces.
     from .managed_identity import RELATED
-    with service.tx() as db:
-        replay=db.execute('SELECT id FROM application_sessions WHERE request_id=?',(request_id,)).fetchone() if request_id else None
-        if not replay:service._assert_not_suppressed(db,job['id'])
-        previous=None if request_id else db.execute(RELATED+'''SELECT s.* FROM related r JOIN application_sessions s ON s.job_id=r.id
-            WHERE s.ended_at IS NULL AND s.driver_id=? AND s.identity_id=?
-            AND s.state NOT IN ('paused','finishing') ORDER BY s.requested_at DESC LIMIT 1''',(job['id'],driver,identity_id)).fetchone()
+    try:
+        with service.tx() as db:
+            replay=db.execute('SELECT id FROM application_sessions WHERE request_id=?',(request_id,)).fetchone() if request_id else None
+            if not replay:service._assert_not_suppressed(db,job['id'],identity_id=identity_id)
+            previous=None if request_id else db.execute(RELATED+'''SELECT s.* FROM related r JOIN application_sessions s ON s.job_id=r.id
+                WHERE s.ended_at IS NULL AND s.driver_id=? AND s.identity_id=?
+                AND s.state NOT IN ('paused','finishing') ORDER BY s.requested_at DESC LIMIT 1''',(job['id'],driver,identity_id)).fetchone()
+    except ProtocolError as exc:
+        from .job_duplicates import record_skip
+        if exc.code=='already_applied':
+            with service.tx() as db:record_skip(db,exc,identity_id,service.now(),'application_start')
+        raise
     requested=request_id or (previous['request_id'] if previous else uid())
     from .managed_versions import code_evidence
     evidence=code_evidence()
@@ -283,7 +290,7 @@ def session_call(config, session_id, operation, parameters=None, driver_id=None)
                 'evidence':result['evidence'],'source':params.get('source','user_reported'),'completed_at':result['completed_at']}
     driver=driver_identity(driver_id)
     if operation=='retry':
-        with service.tx() as db:service._assert_not_suppressed(db,session['job_id'])
+        with service.tx() as db:service._assert_not_suppressed(db,session['job_id'],identity_id=session['identity_id'])
         if not session['ended_at']:
             stopped=control_session(config,service,session,'stop')
             if not stopped.get('ended_at'):

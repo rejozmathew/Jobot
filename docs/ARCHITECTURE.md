@@ -1,5 +1,15 @@
 # Architecture
 
+October 8 addition: company/title duplicate matching supplements posting URL
+identity. The dashboard refreshes optional LM Studio embeddings outside database
+transactions; configured intake refreshes the incoming company's cache. Shared
+admission checks use current metadata, corroborating posting facts and the
+candidate's recorded success. Pair decisions remain separate from browser-scope
+aliases and never suppress failed retries. The existing notification process
+also supports a numerical summary of the previous calendar day. See
+[matching](jobbot-v1/CROSS_SOURCE_IDENTITY.md) and
+[daily reporting](jobbot-v1/SUBMISSION_ALERTS.md#daily-numerical-summary).
+
 [Documentation index](README.md) · [Data model](DATA_MODEL.md) · [Runtime reference](jobbot-v1/APPLICATION_RUNTIME.md)
 
 Reviewed: October 4, 2026. This describes the current managed local-session

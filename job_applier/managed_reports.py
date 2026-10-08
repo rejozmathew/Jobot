@@ -39,6 +39,18 @@ def posting_groups(db):
         key,job=row
         if key in seen:parents[root(job)]=root(seen[key])
         else:seen[key]=job;root(job)
+    # High-confidence semantic groups are reporting-only. Require every cross-
+    # group pair to agree so an A~B~C chain cannot collapse conflicting openings.
+    settings=json.loads(db.execute('SELECT settings_json FROM instance').fetchone()[0])
+    if settings.get('duplicate_matching_mode')=='enforce':
+        from .job_duplicates import matching_records
+        pairs={tuple(sorted((m['left_job_id'],m['right_job_id']))) for m in matching_records(db)
+               if m['decision']=='confirmed' and m['operator_state']!='dismissed'}
+        for left,right in sorted(pairs):
+            a,b=root(left),root(right)
+            if a==b:continue
+            first=[j for j in parents if root(j)==a];second=[j for j in parents if root(j)==b]
+            if all(tuple(sorted((x,y))) in pairs for x in first for y in second):parents[a]=b
     return {job:root(job) for job in parents}
 
 

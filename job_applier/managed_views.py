@@ -157,7 +157,17 @@ class ViewServices:
             jobs=[dict(r) for r in db.execute('SELECT * FROM jobs ORDER BY created_at DESC,id')]
             archived={r[0] for r in db.execute('SELECT job_id FROM job_archives')}
             jobs=[dict(j,archived=j['id'] in archived) for j in jobs if include_archived or j['id'] not in archived]
+            from .job_duplicates import matching_records
+            duplicates={job['id']:[] for job in jobs}
+            labels={job['id']:job for job in jobs}
+            for match in matching_records(db):
+                if match['decision']=='different':continue
+                for job_id,other in ((match['left_job_id'],match['right_job_id']),(match['right_job_id'],match['left_job_id'])):
+                    if job_id in duplicates:
+                        duplicates[job_id].append({k:match[k] for k in ('id','decision','method','similarity','evidence','operator_state')} |
+                            {'other_job_id':other,'other_seq_id':labels.get(other,{}).get('seq_id')})
             for job in jobs:
+                job['duplicate_matches']=duplicates[job['id']]
                 job['assessment']=self._assessment(db,job['id'])
                 job['sources']=self._source_rows(db,job['id'])
                 job['source_count']=len(job['sources'])

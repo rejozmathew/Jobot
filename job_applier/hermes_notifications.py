@@ -17,6 +17,7 @@ from .application_runtime import readonly, resolve_config
 from .managed import Service
 from .managed_redaction import safe_text
 from .workspace_process import FileLock
+from .daily_summary import poll_summary
 
 
 def send_hermes(options, message):
@@ -92,7 +93,8 @@ def poll(config, service, *, sender=send_hermes):
             state = {'instance_id': service.instance_id, 'initialized_at': service.now(),
                      'deliveries': {r['job_id']: {'state': 'historical'} for r in records}}
             _save(path, state)
-            return {'enabled': True, 'initialized': True, 'sent': 0, 'failed': 0}
+            daily=poll_summary(config,service,state,sender=sender,save=lambda:_save(path,state))
+            return {'enabled': True, 'initialized': True, 'sent': 0, 'failed': 0, **daily}
         state = json.loads(path.read_text(encoding='utf-8'))
         if state['instance_id'] != service.instance_id:
             raise ValueError('notification_checkpoint_instance_mismatch')
@@ -119,7 +121,8 @@ def poll(config, service, *, sender=send_hermes):
                 sent += 1
             state['deliveries'][record['job_id']] = delivery
             _save(path, state)
-        return {'enabled': True, 'initialized': False, 'sent': sent, 'failed': failed}
+        daily=poll_summary(config,service,state,sender=sender,save=lambda:_save(path,state))
+        return {'enabled': True, 'initialized': False, 'sent': sent, 'failed': failed, **daily}
 
 
 def main(argv=None):
@@ -136,7 +139,7 @@ def main(argv=None):
             if args.command == 'once':
                 raise
             result = {'notification_error': type(exc).__name__}
-        if args.command == 'once' or result.get('sent') or result.get('failed') or result.get('notification_error'):
+        if args.command == 'once' or any(result.get(k) for k in ('sent','failed','daily_sent','daily_failed','notification_error')):
             print(json.dumps(result), flush=True)
         if args.command == 'once':
             return 0

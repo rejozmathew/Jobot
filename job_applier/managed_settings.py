@@ -13,14 +13,15 @@ DEFAULTS={'mode':'development','submission_mode':'review','worker':'external','a
     'reasoning_provider':None,'reasoning_model':None,'reasoning_effort':'low','application_model_override':False,'learning_activation':'manual',
     'notifications':'none','excluded_companies':[],'market_countries':['US'],'browser_mode':'headed',
     'discovery_batch_size':5,'discovery_interval_hours':4,'application_time_limit_minutes':30,
-    'application_concurrency':1}
+    'application_concurrency':1,'duplicate_matching_mode':'shadow'}
 for _task in ('discovery','learning'):
     DEFAULTS.update({f'{_task}_model_mode':'same_application', f'{_task}_provider':None,
                      f'{_task}_model':None, f'{_task}_effort':'low'})
 CHOICES={'mode':('development','pilot'),'submission_mode':('review','submit'),
     'worker':('external','hermes'),'autofill':('simplify','native'),'trigger':('manual',),
     'allowed_fallback':('targeted','block'),'learning_activation':('manual',),'notifications':('none',),
-    'browser_mode':('headed','headless'),'reasoning_effort':('low','medium','high','xhigh')}
+    'browser_mode':('headed','headless'),'reasoning_effort':('low','medium','high','xhigh'),
+    'duplicate_matching_mode':('off','shadow','enforce')}
 for _task in ('discovery','learning'):
     CHOICES[f'{_task}_model_mode']=('same_application','separate')
     CHOICES[f'{_task}_effort']=CHOICES['reasoning_effort']

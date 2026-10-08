@@ -37,6 +37,7 @@ class LocalClient:
         from .managed import Service
         self.instance_id=config['instance_id']
         self.service=service or Service(config['db_path'],instance_id=self.instance_id)
+        self.service.executor_config=config
         if authority:self.service.session_authority=authority
 
     def call(self, operation, **kwargs):

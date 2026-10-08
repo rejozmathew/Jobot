@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta
 from .managed_shared import ProtocolError, dumps, uid
 from .managed_redaction import safe_text, provenance_text
+from .job_duplicates import audit_duplicate_admission, record_skip
 
 AUTOMATIC_ATTEMPT_HOURS = (0, 2, 4, 6, 24, 28)
 AUTOMATIC_ATTEMPTS = len(AUTOMATIC_ATTEMPT_HOURS)
@@ -53,9 +54,10 @@ class QueueServices:
             # Settle pending work now, without touching active/historical dispatches.
             for row in rows:
                 if row['state']!='queued':continue
-                try:self._assert_not_suppressed(db,row['job_id'])
+                try:self._assert_not_suppressed(db,row['job_id'],identity_id=identity_id)
                 except ProtocolError as exc:
                     if exc.code not in ('already_applied','job_canceled'):raise
+                    record_skip(db,exc,identity_id,self.now(),'queue_reconcile')
                     row.update(state='finished',outcome='already_applied' if exc.code=='already_applied' else 'canceled')
                     db.execute("UPDATE dispatch_queue SET state='finished',outcome=?,detail=?,ended_at=? WHERE id=? AND state='queued'",
                         (row['outcome'],exc.code,self.now(),row['id']))
@@ -77,7 +79,7 @@ class QueueServices:
                 try:
                     # An active intake row no longer needs a second, manual enqueue click.
                     if job['eligibility'] == 'held': db.execute("UPDATE jobs SET eligibility='ready' WHERE id=?", (job['id'],))
-                    self._eligible(db, job['id'], settings)
+                    self._eligible(db, job['id'], settings, identity_id=identity_id)
                     item_id = uid()
                     request = 'automatic-retry:' + old['id'] if old and not restored else 'automatic-intake:' + (old['id'] if restored else job['id'])
                     origin='automatic_retry' if old and not restored else 'automatic_restore' if restored else 'automatic_intake'
@@ -87,10 +89,12 @@ class QueueServices:
                 except ProtocolError as exc:
                     db.execute('ROLLBACK TO auto_pickup')
                     if exc.code not in ('already_applied','job_canceled','company_excluded','job_archived','not_ready','market_incompatible'): raise
+                    record_skip(db,exc,identity_id,self.now(),'queue_reconcile')
                 finally:
                     db.execute('RELEASE auto_pickup')
         return {'added': added}
 
+    @audit_duplicate_admission
     def queue_enqueue(self, *, job_ids, identity_id, resume_asset_id, request_id, retry=False,
                       enqueue_origin=None, producer=None, discovery_run_id=None, discovery_profile=None, start_now=False):
         if (not isinstance(job_ids, list) or not job_ids or len(job_ids)>100
@@ -106,7 +110,7 @@ class QueueServices:
                 raise ProtocolError('asset_identity_mismatch')
             for job_id in dict.fromkeys(job_ids):
                 job=self._get(db,'jobs',job_id)
-                self._assert_not_suppressed(db,job_id)
+                self._assert_not_suppressed(db,job_id,identity_id=identity_id)
                 old=db.execute('SELECT * FROM dispatch_queue WHERE request_id=? AND job_id=?',(request_id,job_id)).fetchone()
                 if not old and start_now:
                     old=db.execute('''SELECT q.* FROM dispatch_queue q JOIN dispatch_immediate_requests r ON r.item_id=q.id
@@ -120,7 +124,7 @@ class QueueServices:
                     items.append(dict(old));continue
                 if job['eligibility']=='held':
                     db.execute("UPDATE jobs SET eligibility='ready' WHERE id=?",(job_id,))
-                self._eligible(db,job_id,self._settings_record(db)['values'])
+                self._eligible(db,job_id,self._settings_record(db)['values'],identity_id=identity_id)
                 item_id=uid()
                 context=tuple(provenance_text(v) for v in (enqueue_origin,producer,discovery_run_id,discovery_profile))
                 db.execute("INSERT INTO dispatch_queue(id,request_id,job_id,identity_id,resume_asset_id,state,created_at,enqueue_origin,producer,discovery_run_id,discovery_profile) VALUES (?,?,?,?,?,'queued',?,?,?,?,?)",
@@ -198,8 +202,9 @@ class QueueServices:
                     CASE WHEN request_id LIKE 'automatic-retry:%' THEN 1 ELSE 0 END,
                     created_at,rowid""").fetchall():
                 if datetime.fromisoformat(schedule[row['id']]['next_attempt_at'])>datetime.fromisoformat(self.now()):continue
-                try:self._eligible(db,row['job_id'],self._settings_record(db)['values'])
+                try:self._eligible(db,row['job_id'],self._settings_record(db)['values'],identity_id=row['identity_id'])
                 except ProtocolError as exc:
+                    record_skip(db,exc,row['identity_id'],self.now(),'queue_take')
                     db.execute("UPDATE dispatch_queue SET state='finished',outcome=?,detail=?,ended_at=? WHERE id=?",
                                ('already_applied' if exc.code=='already_applied' else 'skipped',exc.code,self.now(),row['id']))
                     continue

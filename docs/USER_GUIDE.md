@@ -82,6 +82,21 @@ assessment, country, original posted date, source/reference, added date and last
 disposition. Missing posting metadata is shown as unavailable rather than guessed.
 Source references help trace a posting back to discovery or external intake.
 
+Job rows can also show **Matching posting** or **Possible duplicate** with the
+other job's number and the matching evidence. **These are different jobs**
+dismisses that pair; **Reconsider match** restores automatic matching. Original
+jobs and attempts remain visible. Dismissal does not queue work automatically.
+In Settings, **Previously applied duplicate jobs** offers **Off**, **Show matches
+only**, and **Skip high-confidence applied duplicates**. The last option skips
+new work only when the matched posting already has this candidate's recorded
+success. Earlier failures still follow the existing retry schedule.
+
+The optional daily Discord summary arrives at 8:00 a.m. Central for the previous
+calendar day. It separates jobs submitted, jobs attempted, total attempts,
+duplicate jobs skipped, and postings reaching the six-attempt automatic limit.
+It also reports the attempts used by successful jobs and attempted jobs still
+without submission. See [count definitions](jobbot-v1/SUBMISSION_ALERTS.md#daily-numerical-summary).
+
 **Select all** and the heading checkbox select unfinished jobs shown by the current
 filters. Check the selection count and order before **Queue selected**. Submitted
 and canceled rows are not silently selected for new applications. Clear selection

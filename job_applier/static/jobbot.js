@@ -298,6 +298,15 @@ function renderQueue(v){
   const unanswered=v.answer_queue?.groups.find(g=>g.job_id===job.id&&g.pending_count);
   if(unanswered&&job.disposition!=='canceled'){const review=el('button',`Answer ${unanswered.pending_count} question${unanswered.pending_count===1?'':'s'}`);review.onclick=()=>tab('answers');statusTd.append(review);}
   if(job.failure_reason||queued?.detail){const details=progressDetails(job.id+':outcome','Outcome details',false,'job-outcome');details.append(el('p','Reason: '+(job.failure_reason||queued.detail)));statusTd.append(details);}
+  for(const match of job.duplicate_matches||[]){
+   const dismissed=match.operator_state==='dismissed';
+   const label=(dismissed?'Dismissed match':match.decision==='confirmed'?'Matching posting':'Possible duplicate')+` · #${match.other_seq_id??'?'}`;
+   const details=progressDetails(job.id+':duplicate:'+match.id,label,false,'job-duplicate');
+   details.append(el('p',match.evidence.join('. ')));
+   const button=el('button',dismissed?'Reconsider match':'These are different jobs');button.type='button';
+   button.onclick=async()=>{try{await api('set_duplicate_match_state',{match_id:match.id,state:dismissed?'automatic':'dismissed'});notice(dismissed?'Automatic matching restored.':'Match dismissed. You can queue this job if needed.');await refresh();}catch(err){notice(err.message,true);}};
+   details.append(button);statusTd.append(details);
+  }
   tr.append(statusTd);
   const assessment=job.assessment;tr.append(el('td',assessment?(assessment.recommendation||'Assessment available'):'Unassessed'));
   tr.append(el('td',postingCountry(job)),el('td',postingDate(job)));
@@ -963,10 +972,10 @@ function renderSettings(s){
  if($('main-browser-mode'))$('main-browser-mode').value=s.values.browser_mode||'headed';
  const box=$('setting-fields');box.replaceChildren();const discoveryBox=$('discovery-setting-fields');discoveryBox?.replaceChildren();
  const discoveryLabels={discovery_batch_size:'Maximum jobs per discovery run',discovery_interval_hours:'Discover jobs every (hours)'};
- for(const [key,value]of Object.entries(s.values)){const label=el('label',discoveryLabels[key]||key.replaceAll('_',' '));let input;
+ for(const [key,value]of Object.entries(s.values)){const label=el('label',key==='duplicate_matching_mode'?'Previously applied duplicate jobs':discoveryLabels[key]||key.replaceAll('_',' '));let input;
   if(['worker','reasoning_provider','reasoning_model','reasoning_effort','application_model_override','application_time_limit_minutes','application_concurrency'].includes(key))continue;
   if(['discovery','learning'].some(task=>['model_mode','provider','model','effort'].some(field=>key===task+'_'+field)))continue;
-  if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const o=el('option',x);o.value=x;input.append(o);}input.value=value;}
+  if(s.supported?.[key]){input=el('select');for(const x of s.supported[key]){const name=key==='duplicate_matching_mode'?({off:'Off',shadow:'Show matches only',enforce:'Skip high-confidence applied duplicates'})[x]:x;const o=el('option',name);o.value=x;input.append(o);}input.value=value;}
   else {input=el('input');if(typeof value==='boolean'){input.type='checkbox';input.checked=value;}else if(typeof value==='number'){input.type='number';input.value=value;const range=s.budget_ranges?.[key];if(range){input.min=range[0];input.max=range[1];}}else{input.type='text';input.value=Array.isArray(value)?value.join(', '):(value??'');}}
   if(key==='discovery_batch_size'){input.min=1;input.max=100;input.step=1;}
   if(key==='discovery_interval_hours'){input.min=1;input.max=168;input.step='any';}

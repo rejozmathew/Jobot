@@ -34,6 +34,7 @@ from .managed_questions import QuestionServices
 from .managed_answer_library import AnswerLibraryServices
 from .managed_queue import QueueServices
 from .managed_discovery import DiscoveryServices
+from .job_duplicates import DuplicateServices, matching_success, duplicate_error, audit_duplicate_admission
 from .managed_versions import code_evidence
 from .managed_redaction import safe_text, reject_secrets, provenance_text
 
@@ -45,7 +46,7 @@ def utc_now():
 from .managed_identity import canonical_url, job_key, RELATED, same_job_url, greenhouse_query_identity, workday_identity, linkedin_identity, ats_posting_key, observed_posting_key
 
 
-class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices, AnswerLibraryServices, QueueServices, DiscoveryServices):
+class Service(EventServices, AccountServices, ContinuityServices, SettingsServices, ViewServices, LearningServices, DocumentServices, ReportServices, RuntimeServices, ContextServices, ArchiveServices, SessionServices, QuestionServices, AnswerLibraryServices, QueueServices, DiscoveryServices, DuplicateServices):
     def __init__(self, db_path, *, instance_id=None, now_fn=utc_now):
         p=Path(db_path)
         if not p.is_absolute(): raise ProtocolError('absolute_db_path_required')
@@ -231,7 +232,15 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                 if source and not db.execute('''SELECT 1 FROM source_observations WHERE source_record_id=?
                         AND producer IS ? AND discovery_run_id IS ? AND discovery_profile IS ?''',(source['id'],*context)).fetchone():
                     db.execute('INSERT INTO source_observations VALUES (?,?,?,?,?,?)',(uid(),source['id'],*context,now))
-            return dict(db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone())
+            result=dict(db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone())
+        # Optional local inference is outside the write transaction. If unavailable,
+        # exact matching and the existing application flow remain available.
+        config=getattr(self,'executor_config',{})
+        if config.get('duplicate_matching'):
+            from .job_duplicates import DuplicateMatcher
+            try:DuplicateMatcher(self,config).refresh(job_id=job_id)
+            except Exception:logging.getLogger(__name__).warning('duplicate_intake_refresh_unavailable')
+        return result
 
     def update_job_url(self, *, job_id, url, expected_url):
         """Correct a saved posting link without replacing its identity or history."""
@@ -392,21 +401,23 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             db.execute('UPDATE jobs SET eligibility=?,intervention_reason=? WHERE id=?',(decision,safe_text(reason),job_id))
             return dict(self._get(db,'jobs',job_id))
 
-    def _assert_not_suppressed(self, db, job_id):
-        prior=db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id LEFT JOIN submission_ledger l ON l.job_id=r.id WHERE l.job_id IS NOT NULL OR j.status IN ('applied','already_applied') LIMIT 1",(job_id,)).fetchone()
-        if prior:raise ProtocolError('already_applied')
+    def _assert_not_suppressed(self, db, job_id, identity_id=None):
+        prior=db.execute(RELATED+"SELECT r.id FROM related r JOIN jobs j ON j.id=r.id LEFT JOIN submission_ledger l ON l.job_id=r.id WHERE l.job_id IS NOT NULL OR j.status IN ('applied','already_applied') LIMIT 1",(job_id,)).fetchone()
+        if prior:raise duplicate_error(job_id,prior['id'])
         attempts=db.execute(RELATED+'SELECT a.* FROM related r JOIN application_attempts a ON a.job_id=r.id',
                             (job_id,)).fetchall()
         # Past attempts suppress another request only for recorded success.
         # Uncertainty stays in history; explicit operator cancellation is below.
-        if any(self._submission_state(db,attempt)['state']=='accepted' for attempt in attempts):
-            raise ProtocolError('already_applied')
+        accepted=next((attempt for attempt in attempts if self._submission_state(db,attempt)['state']=='accepted'),None)
+        if accepted:raise duplicate_error(job_id,accepted['job_id'])
         # Explicit operator cancellation is reversible and survives rediscovery.
         # A failed attempt never sets this disposition automatically.
         if db.execute(RELATED+"SELECT 1 FROM related r JOIN jobs j ON j.id=r.id WHERE j.disposition='canceled' LIMIT 1",(job_id,)).fetchone():
             raise ProtocolError('job_canceled')
+        duplicate=matching_success(self,db,job_id,identity_id=identity_id)
+        if duplicate:raise duplicate_error(job_id,duplicate[1],match=duplicate[0])
 
-    def _eligible(self, db, job_id, settings=None, exclude_session=None):
+    def _eligible(self, db, job_id, settings=None, exclude_session=None, identity_id=None):
         job=self._get(db,'jobs',job_id)
         policy=settings or self.settings
         if (job['company'] or '').casefold().strip() in {x.casefold().strip() for x in policy.get('excluded_companies',[])}:
@@ -414,11 +425,12 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
         country=json.loads(job['metadata_json'] or '{}').get('country')
         if country and policy.get('market_countries') and country not in policy['market_countries']:
             raise ProtocolError('market_incompatible')
-        self._assert_not_suppressed(db,job_id)
+        self._assert_not_suppressed(db,job_id,identity_id=identity_id)
         if db.execute('SELECT 1 FROM job_archives WHERE job_id=?',(job_id,)).fetchone():raise ProtocolError('job_archived')
         if job['eligibility']!='ready': raise ProtocolError('not_ready')
         return job
 
+    @audit_duplicate_admission
     def request_run(self, *, request_id, job_ids, identity_id, browser_profile):
         if not request_id or not job_ids or len(job_ids)!=len(set(job_ids)) or not browser_profile:
             raise ProtocolError('invalid_run')
@@ -432,7 +444,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
             candidate=self._get(db,'candidates',identity_id)
             if candidate['state']!='active': raise ProtocolError('identity_inactive')
             settings=self._settings_record(db)['values']
-            for key in job_ids: self._eligible(db,key,settings)
+            for key in job_ids: self._eligible(db,key,settings,identity_id=identity_id)
             run_id=uid()
             db.execute('INSERT INTO runs(id,request_id,request_key,identity_id,browser_profile,state,requested_at,settings_json) VALUES (?,?,?,?,?,?,?,?)',(run_id,request_id,request_key,identity_id,browser_profile,'awaiting_worker',now,dumps(settings)))
             for position,key in enumerate(job_ids):
@@ -506,7 +518,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                 db.execute("UPDATE runs SET state='completed',ended_at=? WHERE id=?",(now,run_id))
                 return None
             snapshot=json.loads(run['settings_json'])
-            job=self._eligible(db,pending['job_id'],snapshot)
+            job=self._eligible(db,pending['job_id'],snapshot,identity_id=run['identity_id'])
             if db.execute('SELECT 1 FROM application_attempts WHERE job_id=? AND completed_at IS NULL',(job['id'],)).fetchone():
                 raise ProtocolError('owned_elsewhere')
             candidate=self._get(db,'candidates',run['identity_id'])
@@ -648,6 +660,7 @@ class Service(EventServices, AccountServices, ContinuityServices, SettingsServic
                        (uid(),a['id'],a['run_id'],None,'operator','outcome',now,now,None,0,payload,audit_key))
             return result
 
+    @audit_duplicate_admission
     def retry(self, job_id):
         with self.tx() as db:
             job=self._get(db,'jobs',job_id)

@@ -4,6 +4,17 @@
 
 ## Local runtime interface
 
+Optional company/title duplicate matching uses a separately configured LM Studio
+embedding endpoint. Only company and role text is sent; cached vectors and
+reversible matching decisions live in the managed database. It runs outside
+application tools and database transactions. See
+[Cross-source identity](jobbot-v1/CROSS_SOURCE_IDENTITY.md).
+
+The existing Discord submission observer can also send a previous-day numerical
+summary at 08:00 America/Chicago. It shares its existing sender, channel and
+private receipt file; individual submission messages retain their current path.
+See [Submission alerts](jobbot-v1/SUBMISSION_ALERTS.md#daily-numerical-summary).
+
 `job_applier.application_runtime` is the portable entry for ordinary application
 sessions. The Hermes `jobbot` tool is a convenience adapter around this interface;
 another shell-capable harness uses the same canonical skills and private config.

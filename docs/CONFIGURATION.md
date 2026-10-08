@@ -61,6 +61,8 @@ match the existing installation. Do not publish a populated runtime JSON.
 | `mailbox_provider`, `himalaya_*` | Selected mailbox integration references |
 | `email_route` | Optional application-recipient versus verification-inbox routing |
 | `submission_notifications` | Optional confirmed-submission alert target and Hermes executable/profile |
+| `submission_notifications.daily_summary` | Optional `enabled`, local `time` (default `08:00`) and IANA `timezone` (default `America/Chicago`) for the previous calendar day's numerical report; uses the existing Discord target |
+| `duplicate_matching` | Optional LM Studio `base_url` ending in `/v1`, embedding `model`, `model_revision` (default `1`) and `title_threshold` (default `0.975`); no secrets or profile data are sent |
 | `require_simplify` | Browser readiness setting; current live execution expects official Simplify |
 
 Some older private configurations also contain `concurrency_limit` or legacy
@@ -98,6 +100,7 @@ another edit. Application snapshots preserve the choices with which work began.
 | `autofill` | `simplify` | Selected autofill strategy; native capability also exists |
 | `browser_mode` | `headed` | Requested browser mode |
 | `application_concurrency` | `1` | Operator-selectable 1–5 simultaneous queued applications |
+| `duplicate_matching_mode` | `shadow` | `off`, show-only `shadow`, or `enforce` high-confidence matches to recorded candidate success; never suppresses because an earlier attempt failed |
 | `application_time_limit_minutes` | `30` | 1–1440 minutes, or `0` for Off; excludes time waiting in queue |
 | `reasoning_provider`, `reasoning_model` | unset | Use configured executor selection until an explicit supported selection is saved |
 | `reasoning_effort` | `low` | Requested effort; UI adapts to executor/provider capabilities |
@@ -116,6 +119,14 @@ another edit. Application snapshots preserve the choices with which work began.
 The current default values are defined in source. The model catalog reflects the
 installed executor/provider configuration; a model label in static HTML is not
 proof that the model is available or selected.
+
+Duplicate matching uses a separate small embedding model, not the application
+reasoning model. The model/input hash caches vectors in the selected managed
+database. Bump `model_revision` if replacing a model's weights under the same
+identifier. Use read-only/shadow assessment before enabling a new model or
+threshold; cosine similarity is not a calibrated probability. Missing LM Studio
+access does not prevent application work. See
+[Cross-source matching](jobbot-v1/CROSS_SOURCE_IDENTITY.md).
 
 Discovery and answer learning read fresh saved settings before each new run/call.
 Shared mode resolves the application override first, then the configured application

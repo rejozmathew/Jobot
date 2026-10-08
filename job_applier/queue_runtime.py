@@ -360,6 +360,9 @@ def serve(config, service):
     from .answer_learning import AnswerLearner
     learner=AnswerLearner(service,config)
     learner.start()
+    from .job_duplicates import DuplicateMatcher
+    duplicate_matcher=DuplicateMatcher(service,config)
+    duplicate_matcher.start()
     service.dispatch_selection={key:config[key] for key in ('identity_id','resume_asset_id')}
     with Client(config['base_url'],config['instance_id'],token):pass
     workers=json.loads(credential(config['worker_tokens_env'],config)) if config.get('worker_tokens_env') else {
@@ -368,7 +371,9 @@ def serve(config, service):
     try:
         uvicorn.run(create_app(service,operator_token=token,worker_tokens=workers),
                     host=address.hostname,port=address.port or 60158,access_log=False)
-    finally:learner.stop.set()
+    finally:
+        learner.stop.set()
+        duplicate_matcher.stop.set()
 
 
 def main(argv=None):

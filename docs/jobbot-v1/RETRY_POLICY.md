@@ -14,6 +14,14 @@ attempts do not acquire this disposition automatically. See
 
 ## Decision
 
+October 8 adds operator-approved company/title duplicate matching. In `enforce`
+mode, a corroborated high-confidence match to this candidate's recorded success
+also returns already applied. Embedding similarity alone, missing model access,
+and failed/uncertain history do not suppress a request. Pair decisions are
+reversible and do not become browser-scope aliases. See
+[Cross-source matching](CROSS_SOURCE_IDENTITY.md#companytitle-matching--october-8-2026).
+The six-attempt schedule and explicit retry behavior below are unchanged.
+
 Match the requested URL to a job using the existing canonical URL/requisition
 identity code. The job is the durable posting; an attempt is one execution of
 an application request. An existing job may have any number of attempts.
@@ -147,6 +155,7 @@ claim on a posting; historical uncertainty is not ownership evidence.
 | --- | --- |
 | `managed_identity.ats_posting_key` and `Service.intake` | Match provider-scoped posting identities across discovery sources; retain existing labels and requisitions when rediscovery supplies conflicting metadata. |
 | `managed_identity.retain_posting_aliases` and migration 23 | Add posting keys to retained jobs and source URLs without deleting historical records or rewriting outcomes. |
+| `job_duplicates.DuplicateMatcher` / migration 29 | Cache optional local title embeddings outside transactions; retain evidence-backed pair decisions, operator dismissals and actual duplicate-admission receipts. |
 | `managed_queue.queue_reconcile` | Settle pending aliases with recorded success or explicit cancellation; preserve active dispatches and historical attempts. |
 | `managed_events._submission_state` | Read the existing per-attempt evidence projection. |
 | `Service._assert_not_suppressed` | Suppress recorded success, including retained accepted evidence, and explicit operator cancellation. |

@@ -1,5 +1,68 @@
 # Confirmed-submission alerts through Hermes
 
+## Daily numerical summary
+
+The same notification service can send a previous-calendar-day summary at
+08:00 America/Chicago. Enable it inside the existing private
+`submission_notifications` configuration:
+
+```json
+"daily_summary": {
+  "enabled": true,
+  "time": "08:00",
+  "timezone": "America/Chicago"
+}
+```
+
+It uses the existing Discord target and sends numbers only. No new gateway,
+model, app automation or independent cron job is needed. First activation starts
+with today's report tomorrow; it does not announce historical days. The existing
+private `notifications/submissions.json` stores per-day receipts, frozen report
+counts and failed-send retries. Restarts resume pending delivery without
+replaying acknowledged reports. Downtime can delay delivery; missed reports are
+delivered one at a time after the configured morning time. The same rare
+send-before-checkpoint crash limitation as individual alerts applies.
+
+Counts have deliberately different units:
+
+- **Jobs submitted:** distinct postings with a new submission completed that day;
+  affirmative already-applied evidence and earlier recorded success are excluded.
+- **Jobs attempted / application attempts:** distinct postings / all attempts
+  started that day, including failed retries.
+- **Attempts used for submitted jobs:** all attempts up to the first new
+  submission for those postings, including attempts on earlier days.
+- **Duplicate jobs skipped:** distinct incoming job records actually refused at
+  admission, counted on their first recorded skip date for the candidate.
+  Matching old records during backfill is not a skipped application, and repeated
+  reconciliation polls do not inflate the count.
+- **Already-applied results:** distinct postings with that reported result
+  completed that day.
+- **Attempted jobs without submission by day end:** attempted postings with no
+  retained successful submission by the end of the day; not a permanent failure.
+- **Jobs reaching the 6-attempt automatic limit:** distinct postings whose
+  unsuccessful sixth dispatch in a retry series ended that day. An explicit
+  later retry can still start a new series. These are dispatch-series milestones,
+  not a claim that each series created exactly six browser sessions.
+
+Day boundaries follow daylight saving time. Counts overlap and are not expected
+to sum to attempts. A late completion appears on its completion date; it does not
+rewrite a delivered summary. Reports use the configured candidate and preserve
+original application outcomes. Existing observed aliases and accepted matching
+decisions deduplicate posting counts; contradictory semantic chains cannot merge
+distinct requisitions. The separate Activity page retains its documented
+start-date cohort semantics.
+
+Preview without sending:
+
+```text
+python -m job_applier.daily_summary --config /absolute/runtime.json --date 2026-10-07 --timezone America/Chicago
+```
+
+`test_daily_summary.py` covers synthetic counts, midnight/completion boundaries,
+daylight saving, duplicate skips, retry exhaustion and delivery retries.
+
+## Individual submission alerts
+
 `job_applier.hermes_notifications` watches the explicitly selected managed
 submission ledger read-only. An `applied` attempt with a durable ledger entry
 sends this message through the installed `hermes send` CLI:

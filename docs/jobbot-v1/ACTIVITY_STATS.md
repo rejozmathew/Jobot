@@ -21,6 +21,9 @@ dispatch policy or submission evidence. There are no migrations or new helpers.
   retries and attempts for jobs later canceled or archived.
 - Distinct jobs: postings among those attempts, deduplicated through connected
   observed identity aliases, including links through records outside the cohort.
+  In enforced duplicate-matching mode, current high-confidence, non-dismissed
+  company/title matches also group postings; all cross-group pairs must agree
+  so a similarity chain cannot collapse conflicting requisitions.
   `recorded_jobs` separately preserves the raw unique job-ID count.
 - Queue dispatches: queue records actually started in the same period. Pending
   queue entries are excluded. Dispatches and attempts are independent counts;
