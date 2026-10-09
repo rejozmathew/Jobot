@@ -98,6 +98,7 @@ def linux_profile_in_use(
     workspace: Dict[str, Any],
     proc_path: Union[str, Path] = "/proc",
     case_sensitive: Optional[bool] = None,
+    *, browser_root_only: bool = False,
 ) -> Optional[int]:
     """Inspect Linux /proc for any running process using workspace['user_data_dir'].
 
@@ -146,6 +147,11 @@ def linux_profile_in_use(
 
         if not data:
             continue
+
+        if browser_root_only:
+            args = parse_cmdline_args(data)
+            if any(arg == '--type' or arg.startswith('--type=') for arg in args):
+                continue
 
         if cmdline_matches_user_data_dir(data, target_user_data_dir, case_sensitive=case_sensitive,
                                         base_cwd=proc_dir/entry/'cwd'):

@@ -1,5 +1,25 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 9: retained-browser recovery after startup
+
+`workspace_attachment --watch` keeps the configured retained browser available
+throughout the graphical session. The previous one-shot service could remain
+`active (exited)` after Brave closed, leaving the independent queue waiting until
+the operator reopened it. The service now runs continuously, reusing a live
+verified profile and relaunching a missing process every five seconds. Temporary
+launch/endpoint failures are retried; existing processes are never terminated to
+repair endpoint settings. Manual and supervised launches share a profile launch
+lock to avoid duplicate launches. The ordinary manual command remains one-shot.
+On Linux, retained-browser lookup prefers the profile's live singleton owner
+and otherwise searches main browser processes; leftover renderer/zygote children
+do not keep the supervisor waiting after the browser exits. The general managed
+profile-in-use check still considers all profile processes.
+
+This adds a supervision caller to the existing browser launcher. Application
+hosts still borrow the connection and own only their application targets. Queue
+admission, deadlines, concurrency, submission evidence and answer entry retain
+their existing behavior. Opening the dashboard is not a scheduling trigger.
+
 ## October 8: applied/canceled-posting matching and daily summary
 
 Operator-approved company/title matching supplements observed URL identity.
@@ -31,8 +51,8 @@ request identity, retries and application deadlines untouched. Active dispatch
 supervision still runs first, and custom executor/managed-browser paths remain.
 The dashboard displays the specific dependency being awaited.
 
-The optional `jobbot-browser.service` calls the existing retained-browser launcher
-at graphical login. Its queue drop-in orders service startup without replacing
+The optional `jobbot-browser.service` starts retained-browser supervision
+at graphical login (continuous recovery was added October 9). Its queue drop-in orders service startup without replacing
 the existing Hermes desktop autostart. It reuses an already-open configured
 browser, and is independent of queue-service restarts. No ATS helper, candidate
 data, submission policy, retry count or memory allocation is changed.
@@ -1139,7 +1159,7 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, pre-click external Apply and authentication target observation/handoff, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
 | managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed. The host-only target handoff atomically retains the prior owned tab and changes the session target after correlated Apply or authentication navigation; the latter retains the verified employer account URL. application_job projects that ownership-checked full route for managed helpers and managed_runtime.browser_observe; the intake posting and query-stripped target display remain separate. |
 | workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, durable same-attempt restart preparation through verified close/reopen, employer-origin cleanup for managed-process retries only, concurrent JSON dispatch per owned session in shared browsers. prepare_target creates a visible window per application and calls arrange_application_windows to tile only its owned windows for Simplify's visibility-dependent filling; no model or five-second busy veto. |
-| workspace_attachment.py / workspace_host.py / managed_sessions.session_browser_attachment | Optional existing-browser launcher and verified attachment; durable application-tab ownership, tab-only cleanup/recovery, and observed navigator.webdriver. Called by the manual launcher, optional jobbot-browser.service and local host; queue_runtime.dispatch_startup reuses read-only profile/process and endpoint checks before native desktop dispatch. Managed process lifecycle remains available. |
+| workspace_attachment.py / workspace_host.py / managed_sessions.session_browser_attachment | Existing-browser launcher, persistent `watch_browser` supervision and verified attachment; durable application-tab ownership, tab-only cleanup/recovery, and observed navigator.webdriver. Called by the manual launcher, jobbot-browser.service (`--watch`) and local host; queue_runtime.dispatch_startup reuses read-only profile/process and endpoint checks before native desktop dispatch. Managed process lifecycle remains available. |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |
 | static/jobbot.js / managed_api.py / managed.py.update_job_url | Operator URL corrections retain the job number, added date, outcomes, source references and old identity aliases; save normalized replacement aliases and an audit trail on the same job. Sorting and filters use existing job data in the dashboard. |
 | static/jobbot.js / managed_queue.py | Queue selected sends visible selection in table order as one immediate request; queued items are reused and receipt insertion order breaks equal-time ties. Repeated requests retain their original position; a new manual selection can reorder its waiting jobs. Current applications continue, automatic scheduling remains enabled or paused as configured. |

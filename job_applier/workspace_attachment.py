@@ -1,4 +1,4 @@
-"""Read-only process verification and user-launched shared-browser setup.
+"""Process verification, shared-browser setup and retained-browser supervision.
 
 The application host borrows a connection, never the browser process lifetime.
 No automation-property overrides or browser-wide cleanup are used.
@@ -62,8 +62,13 @@ def singleton_process(workspace):
 
 
 def existing_profile_process(workspace):
+    if os.name != 'nt':
+        from .workspace_linux import linux_profile_in_use
+        # Chromium children may outlive a closed browser. Only its main process
+        # can own the retained connection and prevent automatic relaunch.
+        return singleton_process(workspace) or linux_profile_in_use(workspace, browser_root_only=True)
     from .workspace_host import profile_in_use
-    return profile_in_use(workspace) or (singleton_process(workspace) if os.name!='nt' else None)
+    return profile_in_use(workspace)
 
 
 def verify_connection_process(workspace, pid):
@@ -98,27 +103,24 @@ def launch_arguments(workspace, urls):
             '--no-first-run', '--no-default-browser-check', *urls]
 
 
-def main():
-    import argparse
-    from .application_runtime import resolve_config, validate_workspaces, REPOSITORY
+def ensure_browser(config, workspace, urls=None):
+    """Reuse the configured browser or launch it once, including concurrent callers."""
+    from .workspace_process import FileLock
+    with FileLock(Path(workspace['user_data_dir'])/'.jobbot-launch.lock'):
+        return _ensure_browser(config, workspace, urls)
+
+
+def _ensure_browser(config, workspace, urls):
+    from .application_runtime import REPOSITORY
     from .workspace_host import endpoint_info
     from .workspace_process import detached_launch
-    parser = argparse.ArgumentParser(description='Open the configured shared browser; application runs attach without owning its lifetime.')
-    parser.add_argument('--config')
-    parser.add_argument('--workspace')
-    parser.add_argument('urls', nargs='*')
-    args = parser.parse_args()
-    config = resolve_config(args.config)
-    workspaces = validate_workspaces(config['workspaces'])
-    workspace = next(w for w in workspaces if w.get('connection_mode') == 'existing' and (not args.workspace or args.workspace == w['id']))
     # A second click on the launcher must not duplicate dashboard/mail tabs.
     pid = existing_profile_process(workspace)
     if pid:
         verify_connection_process(workspace, pid)
         endpoint_info(workspace['cdp_url'])
-        print(json.dumps({'status':'already_open','workspace_id':workspace['id']}))
-        return 0
-    urls = args.urls or workspace.get('startup_urls') or ['about:blank']
+        return {'status':'already_open','workspace_id':workspace['id']}
+    urls = urls or workspace.get('startup_urls') or ['about:blank']
     log = Path(config['spool_dir'])/'shared-browser.log'
     detached_launch(launch_arguments(workspace, urls), cwd=REPOSITORY, stdout_path=log, stderr_path=log)
     deadline=time.monotonic()+20
@@ -134,7 +136,42 @@ def main():
     else:
         raise ProtocolError('browser_endpoint_not_ready',
             'Close Brave once and reopen it with this launcher. An already-running browser ignores new debugging launch options; your tabs have not been closed.')
-    print(json.dumps({'status':'launched','workspace_id':workspace['id']}))
+    return {'status':'launched','workspace_id':workspace['id']}
+
+
+def watch_browser(config, workspace, urls=None):
+    """Recover a closed retained browser independently of dashboard visits."""
+    previous = None
+    while True:
+        try:
+            result = ensure_browser(config, workspace, urls)
+        except (OSError, ValueError, ProtocolError) as exc:
+            # A starting display, busy launcher or temporarily unavailable endpoint
+            # is retried; never kill/reconfigure an existing profile to recover it.
+            result = {'status':'waiting','workspace_id':workspace['id'],
+                      'reason':getattr(exc, 'code', type(exc).__name__)}
+        if result != previous or result['status'] == 'launched':
+            print(json.dumps(result), flush=True)
+        previous = result
+        time.sleep(5)
+
+
+def main():
+    import argparse
+    from .application_runtime import resolve_config, validate_workspaces
+    parser = argparse.ArgumentParser(description='Open or supervise the configured shared browser; application runs attach without owning its lifetime.')
+    parser.add_argument('--config')
+    parser.add_argument('--workspace')
+    parser.add_argument('--watch', action='store_true', help='Keep the retained browser available after it closes.')
+    parser.add_argument('urls', nargs='*')
+    args = parser.parse_args()
+    config = resolve_config(args.config)
+    workspaces = validate_workspaces(config['workspaces'])
+    workspace = next(w for w in workspaces if w.get('connection_mode') == 'existing' and (not args.workspace or args.workspace == w['id']))
+    if args.watch:
+        watch_browser(config, workspace, args.urls)
+    else:
+        print(json.dumps(ensure_browser(config, workspace, args.urls)))
     return 0
 
 

@@ -86,8 +86,10 @@ queue item. A dependency still starting leaves the request queued, with a visibl
 worker heartbeat, unchanged retry lineage and no application deadline yet.
 These short read-only probes run outside database transactions; active work is
 still supervised first. Other transports and managed browser allocation retain
-their existing startup path. On Ubuntu, the optional browser service starts the
-retained profile at graphical login and orders the queue after its launcher.
+their existing startup path. On Ubuntu, the browser service runs a persistent
+supervisor at graphical login. It checks the retained profile every five seconds
+and relaunches a closed browser, independently of dashboard visits. Queue
+readiness still checks the actual browser endpoint before admitting work.
 
 ## One queued application
 

@@ -53,6 +53,11 @@ persistent message calls for checking the desktop/browser services in
 [Operations](OPERATIONS.md#desktop-startup-ordering), rather than repeatedly
 clicking Apply now.
 
+The dashboard does not need to stay open for applications to run. On the Ubuntu
+desktop installation, the browser service reopens the configured Brave profile
+if the whole browser closes. It works independently of the dashboard and answer
+entry; use **Pause JobBot** when you want to pause new application launches.
+
 Expand **Candidate, resume and application options** to inspect the candidate,
 active resume, browser profile, model/effort, submission mode and browser mode.
 **Review only** records readiness for review instead of submitting. **Submit when

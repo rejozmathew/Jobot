@@ -20,7 +20,7 @@ display. Examples below assume the existing user's service manager.
 |---|---|---|
 | `jobbot-dashboard.service` | `queue_runtime serve`; API, UI and answer learner | No dashboard/learning process; independent queue work may continue |
 | `jobbot-queue.service` | `queue_runtime watch` | New saved requests wait; inspect existing executor ownership before changing processes |
-| `jobbot-browser.service` | Optional retained-browser launcher at graphical login | Desktop queue waits for its configured browser; startup does not consume requests or application deadlines |
+| `jobbot-browser.service` | Persistent retained-browser supervisor during graphical login | Reopens a closed browser; desktop queue waits for readiness without consuming requests or application deadlines |
 | Workspace host(s) | Per-workspace owned browser operations and supervision | Browser readiness or session recovery needs investigation |
 | Retained browser launcher | Configured existing browser profile and CDP | Existing-mode applications cannot attach until available |
 | `jobbot-harvest.timer` / `.service` | Schedule separate discovery runs | No scheduled discovery; existing intake remains |
@@ -41,10 +41,20 @@ checkout/interpreter and private config. Enable the browser unit for
 `graphical-session.target`; keep one existing Hermes desktop autostart entry.
 Disable any duplicate browser desktop-autostart entry for that same profile.
 Reload the user service manager and start the browser unit at an idle boundary.
-It reuses a correctly configured running browser without duplicating its tabs.
+It runs `workspace_attachment --watch`, checks every five seconds, and reopens
+the configured profile when its browser process disappears. It reuses a correctly
+configured running browser without duplicating its tabs. Transient launch or
+endpoint failures are retried and reported on state changes in the unit journal.
+An existing process with an unavailable endpoint is retained, not killed.
+The unit should show `active (running)`, not the old `active (exited)` state.
 Do not restart this browser unit while applications are active: it owns browsers
 it launches, whereas starting it against an already-open browser only adopts the
 connection. The desktop session supplies the display and authorization environment.
+
+Opening or closing the dashboard tab does not start or stop scheduling. The
+browser supervisor operates independently of dashboard visibility and does not
+pause work while answers are being entered. Closing the whole retained browser
+causes it to reopen; use the existing queue controls to pause application work.
 
 The queue stays online while Hermes is starting and shows a specific startup
 wait in the dashboard. It checks the native backend with a short, read-only RPC
