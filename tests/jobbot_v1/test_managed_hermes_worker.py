@@ -334,6 +334,10 @@ print('SUCCESS_HERMES_INTEGRATION')
 
     child_env = dict(os.environ, HERMES_HOME=str(tmp_path / 'hermes-home'), HERMES_DISABLE_LAZY_INSTALLS='1')
     res = subprocess.run([str(hermes_python), str(script), str(hermes_root), str(Path(__file__).resolve().parents[2])],
-                         env=child_env, capture_output=True, text=True, timeout=30)
+                         # Installed Hermes discovers its optional tool modules
+                         # before constructing the synthetic agent. Cold imports
+                         # can exceed 30s on Windows; allow startup to complete
+                         # without changing any application execution deadline.
+                         env=child_env, capture_output=True, text=True, timeout=120)
     assert res.returncode == 0, f"Hermes integration failed:\\nSTDOUT: {res.stdout}\\nSTDERR: {res.stderr}"
     assert 'SUCCESS_HERMES_INTEGRATION' in res.stdout

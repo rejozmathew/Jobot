@@ -562,3 +562,39 @@ deferred pending safe synthetic reproductions; production records are preserved.
 No additional production submission or speed gain is claimed. Deployment changes
 only the intended source, synthetic tests and current run/runtime notes, at an
 idle application boundary, with prior queue state restored afterward.
+
+### Self-improvement #013 — 2026-10-08, completed 2026-10-09
+
+Tag: `self-improvement-013-2026-10-08`. Matching private GitHub/Ubuntu run notes
+retain the October 7–8 reviews, exact source/file manifests and validation logs.
+
+The shared browser observer now resolves the same ownership-checked full
+application route used by managed helpers. A same-origin canonical redirect can
+retain its tracking query while the owned target's display URL omits that query.
+Using the display/intake route incorrectly reported a different job and disabled
+Simplify/native writes on the verified form. The correction retains the original
+posting/history, rejects different jobs/sites/hosts/queries and adds no alias,
+helper, deadline, retry rule or application-time gate.
+
+Paired Ubuntu replay used the same 119 synthetic checks: baseline 117 passed and
+two reproduced failures; candidate 119 passed, preserving all 117 baseline passes.
+The real synthetic form continues through native fill and an accepted receipt in
+the same owned attempt. Existing authentication/popup recovery, Simplify order
+and settlement, confirmation, operator stop/deadline and four-slot recovery
+controls remain covered. This does not cover every real form or prove production
+submission-rate, latency or capacity improvements.
+
+Installed Windows Hermes cold imports exceeded the integration fixture's former
+30-second startup allowance. A traced diagnostic completed tool registration,
+invocation and disposal successfully; the fixture now allows 120 seconds for
+installed-agent startup. This changes no application execution clock. Private
+run notes retain the initial failures, diagnostic and final-suite results.
+
+The counterfactual opportunity is conditional zero to one additional unique
+posting across six affected attempts, with downstream fields/validation still
+unproven. Other findings include a kernel Brave OOM preceding four interruptions,
+expensive embedded-form/menu recovery and account-route failures. Those findings
+are retained for separate reproductions. Slow confirmed submissions remain
+persistence controls; no quick unsuccessful outcome is credited as an improvement.
+Only intended files are deployed at a paused idle boundary, with prior operator
+queue state restored and deployed hashes/services independently verified.

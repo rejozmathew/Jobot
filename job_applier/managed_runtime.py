@@ -114,7 +114,7 @@ class RuntimeServices:
             return dict(self._get(db,'owned_targets',target['id']))
 
     def browser_observe(self,attempt_id,*,worker_id,fence,target_id=None,cdp_url=None,expected_url=None):
-        from .managed_sessions import local_session
+        from .managed_sessions import local_session,application_job
         with self.tx() as db:
             session=local_session(db,attempt_id)
             if session:
@@ -138,12 +138,16 @@ class RuntimeServices:
             else:
                 target=db.execute('SELECT * FROM owned_targets WHERE attempt_id=? AND state!=? ORDER BY created_at DESC, id DESC LIMIT 1',(attempt_id,'closed')).fetchone()
             if target is None:raise ProtocolError('target_not_owned')
+            verified_application=application_job(db,a,job)
             if expected_url is not None:
                 expected_canonical=canonical_url(expected_url)
                 if not same_job_url(expected_canonical,target['url']) and not same_job_url(expected_canonical,job['url']):
                     raise ProtocolError('target_job_mismatch')
         settings=json.loads(a['settings_json'])
-        anchor=(json.loads(session['metadata_json']).get('application_identity_url') if session else None) or job['url']
+        # Use the same ownership-checked, full route as the other helpers.
+        # owned_targets.url is only a query-stripped display value.
+        anchor=(verified_application['url'] if 'posting_url' in verified_application else
+                (json.loads(session['metadata_json']).get('application_identity_url') if session else None) or job['url'])
         def verify_url(url):
             try:
                 identity=job_key(canonical_url(url))

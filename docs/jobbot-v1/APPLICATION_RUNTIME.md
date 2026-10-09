@@ -129,6 +129,12 @@ canonical application target, even when its path differs from the intake path.
 No static host/site alias is inferred; an unobserved route, different requisition,
 different site/host or conflicting query remains outside that retained scope.
 
+The shared browser observer uses the same ownership-checked full application
+route as the other managed helpers. An owned target's display URL omits its query
+and must not replace that verified route during identity checks. This preserves
+child-form continuity after a same-origin canonical redirect, including observed
+tracking parameters, without accepting a different job, site, host or query.
+
 These are updates to existing shared navigation, observation and credential
 callers; no helper, executor, retry limit or application-time gate is added. Daily
 engineering reviews use the counterfactual and baseline/candidate replay workflow
@@ -1131,7 +1137,7 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | managed_discovery.py / migration 20 | Selected-instance discovery run/check history and last/next-run reporting for the dashboard and harvest scheduler; no application dispatch or browser ownership |
 | harvest_runtime.py / managed_settings.py / jobbot-harvest.timer | Minute schedule checks launch fresh Hermes discovery only when the saved interval is due; dashboard settings own batch size and interval; the existing harvest lock prevents overlapping discovery; optional harvest_hermes_command selects a discovery profile, and unfinished private checkpoints carry verified leads into the next run for revalidation |
 | application_runtime.py | Shared request identity, start/retry and stop/pause lifecycle; early platform/reference guidance, scoped browser actions, pre-click external Apply and authentication target observation/handoff, automatic masked-image recovery after snapshot misses, field attribution, Autofill timing and answer/metadata capture |
-| managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed. The host-only target handoff atomically retains the prior owned tab and changes the session target after correlated Apply or authentication navigation; the latter retains the verified employer account URL. |
+| managed_sessions.py / migrations 15 and 17 | Session and physical workspace allocation, first-attempt/reattempt metadata and history-derived storage cleanup; same-job and account-use exclusion removed. The host-only target handoff atomically retains the prior owned tab and changes the session target after correlated Apply or authentication navigation; the latter retains the verified employer account URL. application_job projects that ownership-checked full route for managed helpers and managed_runtime.browser_observe; the intake posting and query-stripped target display remain separate. |
 | workspace_host.py / workspace_process.py | Windows lifetime/readiness timing, durable same-attempt restart preparation through verified close/reopen, employer-origin cleanup for managed-process retries only, concurrent JSON dispatch per owned session in shared browsers. prepare_target creates a visible window per application and calls arrange_application_windows to tile only its owned windows for Simplify's visibility-dependent filling; no model or five-second busy veto. |
 | workspace_attachment.py / workspace_host.py / managed_sessions.session_browser_attachment | Optional existing-browser launcher and verified attachment; durable application-tab ownership, tab-only cleanup/recovery, and observed navigator.webdriver. Called by the manual launcher, optional jobbot-browser.service and local host; queue_runtime.dispatch_startup reuses read-only profile/process and endpoint checks before native desktop dispatch. Managed process lifecycle remains available. |
 | managed_client.py / managed_cli.py / managed_api.py | Two transports over shared methods; HTTP auth retained |

@@ -169,3 +169,40 @@ def test_browserless_helper_popup_handoff_resumes_same_attempt_to_submission(tmp
             assert s.session(session['id'])['attempt_id'] == own['attempt_id']
             assert s.job(session['job_id'])['url'].endswith('/jobs/123')
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('tracking', ['', '?src=synthetic'])
+def test_verified_same_origin_form_route_recovers_and_submits(tmp_path, tracking):
+    """Full host observation and native writes use the verified route, not display URL."""
+    async def run():
+        async with popup_fixture(tmp_path) as (page,s,session,own,client,cfg,entry,final,receipts):
+            base=entry.rsplit('/apply/',1)[0]
+            original=base+'/hcmUI/CandidateExperience/en/job/123'+tracking
+            canonical=base+'/hcmUI/CandidateExperience/en/sites/Careers/job/123'+tracking
+            current=canonical.split('?')[0]+'/apply/section/1'+tracking
+            before=s.attempt(own['attempt_id'])
+            s.handoff_target(**own,current_target_id=page.target_id,new_target_id=page.target_id,
+                url=original,expected_url=original,evidence='Synthetic observed Apply')
+            s.handoff_target(**own,current_target_id=page.target_id,new_target_id=page.target_id,
+                url=canonical,source_url=original,navigation_chain=[original,canonical],
+                evidence='Synthetic canonical document transition')
+            await page.evaluate("history.replaceState({},'',"+json.dumps(current)+");document.body.innerHTML="+json.dumps(
+                '<h1>Application review</h1><label>Full name<input id="name" required></label>'
+                '<button onclick="if(!event.isTrusted)return;'+
+                "fetch('/submitted',{method:'POST'});document.body.innerHTML='<h1>Thank you for applying</h1>'"+
+                '">Submit application</button>'))
+            gate=await asyncio.to_thread(s.browser_observe,**own,target_id=page.target_id,cdp_url=page.fixture_endpoint)
+            assert gate['identity']['status']=='same_job',gate
+            assert gate['native_takeover_authorized'],gate
+            package=s.application_context(own['attempt_id'])
+            filled=await asyncio.to_thread(browser_action,cfg,client,own,package,page.target_id,
+                {'method':'fill','selector':'#name','value':'Synthetic Candidate'})
+            assert filled['committed']
+            submitted=await asyncio.to_thread(browser_action,cfg,client,own,package,page.target_id,
+                {'method':'submit','selector':'button'})
+            assert submitted['status']=='applied',submitted
+            assert receipts==['/submitted']
+            assert s.attempt(own['attempt_id'])['started_at']==before['started_at']
+            assert s.session(session['id'])['attempt_id']==own['attempt_id']
+            assert s.job(session['job_id'])['url'].endswith('/jobs/123')
+    asyncio.run(run())
