@@ -17,13 +17,13 @@ from test_local_sessions import setup, connect
 
 
 @asynccontextmanager
-async def popup_fixture(tmp_path, *, redirect=True, conflict=False, hosts=('jobs.example.test', 'forms.example.test')):
+async def popup_fixture(tmp_path, *, redirect=True, conflict=False, hosts=('jobs.example.test', 'forms.example.test'), posting_path='/jobs/123', tls=False):
     receipts = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             path = urlsplit(self.path).path
-            if path == '/jobs/123':
+            if path == posting_path:
                 body = '<h1>Synthetic role</h1><a target="_blank" href="'+entry+'">Apply</a>'
             elif path == '/apply/123' and redirect:
                 # A new target advertises this URL before its document commits.
@@ -52,15 +52,28 @@ async def popup_fixture(tmp_path, *, redirect=True, conflict=False, hosts=('jobs
             pass
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    base = f'http://{hosts[0]}:{server.server_port}'
-    other = f'http://{hosts[1]}:{server.server_port}'
-    source, entry = base+'/jobs/123', base+'/apply/123'
+    if tls:
+        import shutil, ssl, subprocess
+        openssl=shutil.which('openssl')
+        if not openssl:pytest.skip('Synthetic HTTPS fixture requires OpenSSL')
+        key,cert=tmp_path/'synthetic.key',tmp_path/'synthetic.pem'
+        subprocess.run([openssl,'req','-x509','-newkey','rsa:2048','-nodes','-days','1',
+                        '-subj','/CN='+hosts[0],'-keyout',str(key),'-out',str(cert)],
+                       check=True,capture_output=True)
+        context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert,key)
+        server.socket=context.wrap_socket(server.socket,server_side=True)
+    scheme='https' if tls else 'http'
+    base = f'{scheme}://{hosts[0]}:{server.server_port}'
+    other = f'{scheme}://{hosts[1]}:{server.server_port}'
+    source, entry = base+posting_path, base+'/apply/123'
     final = base+'/jobs/999' if conflict else other+'/candidate'
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         async with fixture_browser(tmp_path, 'top', entry_url=source, browser_args=[
-            '--host-resolver-rules=MAP *.example.test 127.0.0.1',
+            '--host-resolver-rules='+','.join('MAP '+host+' 127.0.0.1' for host in hosts),
             '--unsafely-treat-insecure-origin-as-secure='+base+','+other,
+            *(['--ignore-certificate-errors'] if tls else []),
         ]) as (page, _, __):
             service, asset, _, workspaces, config = setup(tmp_path/'ledger')
             workspaces[0].update(cdp_url=page.fixture_endpoint, mode='headless')

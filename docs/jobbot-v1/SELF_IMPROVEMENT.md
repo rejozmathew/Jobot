@@ -63,6 +63,14 @@ write detailed logs locally and return aggregate results for primary inspection.
 
 ## Implementation and deployment
 
+Self-improvement #014 (October 12, 2026) addresses hosted Rippling locale-only
+transitions: `/en-US/<tenant>/jobs/<UUID>` and `/<tenant>/jobs/<UUID>` compare
+through the existing application scope. Full tenant, UUID, child route and opaque
+query comparison remain authoritative. This changes live comparison only; stored
+intake keys, retry permissions, submission evidence and operator deadlines remain
+unchanged. Synthetic native receipt recovery and existing successful mechanisms
+are the validation controls; production gains remain under observation.
+
 Use exact recorded evidence to propose a bounded change. Prefer a shared fix when
 the same cause applies across portals. Add a synthetic failing regression, implement,
 review the diff, and delegate routine validation to authenticated Antigravity

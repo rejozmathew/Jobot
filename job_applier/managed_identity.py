@@ -361,8 +361,25 @@ def public_url(url):
     return urlunsplit((p.scheme, p.netloc, p.path, '', ''))
 
 
+def _rippling_scope_url(url):
+    """Compare Rippling's locale presentation without changing retained URLs."""
+    try:
+        p = urlsplit(canonical_url(url))
+        if p.hostname != 'ats.rippling.com':return url
+        match = re.fullmatch(
+            r'/[A-Za-z]{2}-[A-Za-z]{2}(/[^/]+/jobs/'
+            r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+            r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:/.*)?)', p.path)
+        if not match:return url
+        # Tenant, full UUID, child path and non-tracking query remain subject
+        # to the existing comparison. This is not a general locale alias.
+        return urlunsplit(p._replace(path=match[1]))
+    except (ValueError, ProtocolError):return url
+
+
 def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
     try:
+        job_url, candidate_url = _rippling_scope_url(job_url), _rippling_scope_url(candidate_url)
         gh_expected,gh_actual=ats_posting_identity(job_url),ats_posting_identity(candidate_url)
         if gh_expected and gh_actual and gh_expected[0]==gh_actual[0]=='greenhouse':return gh_expected==gh_actual
         li_expected,li_actual=linkedin_identity(job_url),linkedin_identity(candidate_url)
