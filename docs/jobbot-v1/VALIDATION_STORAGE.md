@@ -50,3 +50,8 @@ Do not adopt arbitrary existing directories into this registry. Legacy fixtures
 can be registered only after checking their original synthetic runner and final
 JUnit/log evidence, capturing their current identities and inspecting references.
 Unregistered, running, recently modified or identity-changed directories stay put.
+
+Tagged names such as `jvb-009-<random>` and `jvt-answer-<random>` are also
+recognized. Registration, completion/JUnit hash, directory ownership/identity,
+age and live-process checks still apply; a recognized name alone never permits
+removal. Reports and production storage remain outside cleanup.

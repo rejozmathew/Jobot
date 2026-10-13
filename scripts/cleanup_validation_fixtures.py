@@ -16,7 +16,7 @@ import time
 
 FIXTURE_NAME = re.compile(
     r'j(?:[0-9]+c?[bt](?:-[a-z0-9_]+)?|w-[a-z0-9_]+|v[bt]-[a-z0-9_]+|'
-    r'b[ad]-(?:base|tmp)-(?:20260927|0927a))'
+    r'b[ad]-(?:base|tmp)-(?:20260927|0927a)|v[bt]-[a-z0-9_]+(?:-[a-z0-9_]+)+)'
 )
 
 

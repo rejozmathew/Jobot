@@ -63,6 +63,11 @@ write detailed logs locally and return aggregate results for primary inspection.
 
 ## Implementation and deployment
 
+Self-improvement #015 (October 13, 2026) repairs cleanup recognition of registered
+tagged synthetic fixture directories. Existing completion, report hash, ownership,
+directory identity, age and live-process checks remain authoritative. This is
+storage maintenance only and changes no application execution or retry behavior.
+
 Self-improvement #014 (October 12, 2026) addresses hosted Rippling locale-only
 transitions: `/en-US/<tenant>/jobs/<UUID>` and `/<tenant>/jobs/<UUID>` compare
 through the existing application scope. Full tenant, UUID, child route and opaque

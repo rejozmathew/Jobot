@@ -8,10 +8,10 @@ import pytest
 from scripts.cleanup_validation_fixtures import cleanup
 
 
-def fixture_record(tmp_path):
+def fixture_record(tmp_path, name='j8b-synthetic'):
     cache = tmp_path / 'cache'
     cache.mkdir()
-    target = cache / 'j8b-synthetic'
+    target = cache / name
     target.mkdir()
     (target / 'browser-profile').mkdir()
     records = tmp_path / 'records'
@@ -47,6 +47,16 @@ def run(data, **kwargs):
     cache, target, records, _, _, proc = data
     return cleanup(records, cache, proc_root=proc, uid=target.stat().st_uid,
                    min_age_hours=0, **kwargs)
+
+
+@pytest.mark.parametrize('name', ['jvb-answer-synthetic', 'jvt-answer-synthetic',
+                                 'jvb-009-synthetic', 'jvt-010-synthetic'])
+def test_completed_tagged_fixture_names_are_cleaned(tmp_path, name):
+    data=fixture_record(tmp_path,name)
+    result=run(data,apply=True)
+    assert result['removed']==[str(data[1])]
+    assert not data[1].exists()
+    assert data[3].exists() and (data[2]/'validation.xml').exists()
 
 
 def test_hidden_optional_metadata_of_unrelated_process_does_not_leak_fixtures(tmp_path, monkeypatch):
