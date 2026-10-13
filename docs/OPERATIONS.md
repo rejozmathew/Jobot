@@ -26,6 +26,7 @@ display. Examples below assume the existing user's service manager.
 | `jobbot-harvest.timer` / `.service` | Schedule separate discovery runs | No scheduled discovery; existing intake remains |
 | `jobbot-notifications.service` | Optional confirmed-submission observer | Alert delivery waits; application outcomes remain durable |
 | `jobbot-validation-cleanup.timer` / `.service` | Remove completed registered disposable fixtures | Test storage can accumulate; production artifacts have separate retention |
+| `jobbot-storage-maintenance.timer` / `.service` | Bound download/build caches and compress/expire verified backup copies | Disposable cache and raw backup storage can accumulate |
 
 The queue unit's historical description may say “sequential”; the current
 dispatcher implements the operator-selected concurrency. The selected settings
@@ -221,3 +222,52 @@ the documented retention interval and verifies process ownership first.
 Follow [Validation storage](jobbot-v1/VALIDATION_STORAGE.md). Never apply its fixture
 cleanup rules to production browsers, current application evidence or private
 configuration.
+
+## Runtime storage maintenance
+
+The separate `scripts/maintain_runtime_storage.py` command operates on the
+selected private runtime config. Preview with:
+
+```bash
+./.venv/bin/python scripts/maintain_runtime_storage.py --runtime-config /absolute/runtime.json
+# Review the preview, then add --apply for the same scope.
+```
+
+The fixed allowlist covers pip, Electron, node-gyp and npm download caches,
+Hermes desktop packaging inputs/tools, and the separate Brave disk-cache folder.
+Files expire after seven days (fourteen for node-gyp); per-folder limits are
+64–256 MiB, with oldest files evicted first. Active build/download processes
+defer cache cleanup; a running browser defers browser-cache cleanup. Running
+executables, Hermes release folders, installed dependencies, browser profiles,
+cookies, live databases, conversation/tool-output history, application evidence
+and screenshots are outside this allowlist.
+
+Explicitly named database backup copies under `private-spool/deployments`,
+`managed.db.before-local-*.db` beside the selected database, and Hermes
+`state.db.pre-update-*.bak` backups are compressed after two days. Compression
+verifies the entire decompressed SHA-256 and checks the original is unchanged
+before removing its raw copy. A `.gz.storage.json` receipt records both hashes.
+SQLite sidecars, process references, changed files, symlinks and unknown backup
+names are retained. Previously registered archives expire after thirty days,
+always keeping the newest three distinct snapshots in each category (JobBot
+deployments, JobBot local snapshots, main Hermes, discovery Hermes). Source
+backups and deployment manifests themselves remain available.
+
+Restore a compressed backup to a **new** path with `gzip -dc backup.db.gz >
+/absolute/new-copy.db`, verify its SHA-256 against `source_sha256` in the receipt,
+then follow the normal database recovery procedure. Never restore over a live
+database or replace newer application history. Older deployment manifests may
+name the original uncompressed filename; its verified `.gz` counterpart holds
+the same bytes during retention.
+
+The adapted `jobbot-storage-maintenance.service` and `.timer` run nightly with
+low CPU/I/O priority and a single-run lock. They do not stop queue work or change
+application eligibility. Install them in the existing user's systemd directory,
+reload the user manager and enable the timer. The latest private result is
+`~/.local/state/jobbot-storage/latest.json`; inspect it and the service journal
+for errors, retained active caches and the `low_space` indicator (less than 4 GiB
+available). This complements the existing validation-fixture cleanup timer.
+
+Preserved conversation and application history can still grow. This maintenance
+bounds disposable caches and ages redundant backups; it does not promise a fixed
+total disk size or silently erase history to meet a storage target.

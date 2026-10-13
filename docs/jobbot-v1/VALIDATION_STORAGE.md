@@ -16,6 +16,11 @@ Zombie and exited processes do not retain fixtures. Reports and logs are retaine
 The utility does not clean application storage, personal browser profiles, Hermes
 history, package caches, deployment backups or arbitrary cache folders.
 
+Download/build caches and named database backup copies have a separate
+[runtime storage maintenance policy](../OPERATIONS.md#runtime-storage-maintenance).
+Its nightly timer does not widen this fixture cleaner's scope or delete
+application evidence, browser logins or live history.
+
 The user systemd service and daily timer in `deploy/systemd` use the existing
 Ubuntu runtime path. They can run alongside applications without restarting them.
 The scheduled cleanup keeps registered fixtures for at least 24 hours after both
