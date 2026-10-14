@@ -63,6 +63,15 @@ write detailed logs locally and return aggregate results for primary inspection.
 
 ## Implementation and deployment
 
+Self-improvement #016 (October 14, 2026) preserves same-session recovery when
+Dayforce drops a language prefix from a tenant/CANDIDATEPORTAL/numeric-posting
+route. The shared scope comparator retains host, scheme, tenant, posting and
+non-tracking query checks; stored URLs and history keys are unchanged. This
+removes a demonstrated recovery veto without changing deadlines, retry policy,
+Simplify order or submission confirmation. Synthetic native recovery and receipt
+checks accompany baseline/candidate scope and successful recovery controls;
+production submission gains remain unmeasured.
+
 Self-improvement #015 (October 13, 2026) repairs cleanup recognition of registered
 tagged synthetic fixture directories. Existing completion, report hash, ownership,
 directory identity, age and live-process checks remain authoritative. This is

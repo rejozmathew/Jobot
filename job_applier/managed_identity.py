@@ -377,9 +377,24 @@ def _rippling_scope_url(url):
     except (ValueError, ProtocolError):return url
 
 
+def _dayforce_scope_url(url):
+    """Ignore a presentation locale only on Dayforce's tenant/posting route."""
+    try:
+        p = urlsplit(canonical_url(url))
+        if p.hostname != 'jobs.dayforcehcm.com':return url
+        match = re.fullmatch(
+            r'/[A-Za-z]{2}-[A-Za-z]{2}(/[^/]+/CANDIDATEPORTAL/jobs/[0-9]+(?:/.*)?)', p.path)
+        if not match:return url
+        # The existing comparator still checks tenant, portal, posting, query,
+        # host and scheme. Intake keys and retained URLs are never rewritten.
+        return urlunsplit(p._replace(path=match[1]))
+    except (ValueError, ProtocolError):return url
+
+
 def is_same_application_scope(job_url: str, candidate_url: str) -> bool:
     try:
         job_url, candidate_url = _rippling_scope_url(job_url), _rippling_scope_url(candidate_url)
+        job_url, candidate_url = _dayforce_scope_url(job_url), _dayforce_scope_url(candidate_url)
         gh_expected,gh_actual=ats_posting_identity(job_url),ats_posting_identity(candidate_url)
         if gh_expected and gh_actual and gh_expected[0]==gh_actual[0]=='greenhouse':return gh_expected==gh_actual
         li_expected,li_actual=linkedin_identity(job_url),linkedin_identity(candidate_url)
