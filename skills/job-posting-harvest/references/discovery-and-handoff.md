@@ -19,5 +19,5 @@ The scheduled runtime supplies `--producer`, `--discovery-run-id` and, when know
 `--discovery-profile` in its exact intake command. Preserve these command arguments.
 Standalone integrations can supply their own process identity with the same flags;
 the emitter otherwise identifies itself as `discovery_intake`. Do not copy process
-identity from job pages or messages. JobBot retains source observations and queue
+identity from job pages or messages. Jobot retains source observations and queue
 origins separately, including multiple sources for a recognized job.

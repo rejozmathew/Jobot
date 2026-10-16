@@ -1,6 +1,6 @@
 # Research handoff: restrictions that interrupt application submission
 
-Repository: https://github.com/rejozmathew/auto-job-applier
+Repository: https://github.com/rejozmathew/Jobot
 
 Branch: `codex/runtime-simplification`
 
@@ -8,7 +8,7 @@ Date: September 9, 2026. Resolve and record the branch HEAD before auditing.
 This document is a starting point, not a claim that every restriction is removed.
 
 Later September 9 follow-up: email selection now belongs entirely to the LLM
-using Hermes Gmail. The `email_code` delivery-label veto and JobBot's automatic
+using Hermes Gmail. The `email_code` delivery-label veto and Jobot's automatic
 mailbox verifier were deleted. The executor chooses the relevant message closest
 to the request timestamp and supplies its code to normal browser fill or the
 grouped field helper. The user also explicitly requires approval before any new

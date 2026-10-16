@@ -74,6 +74,12 @@ ordinary local application starts through `application_runtime`.
 
 ## Hermes executor
 
+For a fresh installation, follow the [Hermes skills and plugin setup](GETTING_STARTED.md#5-connect-hermes-to-the-repository).
+That guide also covers [mailbox authentication](GETTING_STARTED.md#6-connect-your-application-mailbox)
+and [optional Discord setup](GETTING_STARTED.md#7-optional-discord-bot-and-submission-alerts).
+The entry skill and native plugin ship in this repository; email skills come
+from Hermes. They require the new user's own credentials.
+
 `integrations/hermes_jobbot/` contains plugin registration and the thin discovery
 skill entry. The canonical procedure stays under `skills/productivity/`.
 `hermes_plugin.py` binds tool calls to the actual conversation/request, while the
@@ -93,7 +99,7 @@ change discovery. Read [Desktop queue steering](jobbot-v1/DESKTOP_QUEUE_STEERING
 
 ## Simplify and employer portals
 
-Simplify is installed in the selected Chromium-family browser profile. JobBot's
+Simplify is installed in the selected Chromium-family browser profile. Jobot's
 shared boundary observes availability, starts Autofill and tracks settlement.
 Selected credentials use the private native credential path; Simplify fills
 supported application fields before residual work.
@@ -114,7 +120,7 @@ intake; an application executor does not discover or start another job.
 
 The scheduled service template uses `--enqueue`, which allows qualifying discovery
 verdicts into the queue under the existing policy. Discovery-only/manual-review
-intake is different. Pausing JobBot prevents new scheduled discovery as well as new
+intake is different. Pausing Jobot prevents new scheduled discovery as well as new
 queued application admission.
 
 `harvester_source.py` supports external Harvester intake. The existing JobNavigator
@@ -147,7 +153,7 @@ This is distinct from activated procedural lessons and application executors.
 
 Settings exposes **Discovery model** and **Answer learning model** independently;
 both default to **Same as application model**. Explicit separate selections use
-the installed Hermes credentials and provider catalog. JobBot does not change the
+the installed Hermes credentials and provider catalog. Jobot does not change the
 global Hermes profile when these settings change.
 
 ### Model call inventory
@@ -160,7 +166,7 @@ global Hermes profile when these settings change.
 | Hermes internal tool inference, vision and compression | Hermes auxiliary routing, active model context and installed task overrides/fallback configuration |
 | Managed HTTP worker / native compatibility runner | Attested request settings; these are not additional discovery workers |
 | Original browser-use application | Legacy `OPENAI_MODEL` environment setting (the historical `.env.example` names Qwen); separate from the managed dashboard |
-| Browser helpers, Simplify bridge, mailbox/notification plumbing, external Harvester import | No JobBot-owned model call; external products retain their own configuration |
+| Browser helpers, Simplify bridge, mailbox/notification plumbing, external Harvester import | No Jobot-owned model call; external products retain their own configuration |
 
 The catalog may list local Qwen models without selecting them. Hermes auxiliary
 overrides and fallbacks are owned by the installed Hermes configuration, not this

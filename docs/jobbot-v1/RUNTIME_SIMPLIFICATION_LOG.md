@@ -98,7 +98,7 @@ Removed the delivery-label veto and the entire automatic mailbox selection/
 verification function. The LLM reads mail with Hermes, chooses the relevant
 code closest to the request timestamp, and enters it with ordinary browser
 fill or supplies `value` to the grouped code-field helper. No sender, company,
-template, request-time or multiple-message rule in JobBot approves that choice.
+template, request-time or multiple-message rule in Jobot approves that choice.
 The helper does not read mail. Browser fill no longer refuses code fields;
 existing screenshot masking and exclusion from reusable answers remain.
 
@@ -741,7 +741,7 @@ completion of the application-automation acceptance criteria.
   approval review rejected a newly selected destination. Fresh ordinary Hermes
   conversation 20260908_112943_5b9c1a; session aaad5dc4-5dc4-4cd3-97f3-c12a52013c6a,
   attempt 10. Launcher asserted dashboard 60157 and browser 9223 were both down,
-  with no JobBot token exported. Local start opened the correct headed browser and
+  with no Jobot token exported. Local start opened the correct headed browser and
   official Simplify, but the employer page said it did not exist. Blocked, no
   submission. Managed session 156.38s, full Hermes invocation 237.62s. Actual
   invocation metadata was recorded; usage reports remain private.
@@ -952,7 +952,7 @@ completion of the application-automation acceptance criteria.
   `b0fd3f65d2c24cf7c5c20728bbcf62e6fbc75ae4d096f25b535eb6a1a905715f`.
   No active applications were present. The queue has no historical backfill;
   future observed missing questions populate it. No commit or push was made.
-- Long-running native Hermes instances must reload JobBot or restart to load
+- Long-running native Hermes instances must reload Jobot or restart to load
   the new native operations; the portable CLI already loads current code on each
   call. No live application retry or Discord message was sent by this engineering
   task. Live ATS acceptance and authenticated extension behavior remain separate

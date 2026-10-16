@@ -2,7 +2,7 @@
 
 The dashboard's **Source → Origin details** separates a discovery feed from
 the process that supplied the job and the process that placed it in the execution
-queue. **Added** remains the original JobBot intake time. The original source
+queue. **Added** remains the original Jobot intake time. The original source
 timestamp and source identity are never overwritten by rediscovery.
 
 | Entry point | Feed | Recorded process | Queue origin |

@@ -15,7 +15,7 @@ Verify the configured model actually resolves to the requested Astra model throu
 
 Then create docs/jobbot-v1/EXECUTION_PLAN.md and a requirement-to-test map. Implement stages 1–4 below, with tests and small reviewable commits, continuing reversible Windows engineering without asking after every file edit. Maintain a checkpoint so a new session can resume if this conversation becomes too large.
 
-The product remains Hermes pulling one reserved job at a time through a batch, with continuity and reusable helpers; Auto Job Applier owns queue/history/accounts/timing/controls. Simplify is preferred but recovery is flexible. The core worker protocol is agent-neutral. Do not replace this with mandatory fresh-per-job conversations, an internal agent rewrite, or another autofill framework.
+The product remains Hermes pulling one reserved job at a time through a batch, with continuity and reusable helpers; Jobot owns queue/history/accounts/timing/controls. Simplify is preferred but recovery is flexible. The core worker protocol is agent-neutral. Do not replace this with mandatory fresh-per-job conversations, an internal agent rewrite, or another autofill framework.
 
 Use a NEW synthetic Windows development database and isolated test configuration. Do not delete, relabel, or overwrite existing runtime histories, profiles, credentials or browser data. Do not modify Ubuntu, Unraid, VM schedules, or VM databases. Do not start real job submissions, account creation or password resets during offline development. Do not change unrelated cron tasks. Existing real workers must be quiescent before shared-runtime integration testing.
 

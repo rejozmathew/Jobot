@@ -30,7 +30,7 @@ Not now: another production agent, a broad native autofill rewrite, an Autograph
 | Worker | Hermes | Adaptive reasoning and application execution |
 | Bulk autofill provider | Simplify | Replaceable browser-side mechanism, not operational truth |
 | Reasoning provider/model | Whatever is configured and verified in Hermes | Independent of queue, records, and UI |
-| Operational state | Auto Job Applier | Authoritative intake, reservations, accounts, events, outcomes |
+| Operational state | Jobot | Authoritative intake, reservations, accounts, events, outcomes |
 
 Discovery stays external. Hermes discovery, another discovery app, and manual URL input call the same intake service. The core application must not import Hermes-specific conversation objects to understand a job or attempt. A Hermes session ID is optional worker metadata.
 

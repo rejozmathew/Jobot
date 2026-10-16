@@ -8,7 +8,7 @@ It is a design proposal grounded in that conversation and the reviewed repositor
 
 ## Reviewed repository baseline
 
-Repository: `https://github.com/rejozmathew/auto-job-applier`
+Repository: `https://github.com/rejozmathew/Jobot`
 
 Branch: `hermes-modified`
 

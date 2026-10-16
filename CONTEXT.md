@@ -1,16 +1,16 @@
-# Auto Job Applier - Development Context
+# Jobot - Development Context
 
 > Historical February 2026 development context. These setup instructions, models,
 > support claims and architecture describe the original browser-use application.
 > Start with the [current README](README.md), [architecture](docs/ARCHITECTURE.md)
-> and [project history](docs/PROJECT_HISTORY.md) for the managed JobBot runtime.
+> and [project history](docs/PROJECT_HISTORY.md) for the managed Jobot runtime.
 
 ## Project History
 
 This project was extracted from a fork of [browser-use](https://github.com/browser-use/browser-use) to be a standalone application that uses `browser-use` as a dependency.
 
 **Original fork**: `github.com/rejozmathew/browser-use` (branch: `job-applier`)
-**Standalone repo**: `github.com/rejozmathew/auto-job-applier`
+**Standalone repo**: `github.com/rejozmathew/Jobot`
 
 ---
 
@@ -126,7 +126,7 @@ JOB_APPLIER_MAX_HISTORY=10
 ## Architecture
 
 ```
-auto-job-applier/
+Jobot/
 ├── job_applier/
 │   ├── agent.py           # Core: JobApplyAgent uses browser-use Agent
 │   ├── element_handlers.py # Wrapper for browser-use built-in actions
@@ -198,7 +198,7 @@ python run_applier.py migrate           # Run migration
 ## How to Run
 
 ```bash
-cd C:\GitClone\auto-job-applier
+cd C:\GitClone\Jobot
 python run_applier.py serve
 # Open http://127.0.0.1:8000
 ```
@@ -216,7 +216,7 @@ python run_applier.py serve
 ## Next Steps
 
 Start a new session with:
-> "I'm working on auto-job-applier. Read CONTEXT.md for background. I want to implement [specific enhancement]."
+> "I'm working on Jobot. Read CONTEXT.md for background. I want to implement [specific enhancement]."
 
 ---
 

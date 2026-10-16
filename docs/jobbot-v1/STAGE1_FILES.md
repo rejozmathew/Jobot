@@ -39,17 +39,17 @@ Paths are relative to the implementation worktree. This covers source/specificat
 | `tests/jobbot_v1/test_accounts.py` | Accounts slice API tests (expected RED). |
 | `tests/jobbot_v1/test_compatibility.py` | Compatibility acceptance tests for legacy components against managed databases. |
 | `tests/jobbot_v1/test_continuity.py` | Acceptance tests for managed run continuity, checkpoints, and multi-session resumption. |
-| `tests/jobbot_v1/test_core.py` | Offline JobBot acceptance — no credentials, employers or live browsers. |
-| `tests/jobbot_v1/test_data_tools.py` | Data tools acceptance tests for JobBot managed fresh starts, migrations, and backups. |
+| `tests/jobbot_v1/test_core.py` | Offline Jobot acceptance — no credentials, employers or live browsers. |
+| `tests/jobbot_v1/test_data_tools.py` | Data tools acceptance tests for Jobot managed fresh starts, migrations, and backups. |
 | `tests/jobbot_v1/test_events.py` | Regression coverage for events. |
 | `tests/jobbot_v1/test_fake_worker.py` | Protocol regression tests for fake worker. |
 | `tests/jobbot_v1/test_final_review_regressions.py` | Narrowly scoped regression tests from primary decision brief. |
 | `tests/jobbot_v1/test_managed_cli.py` | Acceptance tests for managed CLI entrypoint contracts. |
 | `tests/jobbot_v1/test_ownership.py` | Regression coverage for ownership. |
-| `tests/jobbot_v1/test_protocol.py` | Protocol acceptance tests for JobBot managed API and client. |
+| `tests/jobbot_v1/test_protocol.py` | Protocol acceptance tests for Jobot managed API and client. |
 | `tests/jobbot_v1/test_protocol_types.py` | Protocol type enforcement and requisition query token acceptance tests. |
-| `tests/jobbot_v1/test_review_identity.py` | Reviewer regression tests for JobBot identity deduplication and migration contracts. |
-| `tests/jobbot_v1/test_review_lifecycle.py` | Reviewer regression tests for JobBot lifecycle and control contracts. |
+| `tests/jobbot_v1/test_review_identity.py` | Reviewer regression tests for Jobot identity deduplication and migration contracts. |
+| `tests/jobbot_v1/test_review_lifecycle.py` | Reviewer regression tests for Jobot lifecycle and control contracts. |
 | `tests/jobbot_v1/test_review_security.py` | Targeted security regression tests for independent review S1/S2 (expected RED). |
 | `tests/jobbot_v1/test_safety_regressions.py` | Safety regression tests for jobbot_v1 contracts (expected RED). |
 

@@ -15,11 +15,11 @@ metadata:
 The repository owns application procedures and helpers; keep the workflow there.
 
 ## When to Use
-- An authorized application or application benchmark using the configured JobBot project.
+- An authorized application or application benchmark using the configured Jobot project.
 - For implementation work, inspect code/tests without starting an application.
 
 ## Procedure
-1. Resolve the repository from the active Project or configured JobBot `app_repo`. Require an explicit runtime config; never choose a database by cwd or a similarly named checkout.
+1. Resolve the repository from the active Project or configured Jobot `app_repo`. Require an explicit runtime config; never choose a database by cwd or a similarly named checkout.
 2. Use `read_file` on `<repo>/skills/productivity/job-apply/SKILL.md`. Its relative references resolve from that repository directory, not this entry-point directory.
 3. Immediately use the canonical local start command with `wait_seconds:0`; read ATS detail while the browser prepares. No exploration, doctor, repeated reads or planning turn before start. Configuration selects identity, documents and workspaces; the host resolves ownership/target.
 4. For Workday, read `<repo>/skills/productivity/workday-simplify/SKILL.md` during startup, check session readiness/context and use `jobbot fast_forward` or its documented CLI. No token, HTTP service or expiring lease is required.

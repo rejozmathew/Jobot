@@ -8,7 +8,7 @@ opens its existing evidence and timeline. Legacy selected-run controls and
 diagnostics remain available in a collapsed section.
 
 The period selector offers Today, Last 7 days, Last 30 days, Lifetime and
-Custom dates. Calendar dates use the saved JobBot timezone. Seven/thirty-day
+Custom dates. Calendar dates use the saved Jobot timezone. Seven/thirty-day
 windows include today; custom endpoints include both selected dates. Day
 boundaries follow daylight-saving changes. The results reflect the database
 as of the displayed update time and exclude future start timestamps.

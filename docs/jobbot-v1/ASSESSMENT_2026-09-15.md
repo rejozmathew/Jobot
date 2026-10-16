@@ -1,4 +1,4 @@
-# JobBot capability and deployment assessment — 15 September 2026
+# Jobot capability and deployment assessment — 15 September 2026
 
 ## Verdict
 

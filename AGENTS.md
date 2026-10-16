@@ -1,4 +1,4 @@
-# Auto Job Applier — repository instructions
+# Jobot — repository instructions
 
 ## Application execution (any harness)
 

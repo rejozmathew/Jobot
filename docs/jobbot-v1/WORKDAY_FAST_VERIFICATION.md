@@ -76,4 +76,4 @@ Paths are relative to this checkout. This list excludes pre-existing unrelated a
 
 ## Remaining acceptance
 
-Reload/start JobBot from this updated checkout before the fresh benchmark; an already-running server/plugin may still hold old Python code. Resolve stale run ownership through normal controls rather than relabeling history. Run the new URL only after that preflight, with the configured worker credentials available. Follow `WORKDAY_NEXT_RUN.md` and record actual time, tool round trips, retries and intervention counts. This document does not certify a live Workday run or a sub-ten-minute result.
+Reload/start Jobot from this updated checkout before the fresh benchmark; an already-running server/plugin may still hold old Python code. Resolve stale run ownership through normal controls rather than relabeling history. Run the new URL only after that preflight, with the configured worker credentials available. Follow `WORKDAY_NEXT_RUN.md` and record actual time, tool round trips, retries and intervention counts. This document does not certify a live Workday run or a sub-ten-minute result.

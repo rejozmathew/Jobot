@@ -14,7 +14,7 @@ metadata:
 
 # Job Posting Harvest
 
-Discovery publishes into shared intake by default and never opens application sessions. There is **no auto-apply during discovery itself**. When the operator explicitly enables `--enqueue`, publish qualifying Strong apply / Apply records into JobBot's separate sequential dispatcher. The worker also picks up active intake automatically under its configured controls; omitting `--enqueue` does not pause that worker. Discovery itself still does not apply, claim a browser, or choose the submission mode.
+Discovery publishes into shared intake by default and never opens application sessions. There is **no auto-apply during discovery itself**. When the operator explicitly enables `--enqueue`, publish qualifying Strong apply / Apply records into Jobot's separate sequential dispatcher. The worker also picks up active intake automatically under its configured controls; omitting `--enqueue` does not pause that worker. Discovery itself still does not apply, claim a browser, or choose the submission mode.
 
 ## When to Use
 Find live official roles for the selected candidate profile, verify links, or import an existing alert/ATS result batch. Do not invent listings when a source is blocked.

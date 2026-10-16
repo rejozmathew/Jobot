@@ -1,6 +1,6 @@
 ---
 name: job-apply
-description: Execute local JobBot applications with Simplify.
+description: Execute local Jobot applications with Simplify.
 version: 0.5.22
 author: Rejo Z Mathew (rejozmathew), Hermes Agent
 human_first: true
@@ -605,7 +605,7 @@ existing mailbox capability from the same conversation:
 
 The same prefix supports `gmail get <message-id>`. This invokes the existing
 Hermes Gmail script with the selected mailbox credential. The LLM reads the
-message and decides which code fits the current application; no JobBot mailbox
+message and decides which code fits the current application; no Jobot mailbox
 verifier runs during field entry. Use codes/links privately; never log mailbox
 bodies, passwords, OTPs or reset tokens. Do not use another personal mailbox.
 Routine account creation, relevant verification and approved uploads/submission

@@ -142,14 +142,14 @@ def test_dashboard_pause_resume_and_draining_feedback():
     dashboard_check(r'''
 w.draw(v);w.noRefresh();
 const button=doc.getElementById('automation-toggle');
-assert(button&&!button.hidden&&button.textContent==='Pause JobBot','Pause must be easy to find');
+assert(button&&!button.hidden&&button.textContent==='Pause Jobot','Pause must be easy to find');
 let calls=[];
 w.fetch=async(path,options)=>{calls.push(JSON.parse(options.body));return {ok:true,status:200,json:async()=>({automation_paused:true})};};
 await button.onclick();
 assert(calls[0].command==='pause_all','Must pause applications and discovery together');
 v.dispatch_queue.automation_paused=true;v.dispatch_queue.counts={dispatched:1};
 v.discovery={installed:true,last_run:{state:'running'}};w.draw(v);
-assert(button.textContent==='Resume JobBot','Resume control missing');
+assert(button.textContent==='Resume Jobot','Resume control missing');
 assert(doc.getElementById('automation-status').textContent.includes('Finishing current work'),'Draining incorrectly claims idle');
 assert(!doc.getElementById('application-schedule').textContent.includes('follows after it finishes'),'Promises next job during pause');
 assert(doc.getElementById('discovery-status').textContent.includes('paused'),'Discovery pause invisible');
@@ -157,5 +157,5 @@ v.dispatch_queue.counts={};v.discovery.last_run.state='completed';w.draw(v);
 assert(doc.getElementById('automation-status').textContent.includes('Paused'),'Idle pause invisible');
 await button.onclick();assert(calls[1].command==='resume_all','Resume lost');
 await doc.getElementById('queue-run-next').onclick();
-assert(doc.getElementById('notice').textContent.includes('Resume JobBot'),'Wake falsely promises work while paused');
+assert(doc.getElementById('notice').textContent.includes('Resume Jobot'),'Wake falsely promises work while paused');
 ''')

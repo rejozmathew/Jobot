@@ -40,8 +40,8 @@ and actual evidence. Keep the historical failures below unchanged.
 
 ## Before timing
 
-- Open a fresh conversation in the JobBot project using the configured application model (not the engineering model by accident).
-- Start/reload the existing configured JobBot service/native integration from the updated checkout so the process imports the new helpers. Do not overwrite the database or clear historical runs.
+- Open a fresh conversation in the Jobot project using the configured application model (not the engineering model by accident).
+- Start/reload the existing configured Jobot service/native integration from the updated checkout so the process imports the new helpers. Do not overwrite the database or clear historical runs.
 - Resolve the existing private config and credentials through their configured references. Ordinary Hermes shells can use the configured `credential_files` fallback without inheriting launcher environment variables. Read [internal connection setup](HERMES_CONNECTION.md), then verify authenticated CLI worker health; do not paste secrets or launch a separate worker conversation.
 - Run `workday_fast doctor` with the proposed URL. Check old submission history, exact new database, configured browser and any unresolved ownership. If reconciliation is needed, resolve it explicitly before the timed application—not by changing the old outcome.
 - Establish the authorized managed run and exact claimed attempt. If intake/startup needs work, report that separately from browser execution; do not quietly exclude it from the total user-visible time.

@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JobBot — Application Operations</title>
+  <title>Jobot — Application Operations</title>
   <link rel="stylesheet" href="/static/jobbot.css">
   <script src="/static/jobbot.js" defer></script>
 </head>
 <body>
 <header>
   <div>
-    <p class="eyebrow">AUTO JOB APPLIER</p>
+    <p class="eyebrow">JOBOT</p>
     <h1>Application Operations</h1>
   </div>
   <div class="header-actions">
     <span id="mode" class="badge">Not connected</span>
-    <button id="automation-toggle" type="button" aria-describedby="automation-status" hidden>Pause JobBot</button>
+    <button id="automation-toggle" type="button" aria-describedby="automation-status" hidden>Pause Jobot</button>
     <button id="refresh" hidden>Refresh</button>
 
   </div>
@@ -24,7 +24,7 @@
 <p id="notice" role="status" aria-live="polite"></p>
 
 <section id="login-panel" class="card narrow">
-  <h2>Connecting to JobBot</h2>
+  <h2>Connecting to Jobot</h2>
   <p>The local dashboard connects automatically. No sign-in is needed.</p>
   <button id="reconnect" class="primary" type="button">Reconnect</button>
 </section>
@@ -161,7 +161,7 @@
               <th><button type="button" data-job-sort="posted">Posted date</button></th>
               <th><button type="button" data-job-sort="source">Source</button></th>
               <th><button type="button" data-job-sort="reference">Source reference</button></th>
-              <th title="First added to JobBot; rediscovery does not reset this date"><button type="button" data-job-sort="added">Added</button></th>
+              <th title="First added to Jobot; rediscovery does not reset this date"><button type="button" data-job-sort="added">Added</button></th>
               <th title="Latest recorded operator disposition, application outcome, or queue outcome"><button type="button" data-job-sort="disposition">Last disposition</button></th>
               <th title="Successful attempt start to recorded completion, including waits during that attempt; excludes earlier attempts and time queued"><button type="button" data-job-sort="duration">Time to apply</button></th>
             </tr>
@@ -422,13 +422,13 @@
         <button id="refresh-models" type="button">Refresh models</button>
           <p>Save settings to use this selection for new work. Running applications and discovery runs keep their model.</p>
           <div id="task-model-settings"></div>
-        <p id="application-concurrency-help">Use 1 for your local model, or choose up to 5. Applications use separate windows in your existing JobBot profile, keeping its logins and history. JobBot arranges its application windows so Simplify can keep filling visible pages. Lowering this number lets current applications finish before starting more.</p>
+        <p id="application-concurrency-help">Use 1 for your local model, or choose up to 5. Applications use separate windows in your existing Jobot profile, keeping its logins and history. Jobot arranges its application windows so Simplify can keep filling visible pages. Lowering this number lets current applications finish before starting more.</p>
           <h3>Application time limit</h3>
           <div class="settings-grid">
             <label><input id="settings-time-limit-enabled" type="checkbox"> Stop applications at the time limit (uncheck for Off)</label>
             <label>Time limit in minutes<input id="settings-time-limit-minutes" type="number" min="1" max="1440" step="1" value="30"></label>
           </div>
-          <p>Default: 30 minutes per application. Includes model calls and recovery; excludes time queued. At the limit, JobBot stops the application and moves on after cleanup. Saved changes apply to new applications.</p>
+          <p>Default: 30 minutes per application. Includes model calls and recovery; excludes time queued. At the limit, Jobot stops the application and moves on after cleanup. Saved changes apply to new applications.</p>
           <h3>Job discovery</h3>
         <p>Find the strongest matches, up to the job limit. These settings apply to the next discovery run. Application pickup is separate.</p>
         <div id="discovery-setting-fields" class="settings-grid"></div>

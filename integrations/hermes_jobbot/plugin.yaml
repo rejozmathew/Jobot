@@ -1,6 +1,6 @@
 name: jobbot-worker
 version: 0.1.0
-description: Managed JobBot worker protocol and redacted observations.
+description: Managed Jobot worker protocol and redacted observations.
 kind: standalone
 provides_tools:
   - jobbot
@@ -15,7 +15,7 @@ python_dependencies:
 config_schema:
   app_config:
     type: str
-    description: Absolute path to the explicit JobBot worker configuration.
+    description: Absolute path to the explicit Jobot worker configuration.
   app_repo:
     type: str
-    description: Absolute path to the reviewed Auto Job Applier checkout.
+    description: Absolute path to the reviewed Jobot checkout.

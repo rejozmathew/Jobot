@@ -153,7 +153,7 @@ budgets. Local sessions bypass those legacy reasoning budgets and use the
 operator's overall application deadline. A 60-second helper call is a resumable
 slice, not a one-minute application cutoff.
 
-Global **Pause JobBot**, automatic pickup enablement, queued request identity and
+Global **Pause Jobot**, automatic pickup enablement, queued request identity and
 retry due times are durable scheduling state. They are not model settings, and a
 server restart does not reset them.
 

@@ -19,12 +19,12 @@ runtime. The original browser-use execution path is documented separately in
 
 ## System purpose and boundaries
 
-JobBot coordinates a candidate's job applications. It accepts postings from
+Jobot coordinates a candidate's job applications. It accepts postings from
 manual entry and discovery tools, preserves their identity and history, queues
 work, gives an external reasoning executor an owned browser session, and records
 the outcome with evidence. The dashboard is the operator's view of that state.
 
-JobBot owns scheduling, records, selected candidate/assets, browser ownership,
+Jobot owns scheduling, records, selected candidate/assets, browser ownership,
 deadlines, controls and reporting. The executor reasons about the application
 and handles exceptions. Simplify performs broad form filling. Repository helpers
 accelerate supported interactions and return evidence to the executor; a helper

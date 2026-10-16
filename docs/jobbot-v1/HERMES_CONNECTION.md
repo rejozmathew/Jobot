@@ -1,4 +1,4 @@
-# Hermes-to-JobBot connection
+# Hermes-to-Jobot connection
 
 ## Current local session route — September 2026
 
@@ -11,7 +11,7 @@ runtime-config pointer. From the actual checkout, its terminal executes:
 ```
 
 The CLI reads HERMES_SESSION_ID; if the installed harness does not export it,
-pass --driver-id with that conversation's actual ID. No JobBot API token or
+pass --driver-id with that conversation's actual ID. No Jobot API token or
 dashboard is required. This does not spawn another application model.
 The selected configuration supplies candidate, resume, browser pool and private
 credential/mail references. Read [APPLICATION_RUNTIME.md](APPLICATION_RUNTIME.md)
@@ -35,7 +35,7 @@ fresh sessions and observed refs. Neither the queue nor local start launches an
 additional model. See the shared runtime and canonical skill for the exact calls.
 
 The portable CLI loads repository code on each invocation. A long-running native
-Hermes process must reload its JobBot plugin or restart before using newly added
+Hermes process must reload its Jobot plugin or restart before using newly added
 native operations. Loading files from disk does not replace its existing Python
 modules. The dashboard likewise needs a service restart after Python API changes.
 
@@ -54,9 +54,9 @@ This change repairs **internal service authentication for the portable CLI**. It
 
 ## What failed, and why
 
-The managed JobBot launcher supplies worker/operator tokens in its child-process environment. An ordinary Hermes chat's shell did not inherit `JOBBOT_PILOT_WORKER`. The native JobBot tool was also absent, and the documented CLI fallback previously used only `os.environ`. Duplicate checks could pass while execution remained unauthenticated.
+The managed Jobot launcher supplies worker/operator tokens in its child-process environment. An ordinary Hermes chat's shell did not inherit `JOBBOT_PILOT_WORKER`. The native Jobot tool was also absent, and the documented CLI fallback previously used only `os.environ`. Duplicate checks could pass while execution remained unauthenticated.
 
-The missing token is **not** a Workday password, mailbox credential or model-provider key. It is a local JobBot API credential. The existing private JSON store already held separate operator and worker values; no additional account or new secret was needed.
+The missing token is **not** a Workday password, mailbox credential or model-provider key. It is a local Jobot API credential. The existing private JSON store already held separate operator and worker values; no additional account or new secret was needed.
 
 ## Connection path
 

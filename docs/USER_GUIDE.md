@@ -22,12 +22,12 @@ under **Advanced**. The instance identity is also under Advanced.
 
 ## Header and connection state
 
-The header shows the connected mode and **Pause JobBot / Resume JobBot**. The
+The header shows the connected mode and **Pause Jobot / Resume Jobot**. The
 standard local dashboard connects automatically; **Reconnect** retries that
 connection. **Refresh** requests a fresh view. Visible pages update periodically;
 hidden browser tabs stop polling until visible again.
 
-**Pause JobBot** is a persistent pause on new queued applications and discovery.
+**Pause Jobot** is a persistent pause on new queued applications and discovery.
 Admitted work continues, with **Finishing current work** shown until it drains.
 Then the status becomes **Paused**. Requests made while paused remain saved and
 wait for Resume. Resume retains the previous automatic pickup setting, history
@@ -56,7 +56,7 @@ clicking Apply now.
 The dashboard does not need to stay open for applications to run. On the Ubuntu
 desktop installation, the browser service reopens the configured Brave profile
 if the whole browser closes. It works independently of the dashboard and answer
-entry; use **Pause JobBot** when you want to pause new application launches.
+entry; use **Pause Jobot** when you want to pause new application launches.
 
 Expand **Candidate, resume and application options** to inspect the candidate,
 active resume, browser profile, model/effort, submission mode and browser mode.
@@ -69,7 +69,7 @@ workflow. Changes are for new work; existing attempts retain their snapshots.
 | **Queue selected** | Save/prioritize the selected jobs in the displayed sort order and request execution without waiting for the automatic schedule |
 | **Apply now** on a job | Prioritize that specific job, including bypassing a scheduled retry wait; it waits for available capacity and earlier manual requests |
 | **Wake existing queue** | Wake the worker for existing ready work; it does not choose the selected table row or accelerate a future retry by itself |
-| **Enable automatic queue** / its pause counterpart | Enable or pause automatic pickup; explicit manual requests can still run unless global Pause JobBot is active |
+| **Enable automatic queue** / its pause counterpart | Enable or pause automatic pickup; explicit manual requests can still run unless global Pause Jobot is active |
 
 The configured concurrency determines how many applications can run. Manual
 priority does not evict an application already running. Repeated authenticated

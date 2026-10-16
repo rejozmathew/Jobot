@@ -3,7 +3,7 @@
 [Documentation index](README.md) · [Current setup](GETTING_STARTED.md)
 
 The original browser-use application remains in the repository for compatibility
-and historical reference. It is separate from the current managed JobBot dashboard,
+and historical reference. It is separate from the current managed Jobot dashboard,
 local session runtime and selected managed database.
 
 ## Recognize the old path

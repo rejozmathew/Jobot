@@ -1,4 +1,4 @@
-# JobBot v1 — living Windows execution plan
+# Jobot v1 — living Windows execution plan
 
 ## Scope and safety
 Approved PRD remains authoritative. Implementer: Windows Hermes. Reversible local stages are authorized without per-edit approval; external actions, real data migration, activation, publishing and Ubuntu remain gated. No normal applications while engineering.
@@ -45,4 +45,4 @@ A final real installed-Hermes/Brave run after the last code change completed two
 
 Stage4 offline engineering gates are covered in the 34-ID ACCEPTANCE_LEDGER.md, including explicit partial/pending entries. Live model+managed-browser application, official Simplify/ATS semantics, dedicated mailbox identity and actual helper reuse remain unverified; these are not converted to passes by fixture counts. Next external step requires user authorization for an exact role, candidate/materials and permitted side effects. No unattended live run, push or deployment is authorized. Test-only work used agy Gemini 3.8 Flash Medium/High; primary reviewed and exercised it and owned all production implementation. No provider fallback was used.
 
-No real job application/account/reset, active application-skill deployment, real profile/history overwrite, VM/Ubuntu/cron action, push or deployment. Main architecture stays fixed: Hermes owns execution/continuity; Auto Job Applier owns queue/history/accounts/timing/controls. Continue from actual files, not guessed signatures or stale chat summaries.
+No real job application/account/reset, active application-skill deployment, real profile/history overwrite, VM/Ubuntu/cron action, push or deployment. Main architecture stays fixed: Hermes owns execution/continuity; Jobot owns queue/history/accounts/timing/controls. Continue from actual files, not guessed signatures or stale chat summaries.

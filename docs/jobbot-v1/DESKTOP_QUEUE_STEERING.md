@@ -9,7 +9,7 @@ The optional `hermes_desktop` transport creates the application in the existing
 desktop backend through its native JSON-RPC WebSocket. Opening that conversation
 in Desktop attaches to the same live session. Ordinary busy-input behavior and
 the native `session.steer` / redirect controls remain Hermes responsibilities.
-JobBot does not remove ownership locks or run a second agent for corrections.
+Jobot does not remove ownership locks or run a second agent for corrections.
 
 New application prompts begin with the assigned company and role, which Hermes
 uses for the visible chat label. The desktop adapter keeps that heading before
@@ -31,7 +31,7 @@ Select it in the private runtime configuration:
 
 `yolo` is per-session and should mirror the deployment's existing `--yolo`
 selection; omit it to inherit native approvals. The application model/provider
-inherit the selected Hermes profile by default. JobBot Settings can explicitly
+inherit the selected Hermes profile by default. Jobot Settings can explicitly
 override the application provider/model for new dispatches using the catalog from
 that profile. The selection is passed to `session.create`, not written back to
 the global profile, and a running application retains its existing model.
@@ -51,7 +51,7 @@ stays alive through working and human-input states. Reconnects monitor the same
 session without resubmitting its prompt. If the monitor dies, queue recovery
 checks the native session before closing its application browser. Backend exit
 returns to the existing interrupted-attempt handling. Native idle state and
-monitor exit never establish successful submission; the recorded JobBot outcome
+monitor exit never establish successful submission; the recorded Jobot outcome
 remains authoritative.
 
 Existing CLI-owned runs keep their owner until they exit. This setting changes

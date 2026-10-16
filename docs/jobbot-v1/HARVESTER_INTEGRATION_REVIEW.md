@@ -12,7 +12,7 @@ No production data, mailbox, Harvester service, schedule, or deployment was chan
 
 Reuse Harvester as an additional lead source. It already has Google Jobs search,
 provider IDs, saved application-link candidates, optional scoring, CSV export,
-SQLite storage, a paginated read API, and a scheduler. Keep JobBot authoritative
+SQLite storage, a paginated read API, and a scheduler. Keep Jobot authoritative
 for candidate selection, canonical job identity, queue execution and outcomes.
 
 These findings affect the proposed 10–20 new suitable jobs per day:
@@ -21,7 +21,7 @@ These findings affect the proposed 10–20 new suitable jobs per day:
 | --- | --- | --- |
 | Search pagination is absent | `app/sources.py`, both provider `search` methods issue one request then slice the returned array | `MAX_RESULTS=50` does not fetch 50 Google Jobs results. Add next-page token handling in Harvester. |
 | Google date filtering is outdated | Google request sets `chips=date_posted:week` | Current SerpAPI documentation marks `chips` deprecated. Use current returned filters and verify freshness on employer pages. |
-| Stored URL is not necessarily an employer application | Google URL selection prefers `link`, then the first `related_links`, then an apply option; `_valid_url` checks syntax only | Resolve saved apply options and confirm the employer/requisition before existing JobBot intake. An aggregator link or HTTP 200 alone is not open-status evidence. |
+| Stored URL is not necessarily an employer application | Google URL selection prefers `link`, then the first `related_links`, then an apply option; `_valid_url` checks syntax only | Resolve saved apply options and confirm the employer/requisition before existing Jobot intake. An aggregator link or HTTP 200 alone is not open-status evidence. |
 | Duplicate checks happen after enrichment and scoring | `Runner.run_once` calls `fetch_full_description` and `score_and_blurb` before `Store.upsert` | Move cheap source/identity lookup ahead of expensive operations; retain deliberate refresh separately. |
 | Known rows are never refreshed | `Store.upsert` returns false for existing IDs/SerpAPI IDs | Stored descriptions, scores and open status may be stale. Preserve first discovery while recording later source observations. |
 | Provider errors can look like empty search results | Missing key/non-200 returns `[]`; HTTP 200 is counted successful before inspecting a JSON error | Separate unavailable/error/empty outcomes and persist per-run counts. Verify the optional LinkedIn engine against the selected account before relying on it. No live provider test was performed. |
@@ -35,13 +35,13 @@ review; no paid search requests were made.
 
 ## Implemented locally
 
-The JobBot queue now displays:
+The Jobot queue now displays:
 
 - **Source:** first retained discovery reference, with expandable references for
   every additional source, its first recorded time, source ID and discovery link.
   Source strings are rendered as text. A job with no retained provenance says Unknown.
 - **Added:** original `jobs.created_at` in the selected dashboard timezone.
-  Rediscovery and retries do not reset it. This is JobBot intake time, not a
+  Rediscovery and retries do not reset it. This is Jobot intake time, not a
   Harvester insertion time, employer posting date or execution-queue time.
 - **Last disposition:** newest recorded operator cancellation/restoration,
   completed application outcome, or completed dispatch outcome, with its time and
@@ -58,7 +58,7 @@ even when the prior attempt failed; the ordinary status column retains that outc
 saved `/latest` JSON array, wrapped `items` response, or existing Harvester CSV.
 It produces a separate unverified lead file with source references, candidate
 links and explicitly reported source dates. It omits private notes, descriptions,
-model scores and fit verdicts. It never connects to Harvester, writes JobBot's DB,
+model scores and fit verdicts. It never connects to Harvester, writes Jobot's DB,
 claims a job or enqueues an application. Invalid rows are counted separately;
 partial conversion exits 1 and invalid input exits 2. Source references use the
 Harvester ID, otherwise the provider ID, otherwise a canonical-link hash. Use a
@@ -85,7 +85,7 @@ No private config was changed here.
 
 ## Daily yield and additional sources
 
-Treat 10–20 as a target for **new, unique, suitable JobBot intake**, distinct from
+Treat 10–20 as a target for **new, unique, suitable Jobot intake**, distinct from
 leads fetched, records rediscovered, retries, or applications submitted. A useful
 initial plan is four discovery passes a day targeting about five verified new jobs
 each, drawing from employer searches, Harvester and eventually email alerts.
@@ -98,7 +98,7 @@ seven-day pilot: fetched leads, employer-verified leads, duplicates, closed role
 fit exclusions, new canonical jobs, queue entries, source errors and elapsed time.
 Attribute daily new jobs to their first retained source and count each canonical
 job once. Additional-source sightings should not inflate daily acquisition counts.
-Use original JobBot intake timestamps for daily cohorts. Avoid raising discovery
+Use original Jobot intake timestamps for daily cohorts. Avoid raising discovery
 volume blindly if verification, repeated duplicates or stalled runs are the bottleneck.
 This source-yield report and target-driven top-up scheduling remain future work.
 
@@ -107,7 +107,7 @@ use the configured mailbox, but there is no dedicated incremental alert extracto
 in this change. Use `source_type=linkedin_alert_email` and a stable
 `source_id=<message-id>:<job-id-or-link-hash>` for each job within a message.
 Resolve tracking links to the actual employer posting, apply the same candidate
-matching and JobBot identity checks, and preserve the source reference when the
+matching and Jobot identity checks, and preserve the source reference when the
 same job arrives from another feed. Raw email and private headers stay out of intake.
 Persist mailbox cursors/message processing results in the selected private state
 when building that connector; do not mark messages processed before their per-job

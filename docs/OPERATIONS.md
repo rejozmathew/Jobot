@@ -249,8 +249,8 @@ verifies the entire decompressed SHA-256 and checks the original is unchanged
 before removing its raw copy. A `.gz.storage.json` receipt records both hashes.
 SQLite sidecars, process references, changed files, symlinks and unknown backup
 names are retained. Previously registered archives expire after thirty days,
-always keeping the newest three distinct snapshots in each category (JobBot
-deployments, JobBot local snapshots, main Hermes, discovery Hermes). Source
+always keeping the newest three distinct snapshots in each category (Jobot
+deployments, Jobot local snapshots, main Hermes, discovery Hermes). Source
 backups and deployment manifests themselves remain available.
 
 Restore a compressed backup to a **new** path with `gzip -dc backup.db.gz >

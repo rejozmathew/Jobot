@@ -1,6 +1,6 @@
 > Historical snapshot: this preserves the former engineering index and September implementation handoff. Its acceptance status and instructions describe those checkpoints. Use the [current documentation](../README.md) and [engineering index](README.md) for present behavior.
 
-# JobBot modernization — Windows Hermes implementation handoff
+# Jobot modernization — Windows Hermes implementation handoff
 
 ## Current design and execution evidence
 

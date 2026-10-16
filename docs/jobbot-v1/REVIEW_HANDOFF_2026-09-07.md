@@ -1,4 +1,4 @@
-# JobBot: paused implementation and independent-review handoff
+# Jobot: paused implementation and independent-review handoff
 
 **Status: PAUSED at the user's request. This is a work-in-progress checkpoint, not a working Workday release.**
 
@@ -35,11 +35,11 @@ Role: **Digital Senior Director — Data & Analytics, Financial Services**, Huro
 - Ledger wall duration: `29.226445` seconds.
 - Worker: `gpt-5.6-luna`, Low, `openai-codex` subscription, headed.
 - Outcome: `failed`; submission intent: null; owned application tab closed.
-- Original final evidence was generic cleanup text. The worker's Simplify action had been rejected by JobBot's internal `browser_writer_busy` guard before the extension click code ran.
+- Original final evidence was generic cleanup text. The worker's Simplify action had been rejected by Jobot's internal `browser_writer_busy` guard before the extension click code ran.
 
 An isolated reproduction established that an **unknown** observer state was treated like a busy writer. This did not prove that Workday blocked automation or that Simplify itself was writing. The user reported that manually clicking Simplify worked.
 
-**Incorrect diagnosis to avoid repeating:** a later inspection of the public posting found a `Start Application` control. The assistant prematurely declared its missing recognition to be the confirmed cause. The user pointed out that the relevant screen was actually Workday's Create Account/Sign In screen. A later screenshot and observer check on the explicit application URL showed a visible, enabled **`Create Account & Autofill`** control while JobBot returned unknown/no recognized action.
+**Incorrect diagnosis to avoid repeating:** a later inspection of the public posting found a `Start Application` control. The assistant prematurely declared its missing recognition to be the confirmed cause. The user pointed out that the relevant screen was actually Workday's Create Account/Sign In screen. A later screenshot and observer check on the explicit application URL showed a visible, enabled **`Create Account & Autofill`** control while Jobot returned unknown/no recognized action.
 
 These are different page stages. The posting-only Start Application change passed focused tests, but did not fix the account-stage issue. The original failed tab had already been closed; the later screenshot is a reopened reproduction, not a capture of the original failure instant.
 

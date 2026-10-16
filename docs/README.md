@@ -1,6 +1,6 @@
 # Project documentation
 
-This is the reading guide for the current **JobBot Application Operations** system.
+This is the reading guide for the current **Jobot Application Operations** system.
 The documentation was reviewed against the repository through October 4, 2026,
 including the changes in `1b6776f`. Runtime settings and private deployment
 configuration remain authoritative for a particular installation.
@@ -10,6 +10,7 @@ configuration remain authoritative for a particular installation.
 | You want to… | Read |
 |---|---|
 | Understand the project in five minutes | [Root README](../README.md) |
+| Install Jobot for your own job search, including Hermes, email and Discord | [First-time installation](GETTING_STARTED.md#first-time-personal-installation) |
 | Set up a development environment or reconnect an existing installation | [Getting started](GETTING_STARTED.md) |
 | Understand every dashboard page and everyday controls | [User guide](USER_GUIDE.md) |
 | Understand components, processes and application execution | [Architecture](ARCHITECTURE.md) |
@@ -47,6 +48,11 @@ Historical plans, acceptance snapshots and run reports remain available for
 traceability. Their dates, old restrictions, test counts and deployment status
 describe their own checkpoints. They are not current setup instructions or a
 claim that every employer portal works.
+
+The project is now named **Jobot**. Historical checkout paths and baseline
+repository identifiers can still contain `auto-job-applier`; installed paths,
+`jobbot` commands and service names remain compatible. Current GitHub links use
+`rejozmathew/Jobot`.
 
 ## Documentation scope
 

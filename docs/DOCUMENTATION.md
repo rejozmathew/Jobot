@@ -13,7 +13,7 @@ This is a contributor workflow, not an additional gate on application execution.
 | [README](../README.md) | Project purpose, capabilities, current startup and navigation | Detailed migration history or private installation values |
 | [User guide](USER_GUIDE.md) | Page purpose, exact visible controls, expected effects and common tasks | Internal implementation details that do not help an operator |
 | [Architecture](ARCHITECTURE.md) | Component boundaries, runtime/data flow, rationale and limitations | Every chronological fix or full API payload |
-| [Getting started](GETTING_STARTED.md) | Existing installation entry points and isolated development setup | An invented production bootstrap |
+| [Getting started](GETTING_STARTED.md) | First-time personal provisioning, existing installation entry points and isolated development setup | Private installation values or unverified installer claims |
 | [Configuration](CONFIGURATION.md) | Field purpose, precedence, defaults and update scope | Secrets or copies of live runtime JSON |
 | [Data model](DATA_MODEL.md) | Entities, relationships, authoritative storage and evidence semantics | Exhaustive SQL duplicated from migrations |
 | [Integrations](INTEGRATIONS.md) | Public entry points and external component responsibilities | Reimplementation of canonical application instructions |

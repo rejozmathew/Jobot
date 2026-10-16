@@ -255,7 +255,7 @@ Settings `application_concurrency` selects 1–5 simultaneous queued application
 defaulting to 1. The selected model/provider remains a per-dispatch snapshot;
 operators can choose 1 for a local model and raise the count for another executor.
 Reducing the count drains existing attempts normally before refilling slots.
-Pause JobBot stops new admissions while supervision and cleanup continue for all
+Pause Jobot stops new admissions while supervision and cleanup continue for all
 running attempts. Each retains its own original application deadline and evidence.
 
 `queue_runtime.watch` launches without waiting for an executor, retains/reaps each
@@ -269,7 +269,7 @@ Migration 25 replaces the one-session-per-workspace index with a lookup index.
 `managed_sessions.reserve_session` counts applications and allows an existing-mode
 workspace to host several owned tabs. Managed-process workspaces retain exclusive
 allocation. No profiles are created, copied or cleared for concurrency. The
-existing JobBot browser retains cookies, extension setup, history and personal tabs.
+existing Jobot browser retains cookies, extension setup, history and personal tabs.
 
 `workspace_host` retains one profile lock and supervises every session in that
 browser. Separate request connections and per-session operation locks allow

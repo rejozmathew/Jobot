@@ -15,8 +15,8 @@ Under **Settings → Application model**, **Simultaneous applications** selects
 when using a local model and a larger value when desired for another executor.
 This is a saved operator choice, not an automatic model-dependent restriction.
 
-The existing-mode JobBot browser opens a separate window for each application,
-with its application tab selected. JobBot tiles its application windows so each
+The existing-mode Jobot browser opens a separate window for each application,
+with its application tab selected. Jobot tiles its application windows so each
 page stays visible between input actions; Simplify waits before filling fields
 when a document is hidden. Personal windows are not rearranged.
 Its profile, logins, history and Simplify installation stay in place; no additional
@@ -24,7 +24,7 @@ profiles are required. Each application gets its own model conversation, deadlin
 progress and outcome. Clicks and keyboard input briefly take turns in the foreground;
 reasoning and other tab work overlap. The queue displays active/selected capacity and refills a
 slot after its executor and application-tab cleanup finish. Lowering capacity
-lets existing work finish. Pause JobBot drains all current applications without
+lets existing work finish. Pause Jobot drains all current applications without
 starting new ones. Individual Stop and Restart affect only their owned tabs.
 
 Parallel input, visibility-dependent autofill and lifecycle behavior are tested
@@ -41,7 +41,7 @@ home, authenticated providers, Himalaya account and browser extension setup.
 
 `Hermes discovery -> active intake -> automatic dispatch queue -> up to the selected number of fresh application sessions -> recorded attempt/evidence`.
 
-JobBot owns the selected managed database, deduplication, queue, submission mode,
+Jobot owns the selected managed database, deduplication, queue, submission mode,
 history, browser ownership, controls and reports. Hermes is a replaceable external
 executor, not embedded into the database service. The discovery task never opens
 applications. A queued application never discovers or launches another job.
@@ -57,7 +57,7 @@ worker are independent processes; a working web page does not mean a worker is o
 ### Shared Brave window
 
 For a workspace configured with `connection_mode: "existing"`, open the supplied
-JobBot Brave launcher once and leave it running. It uses the existing authenticated
+Jobot Brave launcher once and leave it running. It uses the existing authenticated
 profile, a fixed loopback debugging port and no `--enable-automation` switch.
 The equivalent command is:
 
@@ -90,10 +90,10 @@ the launcher before the next attempt. No additional automatic retry limit is add
 
 ### Queue controls
 
-**Pause JobBot** in the dashboard header gives the application queue and discovery
+**Pause Jobot** in the dashboard header gives the application queue and discovery
 a break. Work already admitted finishes normally; the banner shows **Finishing
 current work** until it has ended, then **Paused**. No new queued application or
-discovery run starts until **Resume JobBot** is clicked. The pause survives service
+discovery run starts until **Resume Jobot** is clicked. The pause survives service
 and machine restarts. Queue selected, Apply now and Wake existing queue requests
 are saved during the pause and wait for Resume. Resume preserves the prior
 automatic queue setting, discovery interval, retry timing and application history.
@@ -216,7 +216,7 @@ stopped/submitted state.
 ## Discovery settings and other intake sources
 
 The queue's Source column shows the first retained source and expandable additional
-references. Added is original JobBot intake time; Last disposition shows the latest
+references. Added is original Jobot intake time; Last disposition shows the latest
 recorded cancellation/restoration or completed application/queue outcome. Neither
 rediscovery nor metadata refresh resets these times. Missing history stays explicit.
 The [Harvester review and offline export handoff](HARVESTER_INTEGRATION_REVIEW.md)
@@ -224,7 +224,7 @@ describes the prepared integration and future LinkedIn email source contract.
 
 Open **Settings → Job discovery** to set **Maximum jobs per discovery run** and
 **Discover jobs every (hours)**. Defaults are **5 jobs every 4 hours**. Settings
-are saved in JobBot's versioned managed database, not the private runtime JSON.
+are saved in Jobot's versioned managed database, not the private runtime JSON.
 The former `harvest_batch_size` config field is superseded by
 `discovery_batch_size`; transfer any nondefault value into Settings during rollout.
 Discovery prioritizes the strongest verified matches and may return fewer; it
@@ -280,7 +280,7 @@ CLI completion is recorded separately from actual source rows and queue entries.
 An executor that exits without saving its result file is shown as **Incomplete**,
 even when the CLI returns exit code zero. A saved result file alone still does
 not prove intake or application submission; inspect the corresponding job rows.
-Raw executor stdout is not copied into JobBot logs; ordinary Hermes conversation
+Raw executor stdout is not copied into Jobot logs; ordinary Hermes conversation
 history and private task/result files remain available to the operator.
 
 ### Discovery context on local models
@@ -310,7 +310,7 @@ first. Do not replace the entire config with the fragment. Set
 `harvest_hermes_command` to the existing absolute Hermes executable followed by
 `--profile jobbot-discovery chat --oneshot --pass-session-id --query-file
 {prompt_file}` (retain any existing operator CLI flags). The fragment and command
-are deployment choices; JobBot does not modify the general Hermes profile.
+are deployment choices; Jobot does not modify the general Hermes profile.
 
 The discovery brief keeps bulk search output in private scratch files and asks
 the executor to save verified findings to `checkpoint.json` after each role.
@@ -393,8 +393,8 @@ systemctl --user status jobbot-queue.service jobbot-dashboard.service
 systemctl --user list-timers jobbot-harvest.timer
 ```
 
-The minute timer is only a wakeup; the saved JobBot settings control discovery.
-Dates display in JobBot's selected timezone. Services use private umasks. Queue/harvest service shutdown targets their
+The minute timer is only a wakeup; the saved Jobot settings control discovery.
+Dates display in Jobot's selected timezone. Services use private umasks. Queue/harvest service shutdown targets their
 own systemd control groups. User-service persistence may require enabling user
 lingering, but lingering **does not create or preserve a graphical desktop**.
 VM auto-start/login/display availability must be verified on the actual machine.
