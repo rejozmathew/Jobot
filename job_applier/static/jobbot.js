@@ -256,7 +256,18 @@ function dispositionCell(job){
  td.append(el('span',label),el('small',stamp(last.at)),el('small',({operator:'By you',application:'Application outcome',queue:'Queue outcome'})[last.source]||last.source));
  return td;
 }
+function renderOverview(v){
+ const active=v.jobs.filter(unfinished), attention=active.filter(j=>{
+  const q=latestDispatch(v,j);return ['blocked','failed','interrupted','submission_unknown','ready_for_review','skipped'].includes(j.status)||!!j.failure_reason||(q?.state==='finished'&&['blocked','failed','interrupted','submission_unknown','ready_for_review','skipped'].includes(q.outcome));
+ });
+ $('overview-active').textContent=active.length;$('overview-submitted').textContent=v.jobs.filter(submitted).length;$('overview-attention').textContent=attention.length;
+ const q=v.dispatch_queue||{};
+ $('overview-worker').textContent=q.automation_paused?'Paused':!q.worker_online?'Offline':q.enabled?'Automatic':'Manual';
+ $('overview-running').textContent=`${q.counts?.dispatched||0} running · ${q.counts?.queued||0} queued`;
+ for(const button of document.querySelectorAll('[data-overview-filter]'))button.setAttribute('aria-pressed',String(button.dataset.overviewFilter===$('job-filter').value));
+}
 function renderQueue(v){
+ renderOverview(v);
  renderJobFilters(v);
  renderSessions(v);
  renderAnswers(v);
@@ -1072,8 +1083,12 @@ function refresh(){
  }while(state.refreshRequested&&state.instance);}finally{state.busy=false;state.refreshPromise=null;}})();
  return state.refreshPromise;
 }
-async function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!=='tab-'+name);document.querySelectorAll('[data-tab]').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));for(const n of document.querySelectorAll('nav [data-tab]')){if(n.dataset.tab===name)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}fitAnswerWorkspace();if(name==='run')await loadActivity();}
+async function tab(name){$('workspace-title').textContent=({queue:'Applications',answers:'Needs your answer',learned:'Learned answers',run:'Activity',profile:'Your profile',settings:'Settings',accounts:'Accounts & history',knowledge:'Lessons & helpers',documents:'Document records'})[name]||'Workspace';document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!=='tab-'+name);document.querySelectorAll('[data-tab]').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));for(const n of document.querySelectorAll('nav [data-tab]')){if(n.dataset.tab===name)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}fitAnswerWorkspace();if(name==='run')await loadActivity();}
 $('reconnect').onclick=()=>location.reload();
+$('open-intake').onclick=()=>{$('intake-dialog').showModal();$('job-url').focus();};
+$('close-intake').onclick=()=>$('intake-dialog').close();
+$('job-detail-toggle').onclick=()=>{const expanded=$('jobs-panel').classList.toggle('expanded-columns');$('job-detail-toggle').setAttribute('aria-pressed',String(expanded));$('job-detail-toggle').textContent=expanded?'Show fewer columns':'Show all columns';};
+for(const button of document.querySelectorAll('[data-overview-filter]'))button.onclick=()=>{$('job-filter').value=button.dataset.overviewFilter;filterJobs();};
 $('refresh').onclick=refresh;document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function filterJobs(){rememberProgress($('queue-rows'));state.queueKey=null;state.selected.clear();if(state.view)renderQueue(state.view);}
 $('job-filter').onchange=filterJobs;$('job-search').oninput=filterJobs;
@@ -1127,12 +1142,12 @@ if($('queue-answered-batch'))$('queue-answered-batch').onclick=async()=>{
   notice(`${count} answered application${count===1?'':'s'} queued for the next batch.`);await refresh();
  }catch(error){notice(answerError(error),true);}
 };
-$('intake-form').onsubmit=async e=>{e.preventDefault();try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:newRequestId(),producer:'dashboard'});
+$('intake-form').onsubmit=async e=>{e.preventDefault();$('intake-error').textContent='';try{const job=await api('intake',{url:$('job-url').value,company:$('job-company').value,title:$('job-title').value,source_type:'manual',source_id:newRequestId(),producer:'dashboard'});
  for(const id of ['job-search','job-source-filter','job-country-filter','job-assessment-filter','job-added-from','job-added-to'])$(id).value='';state.selected.clear();state.queueKey=null;
  if(job.disposition==='canceled'){$('job-filter').value='canceled';notice('This job is already saved as canceled. Restore it here if you want to pursue it again.');}
  else if(submitted(job)){$('job-filter').value='submitted';notice('This job is already saved as submitted.');}
  else{$('job-filter').value='active';state.selected.add(job.id);notice('Job saved and selected. Choose Queue selected to apply.');}
- $('intake-form').reset();await refresh();}catch(err){notice(err.message,true);}};
+ $('intake-form').reset();$('intake-dialog').close?.();await refresh();}catch(err){$('intake-error').textContent=err.message;}};
 $('mark-ready').onclick=async()=>{try{if(!state.selected.size)throw Error('Select at least one job.');for(const id of state.selected)await api('eligibility',{job_id:id,decision:'ready',reason:'Explicit operator approval'});notice('Selected eligibility recorded.');await refresh();}catch(e){notice(e.message,true);}};
 $('request-run').onclick=async()=>{try{if(!state.selected.size||!$('candidate').value||!$('browser-profile').value.trim())throw Error('Select jobs, candidate and exact browser profile.');const r=await api('request_run',{request_id:newRequestId(),job_ids:[...state.selected],identity_id:$('candidate').value,browser_profile:$('browser-profile').value.trim()});state.run=r.id;state.attempt=null;notice('Run requested; waiting for worker acceptance.');await tab('run');await refresh();}catch(e){notice(e.message,true);}};
 if($('start-application-btn')){$('start-application-btn').onclick=async()=>{

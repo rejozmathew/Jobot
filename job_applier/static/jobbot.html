@@ -8,15 +8,16 @@
   <script src="/static/jobbot.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#workspace-content">Skip to workspace</a>
 <header>
   <div>
-    <p class="eyebrow">JOBOT</p>
-    <h1>Application Operations</h1>
+    <p class="eyebrow">YOUR JOB SEARCH, IN MOTION</p>
+    <h1 id="workspace-title">Applications</h1>
   </div>
   <div class="header-actions">
     <span id="mode" class="badge">Not connected</span>
     <button id="automation-toggle" type="button" aria-describedby="automation-status" hidden>Pause Jobot</button>
-    <button id="refresh" hidden>Refresh</button>
+    <button id="refresh" hidden aria-label="Refresh workspace">Refresh</button>
 
   </div>
 </header>
@@ -32,6 +33,8 @@
 <main id="console" hidden>
   <p id="automation-status" role="status" aria-live="polite"></p>
   <nav aria-label="Workspace">
+    <div class="workspace-brand"><span class="brand-mark" aria-hidden="true">j.</span><div>Jobot<small>Your next chapter</small></div></div>
+    <p class="nav-label">WORKSPACE</p>
     <button data-tab="queue" class="active">Applications</button>
     <button data-tab="answers">Needs your answer <span id="answer-count"></span></button>
     <button data-tab="learned">Learned answers <span id="learned-count"></span></button>
@@ -46,10 +49,19 @@
     </div></details>
   </nav>
 
+  <div id="workspace-content" tabindex="-1">
   <!-- TAB: APPLICATIONS (QUEUE & START) -->
   <section id="tab-queue" class="tab">
-    <section class="card">
-      <h2>Application queue</h2>
+    <div class="workspace-heading"><div><h2>Make your next move.</h2><p>Discover opportunities. Keep every application moving.</p></div><button id="open-intake" class="primary" type="button">+ Add a job</button></div>
+    <div class="queue-overview" aria-label="Application overview">
+      <button type="button" data-overview-filter="active"><span>In your pipeline</span><strong id="overview-active">0</strong><small>Unfinished jobs <span aria-hidden="true">↗</span></small></button>
+      <button type="button" data-overview-filter="submitted"><span>Submitted</span><strong id="overview-submitted">0</strong><small>Recorded submissions <span aria-hidden="true">↗</span></small></button>
+      <button type="button" data-overview-filter="attention"><span>Needs attention</span><strong id="overview-attention">0</strong><small>Review the next step <span aria-hidden="true">↗</span></small></button>
+      <div class="queue-pulse"><span class="pulse-label">Queue status</span><strong id="overview-worker">Checking…</strong><small id="overview-running">Connecting to your workspace</small></div>
+    </div>
+    <section class="card queue-control-card">
+      <details class="operation-details"><summary>Queue controls &amp; schedule <span>Options, timing and service status</span></summary>
+      <h2 class="sr-only">Application queue</h2>
       <p id="dispatcher-status" role="status">Checking queue worker…</p>
       <p id="application-schedule" role="status"></p>
       <p id="discovery-status" role="status">Checking discovery schedule…</p>
@@ -107,11 +119,13 @@
         <button id="mark-ready">Mark selected ready</button>
         <button id="request-run">Request run</button>
       </div>
+      </details>
     </section>
 
-    <section class="card">
+    <section class="card" id="jobs-panel">
       <div class="section-title">
-        <h2>Jobs</h2>
+        <h2>Your opportunities</h2>
+        <button id="job-detail-toggle" type="button" aria-pressed="false">Show all columns</button>
         <span id="queue-count"></span>
       </div>
       <div class="job-filters">
@@ -124,6 +138,7 @@
           <option value="all">All jobs</option>
         </select></label>
       </div>
+      <details class="more-filters"><summary>More filters</summary>
       <div class="job-filter-details">
         <label>Source<select id="job-source-filter"><option value="">All sources</option></select></label>
         <label>Country<select id="job-country-filter"><option value="">All countries</option></select></label>
@@ -132,6 +147,7 @@
         <label>Added through<input id="job-added-to" type="date"></label>
         <button id="job-reset-filters" type="button">Clear filters</button>
       </div>
+      </details>
       <div class="bulk-actions">
         <button id="queue-selected-jobs" type="button" class="primary">Queue selected</button>
         <button id="select-unfinished" type="button" title="Select all unfinished jobs shown by the current filters">Select all</button>
@@ -169,24 +185,7 @@
           <tbody id="queue-rows"></tbody>
         </table>
       </div>
-      <section class="manual-intake">
-          <h3>Add a job</h3>
-          <form id="intake-form">
-            <label>Official URL
-              <input id="job-url" type="url" required>
-            </label>
-            <div class="form-row">
-              <label>Company
-                <input id="job-company" type="text">
-              </label>
-              <label>Role title
-                <input id="job-title" type="text">
-              </label>
-            </div>
-            <button type="submit">Add job</button>
-            <span>Add first, then select it and choose Queue selected.</span>
-          </form>
-      </section>
+
     </section>
   </section>
 
@@ -400,7 +399,7 @@
   <section id="tab-settings" class="tab" hidden>
     <section class="card">
       <div class="section-title">
-        <h2>Effective Settings</h2>
+        <h2>Your preferences</h2>
         <span id="settings-version"></span>
       </div>
       <p>Operational settings apply to new requests. Existing attempts retain their immutable snapshots.</p>
@@ -539,7 +538,28 @@
       </form>
     </section>
   </section>
+  </div>
 </main>
+      <dialog id="intake-dialog" aria-labelledby="intake-title">
+          <div class="section-title"><h2 id="intake-title">Add an opportunity</h2><button id="close-intake" type="button" aria-label="Close add job">Close</button></div>
+          <p>Save a posting to your pipeline. Your queue settings control when it runs.</p>
+          <form id="intake-form">
+            <p id="intake-error" role="alert" class="error"></p>
+            <label>Official URL
+              <input id="job-url" type="url" required>
+            </label>
+            <div class="form-row">
+              <label>Company
+                <input id="job-company" type="text">
+              </label>
+              <label>Role title
+                <input id="job-title" type="text">
+              </label>
+            </div>
+            <button type="submit" class="primary">Add job</button>
+            <span>Add first, then select it and choose Queue selected.</span>
+          </form>
+      </dialog>
 
 <dialog id="job-url-dialog" aria-labelledby="job-url-title">
   <form id="job-url-form">
@@ -553,7 +573,7 @@
 </dialog>
 
 <footer>
-  Evidence-led operations · Review-only development defaults · No automatic letter generation
+  Jobot · Every opportunity, one workspace
 </footer>
 </body>
 </html>

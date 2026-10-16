@@ -18,6 +18,7 @@ load_dotenv()
 
 from browser_use import Agent, Browser, BrowserProfile, ChatOpenAI
 from .browser_use_overrides import apply_browser_use_overrides
+from .legacy_credentials import account_password
 from .platform_handlers import (
     HandlerResult,
     WORKDAY_EXISTING_DATA_CONFLICT_KEYWORDS,
@@ -303,6 +304,7 @@ def build_application_task(
     job_title: Optional[str] = None,
     job_company: Optional[str] = None,
     resolved_resume_path: Optional[str] = None,
+    credential_profile_path: Optional[Path] = None,
 ) -> str:
     """Build a comprehensive task prompt for job application."""
     
@@ -319,7 +321,7 @@ def build_application_task(
     login_password = str(default_account.get("password", "") or "")
     login_password_display = login_password if login_password.strip() else "[NOT_PROVIDED]"
     profile_email = str(identity.get("email", "") or "").strip()
-    fallback_account_password = os.getenv("JOB_APPLIER_FALLBACK_PASSWORD", "ApplyFlow#2026!")
+    fallback_account_password = account_password(profile, job_url, credential_profile_path or Path("profile.json"))
 
     # CRITICAL INSTRUCTIONS INJECTION
     critical_rules = """
@@ -521,7 +523,7 @@ class JobApplyAgent:
         """
         # Imports moved to top
         
-        profile = self.load_profile()
+        profile = {**self.load_profile(), '_legacy_credential_profile_path': str(self.profile_path.resolve())}
         resume_path = self.get_resume_path()
         
         # Create job-specific artifacts directory (numbered by seq_id when available)
@@ -548,6 +550,7 @@ class JobApplyAgent:
             job_title=job_title,
             job_company=job_company,
             resolved_resume_path=resume_path,
+            credential_profile_path=self.profile_path,
         )
         
         # Save task for debugging
@@ -691,9 +694,7 @@ class JobApplyAgent:
             if not isinstance(default_account_profile, dict):
                 default_account_profile = {}
             has_saved_login_password = bool(str(default_account_profile.get("password", "") or "").strip())
-            account_password_value = str(default_account_profile.get("password", "") or "").strip()
-            if not account_password_value:
-                account_password_value = str(os.getenv("JOB_APPLIER_FALLBACK_PASSWORD", "ApplyFlow#2026!"))
+            account_password_value = account_password(profile, job_url, self.profile_path)
             experience_profile = profile.get("experience", []) if isinstance(profile, dict) else []
             if not isinstance(experience_profile, list):
                 experience_profile = []
@@ -3082,7 +3083,7 @@ class JobApplyAgent:
                  except Exception as e:
                      print(f"Warning: Failed to process retry logic: {e}")
 
-            task = build_application_task(profile, job_url, job_title, job_company) + failure_context
+            task = build_application_task(profile, job_url, job_title, job_company, credential_profile_path=self.profile_path) + failure_context
             if platform_handoff_context:
                 task += (
                     "\n\nPLATFORM HANDOFF CONTEXT:\n"

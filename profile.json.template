@@ -1,0 +1,144 @@
+{
+  "identity": {
+    "full_name": "",
+    "first_name": "",
+    "middle_name": "",
+    "last_name": "",
+    "preferred_name": "",
+    "email": "you@example.com",
+    "phone": "",
+    "address": {
+      "street": "",
+      "city": "",
+      "state": "",
+      "zip": "",
+      "country": ""
+    },
+    "location": "",
+    "linkedin": "",
+    "website": "",
+    "github": ""
+  },
+  "summary": "",
+  "years_experience": null,
+  "target_roles": [],
+  "industries": [],
+  "skills": [],
+  "leadership_scope": {
+    "teams_managed": "",
+    "budget_ownership": null,
+    "executive_stakeholders": null
+  },
+  "work_authorization": {
+    "country": "",
+    "status": "",
+    "visa_expiration": "",
+    "needs_sponsorship": null,
+    "sponsorship_type_needed": "",
+    "legally_authorized_us": null,
+    "legally_authorized_eu": null,
+    "work_permit_other_countries": []
+  },
+  "work_preferences": {
+    "remote_only": null,
+    "hybrid_ok": null,
+    "onsite_ok": null,
+    "preferred_locations": [],
+    "willing_to_relocate": null,
+    "relocation_assistance_required": null,
+    "min_total_comp": null,
+    "salary_expectation": {
+      "min": null,
+      "max": null,
+      "currency": "",
+      "includes_bonus": null
+    },
+    "notice_period_days": null,
+    "earliest_start_date": ""
+  },
+  "dealbreakers": [],
+  "eeo_information": {
+    "gender": "",
+    "gender_identity": "",
+    "pronouns": "",
+    "race_ethnicity": "",
+    "hispanic_latino": null,
+    "veteran_status": "",
+    "disability_status": "",
+    "lgbtq": ""
+  },
+  "standard_answers": {
+    "authorized_to_work_us": null,
+    "requires_sponsorship": null,
+    "will_require_sponsorship_future": null,
+    "willing_to_relocate": null,
+    "willing_to_travel": null,
+    "travel_percentage_ok": null,
+    "background_check_consent": null,
+    "drug_test_consent": null,
+    "non_compete_agreement": null,
+    "has_non_compete": null,
+    "previously_applied": null,
+    "previously_employed": null,
+    "referred_by_employee": null,
+    "referral_name": "",
+    "age_18_or_older": null,
+    "has_drivers_license": null,
+    "has_reliable_transportation": null,
+    "can_work_overtime": null,
+    "can_work_weekends": null,
+    "felony_conviction": null,
+    "felony_explanation": "",
+    "security_clearance": "",
+    "highest_education": "",
+    "years_in_current_role": null,
+    "reason_for_leaving": ""
+  },
+  "experience": [
+    {
+      "company": "",
+      "location": "",
+      "title": "",
+      "dates": "",
+      "start_date": "",
+      "end_date": "",
+      "current": null,
+      "highlights": []
+    }
+  ],
+  "education": [
+    {
+      "program": "",
+      "degree": "",
+      "major": "",
+      "institution": "",
+      "year": null,
+      "gpa": ""
+    }
+  ],
+  "certifications": [],
+  "projects": [],
+  "languages": [
+    {
+      "language": "",
+      "proficiency": ""
+    }
+  ],
+  "links": [],
+  "accounts": {
+    "default": {
+      "email": "you@example.com",
+      "username": "",
+      "password": ""
+    },
+    "overrides": []
+  },
+  "resume": {
+    "text": "",
+    "path": "./resume.pdf"
+  },
+  "cover_letter": {
+    "default_text": "",
+    "generate_custom": false
+  }
+}

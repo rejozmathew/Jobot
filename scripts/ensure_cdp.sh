@@ -5,12 +5,19 @@ set -uo pipefail
 
 PORT="${CDP_PORT:-9222}"
 BRAVE="${BRAVE_EXE:-C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe}"
-PROFILE="${CDP_PROFILE:-C:\Users\rejoz\AppData\Local\hermes\browser\brave-cdp-apply}"
 URL="${CDP_INITIAL_URL:-about:blank}"
 
 if curl -s --max-time 3 "http://127.0.0.1:${PORT}/json/version" | grep -q '"Browser"'; then
   echo "CDP already up on ${PORT}"
   exit 0
+fi
+
+if [[ -n "${CDP_PROFILE:-}" ]]; then
+  PROFILE="$CDP_PROFILE"
+else
+  # Resolve the current Windows account rather than a developer's home folder.
+  LOCAL_APP_DATA="$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("LocalApplicationData")' | tr -d '\r')"
+  PROFILE="${LOCAL_APP_DATA}\\hermes\\browser\\brave-cdp-apply"
 fi
 
 echo "Starting Brave (port ${PORT}) ..."

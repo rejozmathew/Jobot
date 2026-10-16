@@ -10,6 +10,12 @@ These integration files maintain the existing installations; they are not a repl
 - Unseen matching roles are inspected first. An unavailable posting rotates behind unseen work instead of ending the entire slice. Role and location preferences are unchanged.
 - `scored-bank-intake.patch` updates the installed bridge to query the two configured searches separately, then scan newly scored `direct` postings from an explicit bank-company allowlist. This avoids unrelated unscored direct records with empty search IDs breaking the entire source scan. Direct records use their official employer URL; the existing role, location, company, URL-availability, identity, Jobot gate, receipt, and per-run import controls still apply. The allowlist lives in the private bridge config as `direct_scored_companies`; `test_scored_bank_intake.py` is its synthetic regression test in the installed bridge's `tests/` directory.
 
-Use the existing authoritative Python `/home/rejo/apps/auto-job-applier-runtime/.venv/bin/python`. Resolver progress is private beside the bridge's configured state database, never in Git. The service imports the existing protected bridge environment without printing its values.
+Use the Python environment from your existing authoritative runtime. The user-service
+template uses `%h/apps/auto-job-applier-runtime/.venv/bin/python`; `%h` is systemd's
+current-user home directory. Adapt the installation path when installing the unit.
+Resolver progress is private beside the bridge's configured state database, never
+in Git. The service imports the existing protected bridge environment without
+printing its values. Deployed machine-specific units remain private operational
+configuration; changing this template does not restart or replace them.
 
 Source backups and test evidence for the September 18 repair are under the existing ignored deployment artifacts area. Preserve Ubuntu-only runtime overlays; do not replace its working tree with a Windows checkout.

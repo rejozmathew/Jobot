@@ -2,9 +2,11 @@
 
 [Documentation index](README.md) · [Getting started](GETTING_STARTED.md) · [Operations](OPERATIONS.md)
 
-The dashboard is titled **Application Operations**. It reads and changes the
+The **Jobot** dashboard reads and changes the
 selected managed instance. Six pages are in the main navigation; three more are
-under **Advanced**. The instance identity is also under Advanced.
+under **Advanced**. The instance identity is also under Advanced. Desktop navigation
+stays in the left sidebar; on smaller screens it wraps above the current page.
+The dark workspace supports keyboard focus indicators, a skip link and reduced motion.
 
 ## Page map
 
@@ -41,8 +43,11 @@ independently started application outside the queue.
 
 ### Queue overview and application options
 
-The queue card shows whether the worker is online, active capacity, application
-scheduling and discovery state. A reachable dashboard with an offline worker can
+The overview shows unfinished jobs, recorded submissions, jobs needing attention
+and queue state. Click a count to apply its corresponding table filter. These
+counts cover the whole saved job list; **Activity** provides date-based metrics.
+Expand **Queue controls & schedule** for worker status, active capacity, application
+scheduling, discovery state and queue controls. A reachable dashboard with an offline worker can
 save requests but cannot dispatch them until the worker returns.
 
 During desktop startup, the worker can be online while the card says **Waiting
@@ -79,7 +84,15 @@ delivery of the same UI request keeps its request identity.
 
 Use text search and the **Show** filter: **Unfinished**, **Needs attention**,
 **Submitted**, **Canceled** or **All jobs**. Additional filters cover source,
-country, assessment and added-date range. Clear filters restores the broad view.
+country, assessment and added-date range under **More filters**. Clear filters restores the broad view.
+The compact table shows job number, company/role, status, added date, last
+disposition and time to apply. **Show all columns** reveals assessment, country,
+posted date and source details; the table scrolls horizontally on narrow screens.
+All columns remain sortable when visible.
+
+Use **+ Add a job** to open the posting form. Closing the dialog keeps its draft;
+a successful save clears it and refreshes the pipeline. Saving a job uses the
+existing queue settings; it does not change submission permissions.
 
 The permanent **#** is assigned when first added. Rediscovery does not change that
 number or the added date. Sortable columns include company/role, status,

@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+from ..legacy_credentials import account_password
 from .base import BasePlatformHandler, HandlerOutcome, HandlerResult, env_flag, safe_navigate
 
 WORKDAY_HOST_MARKER = "myworkdayjobs.com"
@@ -335,7 +336,7 @@ class WorkdayHandler(BasePlatformHandler):
         accounts = profile.get("accounts", {}) if isinstance(profile.get("accounts"), dict) else {}
         default_account = accounts.get("default", {}) if isinstance(accounts.get("default"), dict) else {}
         email = str(default_account.get("email") or identity.get("email") or "").strip()
-        password = str(default_account.get("password") or os.getenv("JOB_APPLIER_FALLBACK_PASSWORD", "ApplyFlow#2026!")).strip()
+        password = str(default_account.get("password") or os.getenv("JOB_APPLIER_FALLBACK_PASSWORD", "")).strip()
         return WorkdayCredentials(email=email, password=password)
 
     def _referral_candidates(self) -> list[str]:
@@ -1366,7 +1367,7 @@ class WorkdayHandler(BasePlatformHandler):
                 and "create account" in normalize_text(snap.get("marker") or "")
             )
         )
-        if self.creds.email and self.creds.password and auth_possible:
+        if self.creds.email and auth_possible:
             acted, note = await self._auth_action("AUTH", snap)
             if acted:
                 return acted, note
@@ -1377,6 +1378,8 @@ class WorkdayHandler(BasePlatformHandler):
         return False, "No deterministic entry action found from DETECT state."
 
     async def _auth_action(self, state: str, snap: dict[str, Any]) -> tuple[bool, str]:
+        if self.creds.email and not self.creds.password:
+            self.creds.password = account_password(self.profile, self.job_url)
         if not self.creds.email or not self.creds.password:
             return False, "Missing credentials in profile."
         marker = normalize_text(snap.get("marker") or "")

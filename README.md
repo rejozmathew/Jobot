@@ -20,7 +20,8 @@ Use the current `main` branch. Repository access is required while this project 
 1. Clone Jobot and install the pinned Python dependencies in its virtual environment.
 2. Install Hermes and authenticate your own model provider. Enable terminal,
    file/skill access and screenshot/vision support on the machine running Jobot.
-3. Create your own private runtime, candidate profile and resume registration.
+3. Copy [profile.json.template](profile.json.template) into your private installation,
+   fill in your own facts, then create the runtime and register your resume.
 4. Install Simplify Copilot in Jobot's browser profile, sign in to your own
    Simplify account and complete your profile there, including education and work history.
 5. Make Hermes discover the bundled [job-apply entry skill](integrations/hermes_jobbot/skills/job-apply/SKILL.md).

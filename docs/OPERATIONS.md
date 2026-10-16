@@ -271,3 +271,27 @@ available). This complements the existing validation-fixture cleanup timer.
 Preserved conversation and application history can still grow. This maintenance
 bounds disposable caches and ages redundant backups; it does not promise a fixed
 total disk size or silently erase history to meet a storage target.
+
+## Preparing a public repository
+
+The public source tree contains neutral templates; filled profiles, credentials,
+resumes, browser data and application evidence belong in private storage. Run
+`python scripts/check_public_tree.py` in the repository virtual environment before
+publication. It checks tracked filenames and obvious credential patterns and
+does not read ignored operator files. Use a full secret scanner as well, including
+all branches and tags; inspect findings without copying secret values into reports.
+
+Deleting a file in a new commit does not remove it from Git history. If credentials
+were committed, rotate them wherever used and sanitize every published reference
+before changing visibility. Preserve a private recovery bundle and a mapping of
+old to rewritten commits/tags. A coordinated history rewrite changes commit IDs
+and requires existing clones to resynchronize; obtain approval for that destructive
+Git operation. Preserve active runtime files and databases separately from the
+source history rewrite. GitHub pull-request references or cached commits may need
+additional host-side removal; a branch-only scan cannot certify those copies.
+
+The October 2026 cleanup removes obsolete root probes and personal backup files
+from the maintained source, groups historical narrative under `docs/legacy/`, and
+adds `profile.json.template`. Runtime rollout preserves existing private files even
+when their former copies are removed from version control. These publication
+checks do not add restrictions to application execution.

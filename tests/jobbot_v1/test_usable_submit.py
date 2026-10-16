@@ -658,10 +658,12 @@ def test_ui_redesign_contract():
     ):
         assert f'id="{old_id}"' in html
 
-    # 4. CSS design contracts: neutral near-white canvas, dark ink, restrained teal, no gradient hero
-    assert "--bg-canvas: #f8fafc;" in css
-    assert "--text-main: #0f172a;" in css
-    assert "--accent: #0d9488;" in css
+    # 4. Requested dark workspace retains keyboard and reduced-motion support.
+    assert "color-scheme: dark" in css
+    assert "prefers-reduced-motion" in css
+    assert ":focus-visible" in css
+    assert 'href="#workspace-content"' in html
+    assert 'aria-labelledby="intake-title"' in html
     assert "linear-gradient" not in css
     assert "overflow-x: hidden" in css
 

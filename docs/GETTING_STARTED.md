@@ -65,27 +65,44 @@ Model authentication belongs to Hermes; it is not bundled with Jobot.
 
 ### 3. Create your private profile, resume and runtime
 
-Create `artifacts/jobbot-v1-private/my-install/` inside the checkout. This ignored
-directory is one convenient private location; an OS-private directory outside
-the checkout also works. Put your resume at `resume.pdf` and a factual
-`candidate.json` there. Start with this shape, expanding it with your own work
-history, education and preferences using [profile.example.json](../profile.example.json)
-as a field reference. Replace all example values, including its seniority and
-target roles; do not copy those sample career facts as your own.
+Start with the downloadable [profile.json.template](../profile.json.template).
+It contains the supported profile fields with blank strings, empty lists and
+`null` for unanswered numbers/yes-no questions. It contains no sample career,
+immigration, demographic or consent answers. `profile.example.json` is an
+identical compatibility copy; maintain the template as the field reference.
 
-```json
-{
-  "identity": {
-    "full_name": "Your Name",
-    "first_name": "Your",
-    "last_name": "Name",
-    "email": "you@example.com",
-    "phone": "+1-555-555-0100",
-    "location": "Your city, region, country"
-  },
-  "target_roles": ["Your target role"]
-}
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force artifacts/jobbot-v1-private/my-install
+if (Test-Path artifacts/jobbot-v1-private/my-install/candidate.json) { throw 'Keep your existing profile; choose another installation directory.' }
+Copy-Item profile.json.template artifacts/jobbot-v1-private/my-install/candidate.json
 ```
+
+Ubuntu:
+
+```bash
+mkdir -p artifacts/jobbot-v1-private/my-install
+cp -n profile.json.template artifacts/jobbot-v1-private/my-install/candidate.json
+chmod 700 artifacts/jobbot-v1-private/my-install
+chmod 600 artifacts/jobbot-v1-private/my-install/candidate.json
+```
+
+Use a new installation directory; preserve any existing profile. Open your private
+`candidate.json` and enter your name, contact information, location, target roles,
+skills, work history and education. Repeat the experience/education objects for
+each entry, or remove unused entries. Replace `you@example.com`. Answer work
+authorization and sponsorship from your own circumstances. Choose voluntary
+self-identification and consent answers yourself. Remove unanswered fields or
+leave them null; null means unknown, not “no.” Keep dates and factual answers
+consistent with your resume and Simplify profile.
+
+Put your approved resume at `artifacts/jobbot-v1-private/my-install/resume.pdf`.
+The template's relative resume path is resolved beside the profile. The setup
+below imports factual fields and registers that file; credentials are not imported
+into the candidate record. Leave the template's `accounts` passwords blank and
+configure employer credentials separately below. Never commit the filled profile.
+An OS-private directory outside the checkout also works if you update the paths.
 
 Save the following as `artifacts/jobbot-v1-private/setup_my_jobot.py`, edit the
 browser and Hermes executable paths for your machine, then run it once with

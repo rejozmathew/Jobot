@@ -22,6 +22,18 @@ dist/
 # Secrets and sensitive files
 .env
 profile.json
+profile.json.*
+!profile.json.template
+profile_no_login.json
+candidate.json
+*.credentials.db*
+timing_log.jsonl
+queue_dryrun.json
+scratch/
+t_wd_*.py
+_wd_*.js
+_repro.js
+node_modules/
 browser_cookies.json
 cookies.json
 
@@ -39,6 +51,7 @@ tmp/
 
 #ignore resume
 Resume -*.pdf
+resume.pdf
 
 # ignore playwright artifacts
 .playwright*

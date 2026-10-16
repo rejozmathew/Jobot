@@ -26,6 +26,7 @@ from browser_use.browser import BrowserSession
 from browser_use.filesystem.file_system import FileSystem
 from browser_use.tools.service import Tools
 from browser_use.tools.views import DoneAction, InputTextAction, NavigateAction, UploadFileAction
+from .legacy_credentials import account_password
 from .platform_handlers import HandlerResult, run_workday_legacy_create_account
 
 CONFIRMATION_PHRASES = (
@@ -1373,14 +1374,11 @@ class JobApplierTools(Tools):
         login = self.profile_data.get("login", {})
         email = default_account.get("email") or login.get("email") or identity.get("email") or ""
         password = default_account.get("password") or login.get("password") or ""
-        if not password:
-            # Create-account flows still need a deterministic password even without saved login creds.
-            password = os.getenv("JOB_APPLIER_FALLBACK_PASSWORD", "ApplyFlow#2026!")
 
         if not email:
             return ActionResult(error="workday_create_account: no email available in profile data")
         if not password:
-            return ActionResult(error="workday_create_account: no password available (and fallback is empty)")
+            password = account_password(self.profile_data, self.job_url or "")
 
         page = await browser_session.get_current_page()
         if page is None:
