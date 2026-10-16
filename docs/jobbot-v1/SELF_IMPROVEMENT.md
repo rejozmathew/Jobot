@@ -63,6 +63,15 @@ write detailed logs locally and return aggregate results for primary inspection.
 
 ## Implementation and deployment
 
+Self-improvement #017 (October 16, 2026) preserves a retained verified history
+source after an accepted Apply handoff changes the current target key. The
+existing private browser-history proof still checks session, target, browser,
+fence, current identity, origin and conflicting requisitions. This shared repair
+allows delayed document/SPA continuation without a portal or company whitelist.
+Synthetic coverage includes same-session recovery to submission and rejection of
+stale or mismatched proofs. Deadlines, retries, Simplify order and confirmation
+acceptance are unchanged; additional production submissions remain unmeasured.
+
 Self-improvement #016 (October 14, 2026) preserves same-session recovery when
 Dayforce drops a language prefix from a tenant/CANDIDATEPORTAL/numeric-posting
 route. The shared scope comparator retains host, scheme, tenant, posting and

@@ -342,6 +342,12 @@ class SessionServices:
                 source=canonical_url(source_url)
                 verified_source=(job_key(source)==current['identity_key'] or is_same_application_scope(job['url'],source)
                                  or is_same_application_scope(current['url'],source))
+                # A verified Apply handoff can change the current key before a
+                # delayed document is observed. The retained browser-history
+                # source remains evidence after the fenced proof checks above;
+                # do not require it to equal the newer target key as well.
+                if _history_proof is not None and _history_proof['expected'].get('source_url')==source:
+                    verified_source=True
                 same_origin=urlsplit(source)[:2]==urlsplit(canonical)[:2]
                 no_conflict=all(application_match(base,canonical)['status']!='different_job'
                                 for base in (source,current['url']))
