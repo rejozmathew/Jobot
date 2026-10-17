@@ -82,6 +82,7 @@ def main(argv=None):
             from .managed_client import Client
             config=load_config(args.config)
             service=Service(config['db_path'],instance_id=config['instance_id'])
+            service.executor_config=config
             if args.command=='serve':
                 token=credential(config['operator_token_env'],config)
                 import uvicorn

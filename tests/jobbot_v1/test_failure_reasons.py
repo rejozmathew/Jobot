@@ -456,7 +456,8 @@ class FakeElement {{
     this.textContent = '';
     this.append(...nodes);
   }}
-  setAttribute(attr, val) {{ this.attributes[attr] = String(val); }}
+      addEventListener(type, listener) {{ this['on' + type] = listener; }}
+      setAttribute(attr, val) {{ this.attributes[attr] = String(val); }}
   getAttribute(attr) {{ return this.attributes[attr] !== undefined ? this.attributes[attr] : null; }}
       contains(node) {{ return node===this || this.children.some(c=>c.contains(node)); }}
       get lastChild() {{ return this.children[this.children.length-1] || null; }}

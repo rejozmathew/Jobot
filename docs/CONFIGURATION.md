@@ -159,6 +159,24 @@ server restart does not reset them.
 
 ## Privacy and portability
 
+The dashboard's portal password editor uses the runtime's existing
+`credential_profile_path`. It adds a private `portal_password_overrides` map to
+that JSON file and leaves `accounts.default`, other account entries and unrelated
+fields intact. Entries are scoped to candidate ID, verified portal namespace and
+account email. Explicit overrides take precedence over the account's saved
+credential reference; otherwise the existing reference/default resolution applies.
+Removing an override deletes its password and retains only scope/fallback metadata
+so a previously recorded override reference can still resolve its prior credential.
+
+This is file-backed storage, **not encryption or a password manager**. The runtime
+user needs read/write access to the selected file and its private directory.
+Updates use a file lock and atomic replacement; replacement files are owner-only
+on POSIX and inherit the private directory's permissions on Windows. Include the
+file in private backups, keep it outside Git, and protect the containing directory.
+The dashboard API accepts replacement passwords but never returns saved passwords.
+Default-password management is unchanged; removing an override whose fallback is
+the default uses the currently configured default.
+
 Store credentials in explicit private references or the selected process
 environment. Do not put passwords, verification codes or tokens in factual profile
 JSON, public docs, queue metadata or example payloads. Upload registration records

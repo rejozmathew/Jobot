@@ -539,11 +539,9 @@ class ApplicationTool:
                 if not cred_path.is_file():
                     raise ValueError('credentials_unavailable')
                 try:
-                    cred_data = json.loads(cred_path.read_text(encoding='utf-8'))
-                    email = cred_data.get('accounts', {}).get('default', {}).get('email')
-                    password = cred_data.get('accounts', {}).get('default', {}).get('password')
-                    if not email or not password:
-                        raise ValueError('credentials_unavailable')
+                    from .managed_credentials import resolve_employer_credential
+                    credential = resolve_employer_credential(self.cfg, self.package)
+                    email, password = credential['email'], credential['password']
                 except Exception:
                     raise ValueError('credentials_unavailable')
 
@@ -555,7 +553,7 @@ class ApplicationTool:
                 action_type = 'create_account' if fill_res.get('passwords_filled_count', 0) >= 2 else 'sign_in'
                 account_state = 'existing_account' if fill_res.get('existing_account') else 'credentials_filled'
                 if account_state == 'existing_account':
-                    instruction = 'An existing account was detected. Sign in using the same defaults. Click the observed native Sign In button next.'
+                    instruction = 'An existing account was detected. Sign in using the selected saved credential. Click the observed native Sign In button next.'
                 else:
                     instruction = f'Credentials filled natively. Choose the observed native {"Create Account" if action_type == "create_account" else "Sign In"} button next using click.'
 

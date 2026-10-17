@@ -246,21 +246,26 @@ async def fill_page_verification(config,package,page,params):
 
 
 def resolve_employer_credential(config, package):
-    """Resolve only a saved explicit reference or the configured retained default.
+    """Resolve a scoped operator override, saved reference, or retained default.
 
     Return values stay inside the private filler. The ledger stores the reference.
-    Never replace an unavailable saved credential with a different password.
+    Without an explicit operator override, never substitute for an unavailable
+    saved credential.
     """
     raw = json.loads(Path(config['credential_profile_path']).read_text(encoding='utf-8'))
     reference=(package.get('account') or {}).get('credential_ref') or DEFAULT_CREDENTIAL_REF
+    profile = package['attempt']['profile_json']
+    if isinstance(profile, str):
+        profile = json.loads(profile)
+    from .portal_credentials import resolve_override
+    override, reference = resolve_override(raw, package, reference, profile.get('identity', {}).get('email', ''))
+    if override:
+        return override
     key='default' if reference==DEFAULT_CREDENTIAL_REF else config.get('credential_account_keys',{}).get(reference)
     if not key:raise ValueError('saved_credential_reference_unavailable')
     account = raw.get('accounts', {}).get(key, {})
     if not account.get('email') or not account.get('password'):
         raise ValueError('configured_credentials_unavailable')
-    profile = package['attempt']['profile_json']
-    if isinstance(profile, str):
-        profile = json.loads(profile)
     if profile.get('identity', {}).get('email', '').casefold() != account['email'].casefold():
         raise ValueError('candidate_credential_identity_mismatch')
     return dict(email=account['email'],password=account['password'],credential_ref=reference)

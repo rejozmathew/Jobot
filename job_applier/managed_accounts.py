@@ -27,6 +27,30 @@ def stamp(value):
 
 
 class AccountServices:
+    def set_portal_password(self, *, account_id, password):
+        if not isinstance(password, str) or not password:
+            raise ProtocolError('password_required')
+        return self._change_portal_password(account_id, password)
+
+    def remove_portal_password(self, *, account_id):
+        return self._change_portal_password(account_id, None)
+
+    def _change_portal_password(self, account_id, password):
+        from .portal_credentials import update_password
+        if type(account_id) is not int or account_id < 1:
+            raise ProtocolError('invalid_account_id')
+        # Keep identity/namespace stable while updating its private credential file.
+        # No password, account status or history is written to SQLite.
+        with self.tx() as db:
+            account = dict(self._get(db, 'company_portal_accounts', account_id))
+            if not account.get('identity_id') or not account.get('namespace'):
+                raise ProtocolError('account_identity_unresolved')
+            candidate = self._get(db, 'candidates', account['identity_id'])
+            if account['email'].casefold() != candidate['email'].casefold():
+                raise ProtocolError('candidate_credential_identity_mismatch')
+            account['namespace'] = self._namespace(db, account['namespace'])
+            return update_password(getattr(self, 'executor_config', {}), account, password)
+
     @staticmethod
     def _namespace(db,value):
         value=valid_namespace(value);seen=set()

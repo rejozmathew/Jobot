@@ -311,12 +311,30 @@ its machine-specific output should stay private.
 ## Accounts & history
 
 Under **Advanced**, **Portal Accounts** shows namespace, candidate identity,
-account status and last confirmation. An unsuccessful application does not erase
-confirmed account state. Passwords and verification codes are not displayed.
+account status, last confirmation and password source. An unsuccessful application
+does not erase confirmed account state. Saved passwords and verification codes
+are not displayed.
+
+Choose **Set password override** on a tracked account to enter and confirm a
+portal-specific password. **Update override** replaces it; **Remove override**
+restores the previously configured credential (usually the default). The override
+applies only to that candidate, account email and verified portal namespace.
+Saving in Jobot does **not** change or reset a password on the employer website.
+For an existing account, enter its actual password; for registration, enter the
+password Jobot should use to create it. Site length and character requirements
+still apply. Jobot does not automatically generate or reset passwords here.
+
+Changes take effect on the next private credential fill, including a later fill
+in an open session; fields already filled are not changed by saving. The default
+password, factual profile and application history are preserved. The editor is
+available for tracked accounts with resolved candidate/portal identity and a
+configured readable private credential file. Legacy unresolved accounts show an
+explanation instead. This first version does not add accounts before a portal is
+tracked, and does not integrate a password manager.
 
 **Run History** provides historical managed run context. This page helps explain
-account reuse; it is not a credential editor and does not make all sites belonging
-to one ATS share an account. See [Data model](DATA_MODEL.md).
+account reuse; it does not make all sites belonging to one ATS share an account.
+See [Data model](DATA_MODEL.md).
 
 ## Lessons & helpers
 

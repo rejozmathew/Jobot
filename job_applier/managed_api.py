@@ -23,6 +23,7 @@ OPERATOR=OPERATOR|frozenset({'queue_enqueue','queue_status','queue_control'})
 OPERATOR=OPERATOR|frozenset({'set_job_disposition','update_job_url'})
 OPERATOR=OPERATOR|frozenset({'model_catalog'})
 OPERATOR=OPERATOR|frozenset({'activity_stats'})
+OPERATOR=OPERATOR|frozenset({'set_portal_password','remove_portal_password'})
 OPERATOR=OPERATOR|frozenset({'duplicate_matches','set_duplicate_match_state'})
 WORKER=frozenset({'accept_run','claim','heartbeat','event','action_start','action_end','writer_state','submission_intent','finish','ack_control','ack_run_control','checkpoint','resume_run'})|READS
 WORKER=WORKER|frozenset({'observe_owned_lesson','report_upload','record_account_event','extend_budget','bind_target','target_state','request_mail_for_attempt','match_mail_for_attempt','browser_observe'})

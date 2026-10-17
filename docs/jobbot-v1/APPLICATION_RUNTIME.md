@@ -1,5 +1,22 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 17: manual portal password overrides
+
+Accounts & history can set, update and remove a password override for an existing
+candidate/portal account. Operator-only `set_portal_password` and
+`remove_portal_password` operations resolve the canonical account scope and call
+`portal_credentials.update_password`. The selected private credential profile
+owns password bytes; no password enters the account ledger, factual profile,
+dashboard response or application event. File locking and atomic replacement keep
+concurrent fills from reading a partial profile.
+
+The shared private credential resolver reads the scoped override on each fill,
+ahead of the saved reference/default. Removal retains non-secret fallback metadata
+for previously recorded override references. Both local workspace/Workday callers
+and the legacy managed worker use this resolution. The original browser-use
+executor remains under `legacy_credentials.py`. No password generation, website
+reset, application restriction, retry limit or new execution gate is introduced.
+
 ## October 9: retained-browser recovery after startup
 
 `workspace_attachment --watch` keeps the configured retained browser available
@@ -1189,6 +1206,7 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | browser_helpers/workday_observe.js / workday_click.js | Workday steps/errors/attachment/employer-confirmation and observed controls |
 | browser_helpers/workday_source.js | Workday-only recruiting-source field/menu association, live option inventory and virtualized-menu scrolling; workday_fast drives pointer actions and verifies commitment |
 | managed_credentials.py / managed_documents.py / hermes_gmail.py | Selected account-field filling, executor-supplied code entry without group/format permission, existing Hermes Gmail CLI wrapper, code screenshot masking and selected uploads; workspace host, legacy plugin and Workday callers |
+| portal_credentials.py | Private-file portal password storage and scoped resolution; operator account services write overrides, dashboard views project source labels, and managed_credentials resolves values for local and legacy managed fillers. |
 | legacy_credentials.py | Private per-account password persistence for the original browser-use agent, element handler and Workday platform handler. Replaces their shared built-in creation password; does not change managed credential references. See [Legacy application](../LEGACY.md). |
 | managed_shared.py / managed_events.py / managed.py | Common submission resolution, strict evidence ledger, progress convenience, existing job metadata enrichment and previewable backfill |
 | managed_reports.py / managed_sessions.py / managed_views.py | Stage/task projection from the same events and actions, explicit waits/action overlap, shared labels and first-Autofill timing |

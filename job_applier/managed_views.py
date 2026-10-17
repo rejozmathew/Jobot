@@ -209,6 +209,11 @@ class ViewServices:
             selections=[dict(r) for r in db.execute('SELECT * FROM document_selections ORDER BY created_at DESC,id')]
             uploads=[dict(r) for r in db.execute('SELECT * FROM document_uploads ORDER BY created_at DESC,id')]
             assessments=[public_record(r) for r in db.execute('SELECT * FROM match_assessments ORDER BY recorded_at DESC,id')]
+            from .portal_credentials import password_metadata
+            for account in accounts:
+                if account.get('namespace'):
+                    account['namespace'] = self._namespace(db, account['namespace'])
+            password_metadata(getattr(self, 'executor_config', {}), accounts)
             for account in accounts:
                 account.pop('credential_ref',None)
             chosen=next((r for r in runs if r['id']==run_id),None) if run_id else (runs[0] if runs else None)

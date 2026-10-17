@@ -60,6 +60,8 @@ that development branch remains available.
   versioned learned answers with source history.
 - Tracks candidate profiles, resume versions, portal account state, application
   progress, timings and confirmation evidence.
+- Supports manual password overrides for tracked portal accounts in **Accounts &
+  history**, using the existing private credential file.
 - Reports distinct postings, attempts, new submissions and already-applied results;
   optionally sends confirmed-submission alerts through the existing Hermes setup.
 

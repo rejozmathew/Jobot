@@ -28,7 +28,8 @@ def cred_profile(tmp_path):
     return p
 
 
-def test_default_credentials_same_in_both_password_fields_no_leakage_no_generation(tmp_path, cred_profile, monkeypatch):
+@pytest.mark.parametrize('override', [False, True])
+def test_default_credentials_same_in_both_password_fields_no_leakage_no_generation(tmp_path, cred_profile, monkeypatch, override):
     """1) Native saved credentials operation fills default email and both password fields,
     verifies equality internally, never generates passwords, and leaks zero secrets."""
     class DummyCtrl:
@@ -46,7 +47,15 @@ def test_default_credentials_same_in_both_password_fields_no_leakage_no_generati
     )
     app.context = {"attempt_id": 1, "worker_id": "w1", "fence": 1}
     job_url = "https://huron.wd5.myworkdayjobs.com/en-US/huroncareers/job/Chicago-IL/Manager_JR-0016154/apply"
-    app.package = {"job": {"id": 1, "url": job_url}}
+    app.package = {"job": {"id": 1, "url": job_url},
+        "attempt": {"identity_id": "candidate", "profile_json": {"identity": {"email": "candidate.test@example.com"}}},
+        "account": {"namespace": "huron.wd5.myworkdayjobs.com/huroncareers"}}
+    secret = "CorrectHorseBatteryStaple99!"
+    if override:
+        from job_applier.portal_credentials import update_password
+        secret = "Portal-specific-12!"
+        update_password(app.cfg, {'id': 1, 'identity_id': 'candidate',
+            'namespace': app.package['account']['namespace'], 'email': 'candidate.test@example.com'}, secret)
 
     monkeypatch.setattr(app, "call", lambda op, **kw: {"control": "running"})
     monkeypatch.setattr(app, "action", lambda name, writes=True: pytest.MonkeyPatch().context())
@@ -101,7 +110,6 @@ def test_default_credentials_same_in_both_password_fields_no_leakage_no_generati
     # Run credentials operation
     res = asyncio.run(app.operate({"operation": "credentials"}))
 
-    secret = "CorrectHorseBatteryStaple99!"
     assert res.get("account_state") in ("credentials_filled", "ready_for_account_action")
     assert res.get("action_type") == "create_account"
 
@@ -137,7 +145,9 @@ def test_existing_account_prompt_path(cred_profile, monkeypatch):
     )
     app.context = {"attempt_id": 2, "worker_id": "w1", "fence": 1}
     job_url = "https://huron.wd5.myworkdayjobs.com/en-US/huroncareers/job/Chicago-IL/Manager_JR-0016154/apply"
-    app.package = {"job": {"id": 1, "url": job_url}}
+    app.package = {"job": {"id": 1, "url": job_url},
+        "attempt": {"identity_id": "candidate", "profile_json": {"identity": {"email": "candidate.test@example.com"}}},
+        "account": {"namespace": "huron.wd5.myworkdayjobs.com/huroncareers"}}
 
     monkeypatch.setattr(app, "call", lambda op, **kw: {"control": "running"})
     monkeypatch.setattr(app, "action", lambda name, writes=True: pytest.MonkeyPatch().context())

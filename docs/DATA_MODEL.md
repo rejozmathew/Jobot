@@ -84,6 +84,14 @@ enough to establish every identity relationship.
 See [Cross-source identity](jobbot-v1/CROSS_SOURCE_IDENTITY.md) and
 [Source/process attribution](jobbot-v1/SOURCE_PROCESS_ATTRIBUTION.md).
 
+Portal password overrides live in the existing private credential JSON, keyed by
+candidate ID, canonical account namespace and email. SQLite retains account state
+and opaque credential references only; the password editor does not rewrite
+account confirmation or application history. Successful executor observations may
+record the override reference through the existing account ledger. Removing an
+override retains non-secret fallback metadata in the private file so those
+references remain usable. No new database or schema migration is required.
+
 ## Outcomes, disposition and retry scheduling
 
 | Record | Examples | Interpretation |

@@ -451,11 +451,11 @@
   <section id="tab-accounts" class="tab" hidden>
     <section class="card">
       <h2>Portal Accounts</h2>
-      <p>Scoped to candidate and verified namespace. Application failure does not erase account state. No passwords or verification codes are displayed.</p>
+      <p>Manage passwords for tracked portal accounts. An override applies only to the listed candidate and portal. Saving here does not change the password on the employer's website.</p>
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Company / Namespace</th><th>Identity</th><th>Status</th><th>Last Confirmed</th></tr>
+            <tr><th>Company / Namespace</th><th>Identity</th><th>Status</th><th>Last Confirmed</th><th>Password</th><th>Action</th></tr>
           </thead>
           <tbody id="account-rows"></tbody>
         </table>
@@ -560,6 +560,22 @@
             <span>Add first, then select it and choose Queue selected.</span>
           </form>
       </dialog>
+
+<dialog id="portal-password-dialog" aria-labelledby="portal-password-title">
+  <form id="portal-password-form" autocomplete="off">
+    <div class="section-title"><h2 id="portal-password-title">Portal password override</h2><button id="close-portal-password" type="button">Close</button></div>
+    <p id="portal-password-account"></p>
+    <p>Enter the password for this portal, or the one to use when creating the account. This saves it in Jobot's private credential file; it does not reset the employer account's password.</p>
+    <label>Password<input id="portal-password" type="password" autocomplete="new-password" required></label>
+    <label>Confirm password<input id="portal-password-confirm" type="password" autocomplete="new-password" required></label>
+    <p id="portal-password-error" role="alert" class="error"></p>
+    <div class="button-row">
+      <button id="save-portal-password" type="submit" class="primary">Save override</button>
+      <button id="remove-portal-password" type="button" hidden>Remove override</button>
+    </div>
+    <p id="portal-password-fallback">Removing an override restores the previously configured credential. It does not change the employer account.</p>
+  </form>
+</dialog>
 
 <dialog id="job-url-dialog" aria-labelledby="job-url-title">
   <form id="job-url-form">
