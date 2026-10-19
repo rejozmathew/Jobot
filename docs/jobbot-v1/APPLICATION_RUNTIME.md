@@ -1,5 +1,20 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 19: signed form question context
+
+Shared `browser request_answers` / `apply_answers` callers use
+`browser_controls.required_questions` and `managed_questions.question_data`.
+For otherwise valid embedded-form URLs whose query contains secret-bearing
+assignments, question context keeps the document origin/path plus a SHA-256
+digest of the complete canonical URL instead of its query values. Different
+queries remain distinct; ordinary contexts and existing question keys remain
+unchanged. The digest is an opaque context key, never a navigation destination,
+account authorization or reusable answer. Query rotation can create another
+exact-context question; approved answer-library reuse remains separately scoped.
+Public URL validation and secret checks on other question data are unchanged.
+Missing facts, current controls, session ownership, deadlines, Simplify order and
+accepted submission evidence retain their existing behavior.
+
 ## October 17: manual portal password overrides
 
 Accounts & history can set, update and remove a password override for an existing

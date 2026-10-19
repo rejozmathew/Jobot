@@ -2,9 +2,10 @@
 import hashlib
 import json
 import re
+from urllib.parse import urlsplit, urlunsplit
 
 from .managed_identity import RELATED, canonical_url
-from .managed_redaction import reject_secrets
+from .managed_redaction import reject_secrets, SECRET
 from .managed_shared import ProtocolError, dumps, uid
 
 PRIVATE = re.compile(r'password|passwd|\botp\b|one.?time.?code|(?:verification|security|authentication).?code|secret|social.?security|\bssn\b|tax.?id|bank.?account|routing.?number|credit.?card', re.I)
@@ -49,7 +50,18 @@ def question_data(*,field,question,kind,options=None,required=True,context=None)
     if not isinstance(context,dict) or set(context)-{'page','section','document'}:
         raise ProtocolError('invalid_question_context')
     if any(not isinstance(v,str) or len(v)>4000 for v in context.values()):raise ProtocolError('invalid_question_context')
-    if context.get('document'):context=dict(context,document=canonical_url(context['document']))
+    if context.get('document'):
+        document=canonical_url(context['document'])
+        parts=urlsplit(document)
+        if SECRET.search(parts.query):
+            # A form's signed query is context, never navigation authority or
+            # reusable knowledge. Keep exact-query isolation without persisting
+            # its values. Public URL validation above and all other secret
+            # checks below remain unchanged; ordinary question keys stay stable.
+            digest=hashlib.sha256(document.encode()).hexdigest()
+            document=urlunsplit((parts.scheme,parts.netloc,parts.path,
+                                'form_context_sha256='+digest,''))
+        context=dict(context,document=document)
     data={'field':field,'question':question.strip(),'kind':kind,'options':clean,'context':context,'required':True}
     reject_secrets(data)
     return data

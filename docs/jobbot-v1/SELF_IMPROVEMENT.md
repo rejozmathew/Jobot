@@ -63,6 +63,14 @@ write detailed logs locally and return aggregate results for primary inspection.
 
 ## Implementation and deployment
 
+Self-improvement #018 (October 19, 2026) keeps signed embedded-form queries out
+of durable question context while retaining exact document isolation through an
+opaque digest. Ordinary question contexts and public navigation/authentication
+validation remain unchanged. Synthetic capture, actual-answer reuse and native
+same-browser submission checks cover the recovery path. This removes failed
+question-capture work; missing candidate facts still require actual answers, and
+production submission or speed gains remain unmeasured.
+
 Self-improvement #017 (October 16, 2026) preserves a retained verified history
 source after an accepted Apply handoff changes the current target key. The
 existing private browser-history proof still checks session, target, browser,
