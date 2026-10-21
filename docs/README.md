@@ -10,6 +10,7 @@ configuration remain authoritative for a particular installation.
 | You want to… | Read |
 |---|---|
 | Understand the project in five minutes | [Root README](../README.md) |
+| Preview the dashboard with synthetic data | [README tour](../README.md#a-look-inside), [Screenshot provenance](images/README.md) |
 | Install Jobot for your own job search, including Hermes, email and Discord | [First-time installation](GETTING_STARTED.md#first-time-personal-installation) |
 | Set up a development environment or reconnect an existing installation | [Getting started](GETTING_STARTED.md) |
 | Understand every dashboard page and everyday controls | [User guide](USER_GUIDE.md) |
@@ -58,8 +59,9 @@ repository identifiers can still contain `auto-job-applier`; installed paths,
 
 The public repository documents software, interfaces, operator behavior and
 sanitized examples. Candidate facts, credentials, actual application records,
-screenshots, mailbox contents, deployment manifests and machine-specific launchers
+private application screenshots, mailbox contents, deployment manifests and machine-specific launchers
 belong in the existing private configuration/artifact locations.
+The [public dashboard screenshots](images/README.md) use isolated synthetic data.
 
 There is no separate generated documentation site or build step. Markdown and
 Mermaid diagrams render in GitHub and compatible editors. Update the relevant

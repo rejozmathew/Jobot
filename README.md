@@ -1,119 +1,161 @@
 # Jobot
 
-**Jobot Application Operations** coordinates job discovery, an application queue,
-external AI executors, Simplify-assisted browser sessions and evidence-backed
-application history. It runs locally with an existing Windows or Ubuntu setup and
-provides a dashboard for operating and reviewing the workflow.
+**A local dashboard and application runtime for an agent-assisted job search.**
 
-Start with the [documentation index](docs/README.md),
-[dashboard user guide](docs/USER_GUIDE.md) or [architecture](docs/ARCHITECTURE.md).
-The project was previously named Auto Job Applier / JobBot. Its GitHub repository
-is now [rejozmathew/Jobot](https://github.com/rejozmathew/Jobot).
+Jobot brings job discovery, an application queue, human answers and application
+history into one workspace. **It depends on an external agent harness and Simplify
+Copilot:** Hermes is the documented harness that runs the AI model, reasons through
+applications and handles exceptions; the Simplify browser extension fills forms
+using your own completed profile. Jobot coordinates their work, owns application
+sessions and records outcomes with evidence.
 
-## Set up Jobot for yourself
+[Get started](docs/GETTING_STARTED.md#first-time-personal-installation) ·
+[User guide](docs/USER_GUIDE.md) · [Architecture](docs/ARCHITECTURE.md) ·
+[All documentation](docs/README.md)
 
-Start with [the first-time installation guide](docs/GETTING_STARTED.md#first-time-personal-installation).
-It covers Windows and Ubuntu, your own candidate profile and resume, the private
-database/configuration, Hermes, email verification, Simplify, Discord and startup.
-Use the current `main` branch. Repository access is required while this project is private.
+![Jobot Applications dashboard showing a synthetic job pipeline, queue controls and application statuses](docs/images/applications.png)
 
-1. Clone Jobot and install the pinned Python dependencies in its virtual environment.
-2. Install Hermes and authenticate your own model provider. Enable terminal,
-   file/skill access and screenshot/vision support on the machine running Jobot.
-3. Copy [profile.json.template](profile.json.template) into your private installation,
-   fill in your own facts, then create the runtime and register your resume.
-4. Install Simplify Copilot in Jobot's browser profile, sign in to your own
-   Simplify account and complete your profile there, including education and work history.
-5. Make Hermes discover the bundled [job-apply entry skill](integrations/hermes_jobbot/skills/job-apply/SKILL.md).
-   The full [application procedure](skills/productivity/job-apply/SKILL.md),
-   [Workday procedure](skills/productivity/workday-simplify/SKILL.md) and their
-   references are all in this repository. No separate private skill download is needed.
-6. Connect your application mailbox through Hermes's Himalaya or Google Workspace
-   skill. Configure Discord if you want bot conversations or submission alerts.
-7. Verify setup, open the dashboard and choose your submission settings before
-   starting the queue or requesting an application.
+*Actual dashboard, synthetic demonstration data. All screenshots use fictional
+employers and candidate facts; counts and outcomes are illustrations, not performance
+results. [Screenshot provenance](docs/images/README.md).*
 
-Hermes is the documented executor; another compatible harness can use the same
-CLI. Mail access supports employer verification. Discord and the native Hermes
-`jobbot` plugin are optional. The guide explains both the portable skill/CLI route
-and the native plugin route, and where each upstream integration comes from.
+## What you can do
 
-Existing command/module names (`jobbot`, `job_applier`, `JOBBOT_CONFIG`), service
-names and `docs/jobbot-v1/` paths remain compatible. Existing installations can keep
-their current checkout directory; new clones can use `Jobot`.
+| Capability | What it gives you |
+|---|---|
+| **One application pipeline** | Add posting URLs manually or through discovery/integrations. Search, filter, prioritize, cancel and restore jobs while retaining their history. |
+| **Managed execution** | Queue selected jobs or use Apply now. Run 1–5 applications with separate executor conversations and owned browser windows. Pause new work or control an individual session. |
+| **Human answers when needed** | Resolve missing facts in Needs your answer, then queue an answered application for retry. Keep the original question and response history. |
+| **Reusable knowledge** | Maintain versioned learned answers with global, company or application scope, alternate question wording and source history. AI learning runs separately from saving an answer. |
+| **Visible outcomes** | Inspect attempts, progress, timings and confirmation evidence. Activity separates distinct postings, attempts, new submissions and already-applied results. |
+| **Your execution settings** | Select model and effort, review-only or submission mode, concurrency and an overall application deadline. Discovery and answer learning can use separate models. |
+| **Profiles, resumes and accounts** | Register resume versions, maintain candidate facts and track portal accounts, including private per-account password overrides. |
+| **Discovery and notifications** | Use configured discovery sources, duplicate-posting matching and optional Hermes/Discord submission alerts and daily summaries. |
 
-For an existing clone, update the remote with
-`git remote set-url origin https://github.com/rejozmathew/Jobot.git`.
-The maintained application history from `self-improvement` is included in `main`;
-that development branch remains available.
+Shared controls and helpers support Workday, Greenhouse, iCIMS and LinkedIn flows.
+Coverage varies by employer and form; a helper's presence is not a guarantee of
+successful submission. A Submit click or executor exit code alone is not evidence
+that an employer accepted the application.
 
-## What it does
+## A look inside
 
-- Brings manual URLs and discovery/integration sources into one durable job history.
-- Queues selected jobs in order, supports per-job Apply now, scheduled retries,
-  cancellation/restoration and persistent Pause/Resume Jobot.
-- Runs 1–5 queued applications with separate executor conversations and owned
-  application windows, using the operator's selected model and deadline.
-- Uses Simplify for broad filling, shared browser controls and Workday, Greenhouse,
-  iCIMS and LinkedIn helpers, with executor recovery for exceptions.
-- Collects unresolved questions, saves human responses and maintains editable,
-  versioned learned answers with source history.
-- Tracks candidate profiles, resume versions, portal account state, application
-  progress, timings and confirmation evidence.
-- Supports manual password overrides for tracked portal accounts in **Accounts &
-  history**, using the existing private credential file.
-- Reports distinct postings, attempts, new submissions and already-applied results;
-  optionally sends confirmed-submission alerts through the existing Hermes setup.
+### Resolve missing answers
 
-An ATS helper is not a guarantee that every employer form works. Recorded evidence
-establishes an outcome; a Submit click or executor exit code alone does not.
+The answer inbox keeps the employer, role and exact question together. Save the
+facts an application needs, review answer history and retry when its required
+answers are ready.
+
+![Needs your answer workspace with synthetic application questions and an answer editor](docs/images/answer-inbox.png)
+
+### Keep reusable answers under your control
+
+Inspect, edit or retire learned answers without losing earlier versions. Choose
+where an answer applies instead of assuming one employer's response fits every job.
+
+![Learned answers workspace showing synthetic reusable answers and their scope](docs/images/learned-answers.png)
+
+<details>
+<summary><strong>See execution and model settings</strong></summary>
+
+Select the application model, optional separate discovery and answer-learning
+models, simultaneous applications and time limit. Changes apply to new work.
+
+![Settings workspace showing model selection, concurrency and the application deadline](docs/images/settings.png)
+
+</details>
+
+## What you need
+
+Jobot is a self-hosted integration. Cloning this repository installs neither an
+agent harness nor an authenticated model, mailbox or Simplify account.
+
+| Dependency | Role and setup |
+|---|---|
+| **Windows or Ubuntu, Python 3.11 and a Chromium browser** | Run Jobot locally with its pinned dependencies and a configured browser profile. The documented desktop setup needs a graphical session. |
+| **Agent harness: Hermes + authenticated model provider** | Run the model conversation with terminal, file/skill and screenshot/vision access. Hermes is the documented integration; another compatible harness can use the same local CLI and canonical skills. |
+| **Simplify Copilot extension + your Simplify account** | Install in the browser profile Jobot uses, sign in and complete your profile, including education and work history. Simplify performs broad form filling; the harness handles exceptions. |
+| **Your candidate profile and resume** | Supply your own facts and approved files in private storage. Jobot does not ship a candidate identity or resume. |
+| **Authenticated application mailbox** | Enable employer verification through Hermes's Himalaya or supported Google Workspace integration. Configure access for the mailbox you actually apply with. |
+| **Optional Discord and native Hermes plugin** | Add bot conversations or notifications. The portable skill/CLI route works without the native jobbot plugin. |
+| **Optional LM Studio embedding endpoint** | Enable semantic company/title matching for duplicate postings when configured. |
+
+Model-provider access and third-party accounts are configured separately. See
+[installation](docs/GETTING_STARTED.md#first-time-personal-installation) for setup
+and upstream links, and [integrations](docs/INTEGRATIONS.md) for the boundaries.
 
 ## How it fits together
 
 ```mermaid
-flowchart LR
-    Intake[Manual entry / discovery] --> Queue[Managed queue and history]
-    UI[Operator dashboard] <--> Queue
-    Queue --> Executor[External application executor]
-    Executor --> Runtime[Owned local browser session]
-    Runtime --> Forms[Simplify + shared and ATS helpers]
-    Forms --> Portal[Employer portal]
-    Runtime --> Evidence[Outcome and evidence]
-    Evidence --> Queue
+flowchart TD
+    Intake[Manual URLs / discovery] --> Records[Jobot managed service and history]
+    UI[Operator dashboard] <--> Records
+    Records <--> Queue[Queue dispatcher]
+    Queue --> Agent[External agent harness: Hermes + model]
+    Direct[Direct harness / CLI request] --> Runtime[Jobot application runtime]
+    Agent <--> Runtime
+    Runtime <--> Browser[Owned browser session]
+    Simplify[Simplify Copilot extension] --> Browser
+    Runtime <--> Helpers[Shared and ATS helpers]
+    Browser <--> Portal[Employer portal]
+    Runtime --> Evidence[Outcome and confirmation evidence]
+    Evidence --> Records
 ```
 
-Jobot owns the records, scheduling, browser targets, lifecycle and reports. The
-external executor reasons about the application. Helpers assist it; their call
-budgets and recovery handoffs do not decide when an application is over. The
-operator's overall time limit defaults to 30 minutes and can be changed or turned off.
+Jobot owns records, scheduling, browser targets, lifecycle and reporting. The
+external harness reasons about the application, uses Simplify and calls helpers
+through the runtime. Helpers assist that executor; their call budgets and recovery
+handoffs do not decide when an application is over.
 
-## Run an existing installation
+The dashboard and queue worker are separate processes. Closing the dashboard
+does not stop the worker, and a reachable dashboard does not prove the worker is
+online. Direct local application execution uses the same runtime and history
+without requiring a running dashboard or HTTP API token.
 
-Use this repository's virtual environment and the existing private runtime
-configuration. With the local runtime pointer already installed:
+The operator's overall application deadline defaults to **30 minutes**, can be
+changed or turned **Off**, and applies to new attempts. Browser recovery does not
+restart that clock. See [architecture](docs/ARCHITECTURE.md) for the detailed
+execution sequence and data ownership.
+
+## Set up Jobot for yourself
+
+The repository is public. Start from `main`:
+
+```text
+git clone https://github.com/rejozmathew/Jobot.git Jobot
+cd Jobot
+```
+
+Follow the [first-time installation guide](docs/GETTING_STARTED.md#first-time-personal-installation)
+to install the Python environment, connect Hermes and your model provider,
+create private configuration from [profile.json.template](profile.json.template),
+register your resume, prepare Simplify and authenticate mail access. It includes
+Windows and Ubuntu commands and optional Discord setup.
+
+Choose your submission settings before starting the queue. **Review only**
+records readiness for review; **Submit when complete** permits submission within
+the configured workflow. The canonical [job-apply procedure](skills/productivity/job-apply/SKILL.md)
+and [Workday procedure](skills/productivity/workday-simplify/SKILL.md) are included
+in this repository.
+
+### Run an existing installation
+
+With the local private runtime pointer already installed, use the repository's
+virtual environment:
 
 ```powershell
 .\.venv\Scripts\python.exe -m job_applier.queue_runtime status
 .\.venv\Scripts\python.exe -m job_applier.queue_runtime serve
 ```
 
-On Ubuntu, use `./.venv/bin/python` and the installed services; inspect their state
-instead of starting a second dispatcher. The dashboard URL comes from the selected
-config's `base_url` (example/default port: 60158).
+On Ubuntu, use `./.venv/bin/python` and inspect the installed services rather than
+starting a second dispatcher. The dashboard address comes from the selected
+configuration's `base_url` (example/default port: 60158). `queue_runtime watch`
+is the separate worker entry point. See [Operations](docs/OPERATIONS.md).
 
-The dashboard and queue worker are independent. `queue_runtime watch` is the
-worker entry point; a working dashboard alone does not mean a worker is online.
-Local application execution uses `application_runtime start` or the Hermes
-`jobbot` tool and does not require a dashboard or HTTP API token.
-
-For a fresh development checkout, synthetic setup and provisioning requirements,
-read [Getting started](docs/GETTING_STARTED.md). Private candidate records,
-credentials, browser profiles, authenticated providers and deployment launchers
-are not included in Git.
-
-`python run_applier.py serve` starts the **legacy** browser-use dashboard, commonly
-on port 8000 with different history. See [Legacy application](docs/LEGACY.md) if you
-intend to work on that path.
+Private profiles, credentials, databases, browser sessions and application evidence
+stay outside Git. The older `python run_applier.py serve` command starts the
+[legacy browser-use dashboard](docs/LEGACY.md), commonly on port 8000 with different
+history.
 
 ## Documentation
 
@@ -139,7 +181,7 @@ intend to work on that path.
 | `integrations/` | Hermes plugin and existing JobNavigator bridge maintenance |
 | `deploy/` | Sanitized runtime example and systemd templates |
 | `tests/jobbot_v1/` | Maintained synthetic managed-runtime and browser/UI regressions |
-| `docs/` | Current guides, detailed engineering references and historical evidence |
+| `docs/` | Current guides, public demo screenshots and historical engineering records |
 | `artifacts/` | Ignored private runtime/validation artifacts; never a public data bundle |
 
 ## Development
@@ -155,5 +197,11 @@ Follow the repository's delegated validation, local checkpoint and authoritative
 Ubuntu deployment workflow. Update the affected docs in the same change using
 [the maintenance map](docs/DOCUMENTATION.md).
 
-The project builds on browser-use and integrates an external executor and the
-Simplify browser extension.
+Jobot grew out of a browser-use application and was previously named Auto Job
+Applier / JobBot. Existing `jobbot`, `job_applier`, `JOBBOT_CONFIG`, service names
+and `docs/jobbot-v1/` paths remain compatible. Existing installations can keep
+their checkout directory.
+
+Numbered [self-improvement records](docs/jobbot-v1/SELF_IMPROVEMENT.md) document
+bounded fixes and validation; private application reviews and temporary evidence
+remain in ignored storage.

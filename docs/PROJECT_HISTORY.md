@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Architecture](ARCHITECTURE.md) · [Engineering records](jobbot-v1/README.md)
 
-This is a capability history through October 4, 2026, not an exhaustive changelog
+This is a selected capability history through October 21, 2026, not an exhaustive changelog
 or a retrospective submission-rate claim. Commit IDs identify implementation
 checkpoints. Dated test counts and deployment evidence remain in their original
 records; actual candidate/application data stays private.
@@ -42,6 +42,21 @@ that transition and its deferred proposals.
 | October 2 | Recovery continuity; 1–5 simultaneous applications in the existing browser profile; visible owned windows and cleanup; editable reusable answers and focused answer inbox | `5baf177`, `5b65fbb`, `5d38d82`, `bb12536`, `9628106`, `42f6714` |
 | October 3 | AI generalized knowledge separated from application responses; company knowledge; account namespace and authenticated-route recovery; select-all and Activity statistics | `c1c41a3`, `655b4b4`, `aba0ff2`, `a8dd72b`, `9d91d4c`, `b0e5bbb` |
 | October 4 | Validation-fixture retention fix; SQLite contention resilience, indexed/batched reporting, retained routes and improved retry/answer context | `75a6948`, `1b6776f`, [Self-improvement #009](jobbot-v1/SELF_IMPROVEMENT.md) |
+
+### Recent changes brought into the public main branch
+
+| Date | Implemented work | Reference |
+|---|---|---|
+| October 16 | Preserve verified browser-history evidence after an accepted Apply handoff, allowing delayed continuation in the same session | Self-improvement #017, `f7b9ee9` |
+| October 17 | Add candidate- and portal-scoped password overrides in Accounts & history, stored in the existing private credential file | [User guide](USER_GUIDE.md#accounts--history), `af86d29` |
+| October 19 | Capture questions on signed embedded forms without retaining sensitive query values; preserve exact document isolation with an opaque digest | Self-improvement #018, `6030175` |
+| October 21 | Refresh the public README with synthetic dashboard screenshots, explicit Hermes/Simplify dependencies and the managed execution flow | [README](../README.md), [Screenshot provenance](images/README.md) |
+
+The three implementation commits were developed on `self-improvement` and brought
+into the public `main` branch with their synthetic regressions and current guides.
+The [numbered review record](jobbot-v1/SELF_IMPROVEMENT.md) describes the bounded
+fixes and validation limits. Temporary folders, private application reviews and
+deployment logs are not part of this synchronization.
 
 ## What the current system now covers
 

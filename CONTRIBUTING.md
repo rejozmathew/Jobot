@@ -3,7 +3,9 @@
 Before publishing changes, run `python scripts/check_public_tree.py` in the
 repository virtual environment. This checks tracked paths and obvious credential
 material without scanning ignored personal artifacts. Keep filled profiles,
-credentials, resumes, databases and screenshots private. Use
+credentials, resumes, databases and real application screenshots private. Public
+dashboard illustrations must use isolated synthetic data; see the
+[screenshot provenance](docs/images/README.md). Use
 `profile.json.template` for new installations; `profile.example.json` remains its
 compatibility copy. A clean working tree does not remove secrets from old Git
 commits: audit history separately before changing repository visibility.
