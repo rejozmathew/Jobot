@@ -60,9 +60,13 @@ def ensure_host(config, workspace_id):
         if FileLock.is_locked(lock_path(workspace)):raise ProtocolError('workspace_owned_by_another_host')
         root=Path(config['spool_dir'])/'hosts';root.mkdir(parents=True,exist_ok=True)
         host_id=uid()
-        interpreter=Path(sys.executable)
+        # Hermes may run another Python version and export its site-packages in
+        # PYTHONPATH. The owned host uses this installation's dependencies, not
+        # the calling harness's interpreter or Python environment overrides.
+        interpreter=REPOSITORY/'.venv'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+        if not interpreter.is_file():interpreter=Path(sys.executable)
         if os.name=='nt' and interpreter.with_name('pythonw.exe').is_file():interpreter=interpreter.with_name('pythonw.exe')
-        detached_launch([str(interpreter),'-m','job_applier.workspace_host','--config',config['config_path'],
+        detached_launch([str(interpreter),'-E','-m','job_applier.workspace_host','--config',config['config_path'],
                         '--workspace',workspace_id,'--host-id',host_id],cwd=REPOSITORY,
                         stdout_path=root/(workspace_id+'.out.log'),stderr_path=root/(workspace_id+'.err.log'))
         deadline=time.monotonic()+10

@@ -12,7 +12,10 @@ def canonical_url(url):
     # Auth0's reset-request screen contains no reset token. It remains reachable
     # only through the ordinary observed-route proof; signed reset links retain
     # their existing treatment and never become public posting identities.
-    reset_request=bool(re.fullmatch(r'/u/reset-password/request(?:/hs-\d+)?/?',p.path))
+    # The optional segment is the connection name (including custom database
+    # connections), not a password-reset token. Additional path segments and
+    # secret-bearing query parameters still use the existing sensitive checks.
+    reset_request=bool(re.fullmatch(r'/u/reset-password/request(?:/[A-Za-z0-9_-]+)?/?',p.path))
     if not reset_request and any(s in p.path.lower() for s in ('reset-password','password-reset','verify-email','oauth/','signin/callback')):
         raise ProtocolError('sensitive_url')
     query = parse_qsl(p.query, keep_blank_values=True)

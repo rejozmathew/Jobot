@@ -69,6 +69,13 @@ or solve memory exhaustion; inspect the desktop and kernel logs for those failur
 
 ## Read-only health checks
 
+Workspace hosts launch with the repository virtualenv when installed and ignore
+inherited Python environment overrides. This keeps a harness's `PYTHONPATH` or
+`PYTHONHOME` from loading packages compiled for a different interpreter. Display,
+configuration and other non-Python environment values remain available. Existing
+hosts are retained until their normal idle exit; launching a clean caller alone
+does not repair dependencies already imported by a running host.
+
 ```bash
 systemctl --user status jobbot-dashboard.service jobbot-queue.service
 systemctl --user list-timers jobbot-harvest.timer jobbot-validation-cleanup.timer

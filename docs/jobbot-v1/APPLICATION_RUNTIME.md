@@ -1,5 +1,23 @@
 # Application runtime: ownership, helper map, and rationale
 
+## October 22: harness-independent host dependencies and reset requests
+
+The existing `workspace_host.ensure_host` caller prefers the repository virtualenv
+and starts the owned host with Python's `-E` option. A harness can use a different
+Python version without its inherited module paths supplying the host's native
+dependencies. Existing live hosts, selected configuration, display environment,
+session ownership and original application deadlines are preserved. Without a
+repository virtualenv the current interpreter remains the fallback.
+
+The shared URL canonicalizer recognizes the connection-name segment on Auth0's
+public `/u/reset-password/request/<connection>` screen, including custom database
+connections. Ordinary observed navigation proof is still required to adopt it;
+the URL alone does not establish application or account ownership. Additional
+path segments and secret-bearing query parameters retain the existing treatment.
+This removes a false recovery veto before the reset email can be requested.
+Neither change adds a helper or caller, changes retry policy, supplies candidate
+answers, or establishes employer acceptance.
+
 ## October 19: signed form question context
 
 Shared `browser request_answers` / `apply_answers` callers use

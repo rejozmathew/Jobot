@@ -14,13 +14,14 @@ LOGIN='https://login.example.test/u/login/password'
 RETURN=SOURCE.rsplit('/',1)[0]+'/application'
 
 
-def test_observed_reset_request_can_continue_and_return_to_application(tmp_path):
+@pytest.mark.parametrize('reset', [RESET, 'https://login.example.test/u/reset-password/request/syntheticTenant-custom'])
+def test_observed_reset_request_can_continue_and_return_to_application(tmp_path, reset):
     def html(url):
         if url==SOURCE:
             return '<h1>Sign in</h1><input type="email"><button onclick='+json.dumps("location.href='"+LOGIN+"'")+'>Next</button>'
         if url==LOGIN:
-            return '<h1>Sign in</h1><input type="password"><a href="'+RESET+'">Reset your password</a>'
-        if url==RESET:
+            return '<h1>Sign in</h1><input type="password"><a href="'+reset+'">Reset your password</a>'
+        if url==reset:
             return '<h1>Reset your password</h1><label>Email<input type="email" value="candidate@example.test"></label><button onclick='+json.dumps("location.href='"+RETURN+"'")+'>Continue</button>'
         return '<h1>Application review</h1><button onclick="document.body.innerHTML=\'<h1>Thank you for applying</h1>\'">Submit application</button>'
     async def run():
@@ -28,7 +29,7 @@ def test_observed_reset_request_can_continue_and_return_to_application(tmp_path)
             client=LocalClient({'instance_id':service.instance_id},service=service)
             config={'cdp_url':page.fixture_endpoint,'browser_mode':'headless','spool_dir':str(tmp_path/'spool')}
             namespace=service.application_context(owner['attempt_id'])['namespace']
-            for selector,url in [('button',LOGIN),('a',RESET),('button',RETURN)]:
+            for selector,url in [('button',LOGIN),('a',reset),('button',RETURN)]:
                 package=service.application_context(owner['attempt_id'])
                 await asyncio.to_thread(browser_action,config,client,owner,package,page.target_id,{'method':'click','selector':selector})
                 assert await page.evaluate('location.href')==url
@@ -79,3 +80,13 @@ def test_sensitive_reset_token_urls_are_not_persisted_as_public_postings():
     for url in (RESET+'?reset_token=synthetic-secret',RESET+'/synthetic-secret',
                 'https://login.example.test/reset-password/synthetic-secret'):
         with pytest.raises(ProtocolError,match='sensitive_url'):canonical_url(url)
+
+
+def test_custom_connection_reset_request_is_public_but_not_unobserved_job_scope():
+    from job_applier.managed_identity import canonical_url, is_same_application_scope
+    reset='https://login.example.test/u/reset-password/request/syntheticTenant-custom'
+    assert canonical_url(reset)==reset
+    assert not is_same_application_scope(SOURCE,reset)
+    from job_applier.managed_shared import ProtocolError
+    for suffix in ('?reset_token=synthetic-secret','/synthetic-secret','?password=secret'):
+        with pytest.raises(ProtocolError,match='sensitive_url'):canonical_url(reset+suffix)

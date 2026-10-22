@@ -63,6 +63,25 @@ write detailed logs locally and return aggregate results for primary inspection.
 
 ## Implementation and deployment
 
+Self-improvement #019 (October 22, 2026) isolates newly launched workspace hosts
+from a calling harness's Python interpreter and Python environment overrides.
+Hosts use the repository virtualenv and `-E`; existing owned hosts remain intact.
+It also recognizes Auth0 reset-request routes with custom connection names through
+the existing observed-navigation proof. Secret-bearing reset links, job identity,
+submission confirmation, retry handling and operator deadlines are unchanged.
+
+Paired Ubuntu synthetic replay passed 77/83 baseline cases and all 83 candidate
+cases, retaining every baseline success. Five baseline failures reproduced these
+two defects; the sixth was a pre-existing delayed-document fixture race. Focused
+Windows validation passed 57 with four browser opt-in skips. The final managed
+suite passed 1,435 with 173 skips. Logs, JUnit and the deployment manifest are
+retained privately with this run label.
+Successful control mechanisms include native and Simplify confirmation, same-session
+authentication recovery, ownership, concurrency and deadline handling. No capacity
+increase or additional production submission is claimed from these checks.
+The local checkpoint and annotated tag use `self-improvement-019-2026-10-22`;
+GitHub publication remains pending explicit push authorization.
+
 Self-improvement #018 (October 19, 2026) keeps signed embedded-form queries out
 of durable question context while retaining exact document isolation through an
 opaque digest. Ordinary question contexts and public navigation/authentication
