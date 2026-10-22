@@ -801,10 +801,18 @@ function renderRun(v){
   $('attempts').append(n);
  }
 }
-function renderAccounts(v){$('account-rows').replaceChildren();for(const a of v.accounts){const tr=el('tr');tr.append(el('td',a.namespace||a.portal_key||a.company_key),el('td',a.identity_id?(a.email||a.identity_id):'Legacy / unresolved'),el('td',a.status||'unknown'),el('td',stamp(a.last_confirmed_at)));
+function renderPortalAccounts(v){
+ const query=$('account-search').value.trim().toLowerCase();
+ const accounts=v.accounts.filter(a=>[a.namespace,a.portal_key,a.company_key,a.email,a.identity_id].some(value=>String(value||'').toLowerCase().includes(query)));
+ $('account-search-count').textContent=`${accounts.length} of ${v.accounts.length} accounts`;
+ $('account-rows').replaceChildren();for(const a of accounts){const tr=el('tr');tr.append(el('td',a.namespace||a.portal_key||a.company_key),el('td',a.identity_id?(a.email||a.identity_id):'Legacy / unresolved'),el('td',a.status||'unknown'),el('td',stamp(a.last_confirmed_at)));
  const source=({override:'Custom password',default:'Default password',saved:'Saved credential',unavailable:'Unavailable'})[a.password_source]||'Unavailable';tr.append(el('td',source));
  const action=el('td');if(a.password_editable){const button=el('button',a.password_source==='override'?'Update override':'Set password override');button.type='button';button.onclick=()=>openPortalPassword(a);action.append(button);}else action.textContent=a.identity_id?'Private credentials unavailable':'Account identity unresolved';tr.append(action);$('account-rows').append(tr);}
- if(!v.accounts.length){const row=el('tr'),cell=el('td','No tracked portal accounts yet. Accounts appear as Jobot encounters employer sign-in or registration.');cell.colSpan=6;row.append(cell);$('account-rows').append(row);}
+ if(!accounts.length){const row=el('tr'),cell=el('td',v.accounts.length?'No portal accounts match your search. Try another site name, address or account email.':'No tracked portal accounts yet. Accounts appear as Jobot encounters employer sign-in or registration.');cell.colSpan=6;row.append(cell);$('account-rows').append(row);}
+}
+$('account-search').oninput=()=>{if(state.view)renderPortalAccounts(state.view);};
+$('account-search-clear').onclick=()=>{$('account-search').value='';if(state.view)renderPortalAccounts(state.view);$('account-search').focus();};
+function renderAccounts(v){renderPortalAccounts(v);
  $('history').replaceChildren();for(const r of v.runs){const n=el('p');const b=el('button',`${stamp(r.requested_at)} · ${r.state}`);b.onclick=async()=>{state.run=r.id;await tab('run');await refresh();};n.append(b,document.createTextNode(' '+r.id));$('history').append(n);}}
 let portalPasswordAccount=null,portalPasswordSaving=false;
 function openPortalPassword(account){

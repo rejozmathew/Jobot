@@ -452,6 +452,11 @@
     <section class="card">
       <h2>Portal Accounts</h2>
       <p>Manage passwords for tracked portal accounts. An override applies only to the listed candidate and portal. Saving here does not change the password on the employer's website.</p>
+      <label for="account-search">Search portals<input id="account-search" type="search" placeholder="Site name, address or account email" aria-controls="account-rows" aria-describedby="account-search-count"></label>
+      <div class="toolbar">
+        <p id="account-search-count" role="status" aria-live="polite"></p>
+        <button id="account-search-clear" type="button">Clear search</button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>

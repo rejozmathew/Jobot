@@ -315,6 +315,11 @@ account status, last confirmation and password source. An unsuccessful applicati
 does not erase confirmed account state. Saved passwords and verification codes
 are not displayed.
 
+Use **Search portals** to filter the list instantly by site name, address or
+account email. Search ignores case and surrounding spaces; the count shows
+matching accounts out of the total. The filter stays in place during automatic
+refreshes. **Clear search** restores the full list. Run history is not filtered.
+
 Choose **Set password override** on a tracked account to enter and confirm a
 portal-specific password. **Update override** replaces it; **Remove override**
 restores the previously configured credential (usually the default). The override
