@@ -119,6 +119,8 @@ v.answer_library={entries:[{id:'result',identity_id:'candidate',question:'Genera
  suggestions:[{id:'source',identity_id:'candidate',state:'learned',question:'General question?',entry_id:'result',source:{question:'Original?',answer:'Original reply'},attempts:1}],learning:{total:150,learned:130},impact:{applications:4,resolved_questions:7,recorded_form_uses:2}};
 w.drawAnswers(v);doc.querySelector('[data-learned-mode=suggestions]').click();
 assert(doc.getElementById('learned-summary').textContent.includes('150'),'Truncated activity is presented as complete');
+doc.getElementById('learned-search').value='General';doc.getElementById('learned-search').oninput();
+assert(doc.getElementById('learned-summary').textContent==='1 matching record in the latest 1 of 150 learning records','Filtered search hides the recent-record window');
 assert(doc.getElementById('learning-impact').textContent.includes('4'),'Application impact not visible');
 const link=[...doc.querySelectorAll('#learned-detail button')].find(b=>b.textContent==='View learned answer');assert(link,'No link from completed extraction to result');link.click();
 assert(doc.getElementById('learned-detail').textContent.includes('General answer'),'Wrong result opened');
