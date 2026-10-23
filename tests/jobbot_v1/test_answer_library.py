@@ -82,7 +82,8 @@ def test_duplicate_questions_are_grouped_and_one_answer_resolves_all(tmp_path):
     assert len(queue['clusters']) == 1 and queue['clusters'][0]['request_count'] == 2
     save(service)
     queue = service.answer_queue()
-    assert queue['inbox'] == [] and len(queue['ready']) == 1
+    assert queue['inbox'] == [] and queue['ready'] == []
+    assert len(service.answer_queue_history()['groups']) == 1  # Answers can continue in the live session.
     assert queue['clusters'] == []
 
 
@@ -140,7 +141,8 @@ def test_terminal_and_canceled_requests_keep_answers_and_restore_to_inbox(tmp_pa
     assert service.answer_queue_history()['groups'][0]['questions'][0]['answer'] is None
     with service.tx() as db:db.execute("UPDATE jobs SET disposition='active' WHERE id=?",(session['job_id'],))
     service.reconcile_answers()
-    assert service.answer_queue()['ready'][0]['questions'][0]['id']==q['id']
+    assert service.answer_queue()['ready']==[]
+    assert service.answer_queue_history()['groups'][0]['questions'][0]['id']==q['id']
 
 
 def test_library_api_is_operator_only(tmp_path):

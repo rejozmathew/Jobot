@@ -227,20 +227,20 @@ class AnswerLearningServices:
         return latest==source['source_revision']
 
     def _learning_view(self, db, identity_id=None):
-        if not self._has_learning_schema(db):return dict(pending=0,processing=0,error=0,activity=[])
+        if not self._has_learning_schema(db):return dict(pending=0,processing=0,error=0,learned=0,total=0,activity=[])
         where = ' WHERE identity_id=?' if identity_id else '';args = (identity_id,) if identity_id else ()
         counts = {r[0]:r[1] for r in db.execute('SELECT state,COUNT(*) FROM answer_learning_sources'+where+' GROUP BY state',args)}
         activity = []
-        for row in db.execute("SELECT * FROM answer_learning_sources"+where+(' AND' if where else ' WHERE')+
-                " state!='learned' ORDER BY updated_at DESC LIMIT 100",args):
-            if row['state']=='learned':continue
+        for row in db.execute("SELECT * FROM answer_learning_sources"+where+" ORDER BY updated_at DESC,id LIMIT 100",args):
             payload=json.loads(row['payload_json']);proposal=json.loads(row['result_json'] or '{}')
             activity.append(dict(id=row['id'],identity_id=row['identity_id'],state=row['state'],
                 question=proposal.get('question') or payload['question'],answer=proposal.get('answer'),
                 scope=proposal.get('scope') or payload.get('scope','global'),scope_key=proposal.get('scope_key',''),
                 conditions=proposal.get('conditions',{}),existing_entry_id=proposal.get('existing_entry_id'),
-                source=payload,error_code=row['error_code']))
-        return dict(pending=counts.get('pending',0),processing=counts.get('processing',0),error=counts.get('error',0),activity=activity)
+                source=payload,error_code=row['error_code'],entry_id=row['entry_id'],source_id=row['source_id'],
+                source_revision=row['source_revision'],attempts=row['attempts'],updated_at=row['updated_at'],retry_at=row['retry_at']))
+        return dict(**{key:counts.get(key,0) for key in ('pending','processing','error','learned','context_only','conflict','changed')},
+                    total=sum(counts.values()),activity_limit=100,activity=activity)
 
     def retry_answer_learning(self):
         with self.tx() as db:

@@ -121,6 +121,13 @@ counts do not imply submission or capture unrecorded model reasoning. No new tab
 or duplicated answer store is introduced. `{company}` in question wording binds
 to the posting's company; existing scope precedence handles exceptions.
 
+The answer-library overview deduplicates application IDs and matched question IDs
+across entries, including historical reuse of retired entries. Its recent application
+list is capped at 20. Learning activity projects the latest 100 source records,
+including successful extraction, with full state totals, the source revision,
+result entry ID, attempt count and retry timestamp. These are projections of the
+existing records, not a new learning or profile store.
+
 Human responses belong first to the actual application questions. Revisions retain
 the original wording, choices and answer provenance. A candidate-scoped library
 stores current reusable knowledge separately, with global, company or job scope

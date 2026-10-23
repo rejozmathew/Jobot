@@ -288,8 +288,8 @@ class AnswerLibraryServices(AnswerLearningServices):
             for entry in entries if self._has_learning_schema(db) else []:
                 entry['sources'] = [json.loads(r[0]) for r in db.execute(
                     "SELECT payload_json FROM answer_learning_sources WHERE entry_id=? AND state IN ('learned','context_only','conflict') ORDER BY updated_at DESC", (entry['id'],))]
-            self._answer_usage(db, entries)
-            return {'entries':entries, 'suggestions':learning.pop('activity'), 'learning':learning}
+            impact = self._answer_usage(db, entries)
+            return {'entries':entries, 'suggestions':learning.pop('activity'), 'learning':learning, 'impact':impact}
 
     def _answer_usage(self, db, entries):
         """Project existing response and private form evidence, never infer submission."""
@@ -297,11 +297,15 @@ class AnswerLibraryServices(AnswerLearningServices):
         indexed = {e['id']:e for e in entries}
         counts = {e['id']:set() for e in entries}
         applications = {e['id']:set() for e in entries}
+        used_applications = {}; matched_questions = set()
         for entry in entries:
             entry['usage'] = dict(resolved_questions=0, recorded_form_uses=0, applications=0, last_used_at=None, recent=[])
 
         def retain(entry, item):
             usage = entry['usage']; applications[entry['id']].add(item['job_id'])
+            previous = used_applications.get(item['job_id'])
+            if not previous or (item['at'] or '') > (previous['at'] or ''):
+                used_applications[item['job_id']] = {key:item.get(key) for key in ('job_id','company','title','url','at')}
             usage['recent'].append(item)
             usage['recent'].sort(key=lambda r:r['at'] or '', reverse=True)
             del usage['recent'][20:]
@@ -314,7 +318,7 @@ class AnswerLibraryServices(AnswerLearningServices):
                 AND a.answer_json IS NOT NULL AND a.answer_json!='null' ORDER BY a.created_at DESC'''):
             item = dict(row); entry = indexed.get(item.pop('library_entry_id'))
             if not entry or item['question_id'] in counts[entry['id']]:continue
-            counts[entry['id']].add(item['question_id']);retain(entry, dict(item, kind='resolved'))
+            counts[entry['id']].add(item['question_id']);matched_questions.add(item['question_id']);retain(entry, dict(item, kind='resolved'))
         spool = (getattr(self, 'executor_config', {}) or {}).get('spool_dir')
         cache = getattr(self, '_answer_usage_cache', {})
         current_cache = {}
@@ -352,6 +356,9 @@ class AnswerLibraryServices(AnswerLearningServices):
         for entry in entries:
             entry['usage']['resolved_questions'] = len(counts[entry['id']])
             entry['usage']['applications'] = len(applications[entry['id']])
+        return dict(applications=len(used_applications),resolved_questions=len(matched_questions),
+                    recorded_form_uses=sum(e['usage']['recorded_form_uses'] for e in entries),
+                    recent_applications=sorted(used_applications.values(),key=lambda item:item['at'] or '',reverse=True)[:20])
 
     @staticmethod
     def _answer_clusters(groups):

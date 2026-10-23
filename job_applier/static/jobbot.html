@@ -192,7 +192,7 @@
   <section id="tab-answers" class="tab" hidden>
     <section class="card answers-card">
       <div class="section-title">
-        <div><h2 id="answer-heading">Needs your answer</h2><p>Choose a question to see the company, position and applications it belongs to.</p></div>
+        <div><h2 id="answer-heading">Needs your answer</h2><p>Answer matching applications together. Work through several questions, then save your drafts once.</p></div>
         <button id="queue-answered-batch" type="button">Queue all answered applications</button>
       </div>
       <div class="answer-toolbar">
@@ -202,6 +202,11 @@
           <button type="button" data-answer-mode="history" aria-pressed="false">History <span id="answer-history-count"></span></button>
         </div>
         <label class="answer-search-label"><span class="sr-only">Search questions and applications</span><input id="answer-search" type="search" placeholder="Search company, position or question"></label>
+      </div>
+      <div id="answer-draft-toolbar" class="answer-actions">
+        <button id="answer-bulk-toggle" type="button" aria-pressed="false">Answer in bulk</button>
+        <button id="answer-save-drafts" class="primary" type="button" disabled>Save drafts</button>
+        <span id="answer-draft-count" class="answer-meta" role="status"></span>
       </div>
       <div id="answer-receipt" role="status" aria-live="polite" hidden></div>
       <label class="answer-mobile-picker">Choose a question or application<select id="answer-picker"></select></label>
@@ -228,6 +233,8 @@
         <label class="answer-search-label"><span class="sr-only">Search learned answers</span><input id="learned-search" type="search" placeholder="Search question, answer, company or position"></label>
       </div>
       <p id="learning-status" class="answer-meta" role="status"></p>
+      <div id="learning-impact" class="learning-impact"></div>
+      <details id="learning-applications" class="answer-library-history"></details>
       <label class="answer-mobile-picker">Choose a learned answer<select id="learned-picker"></select></label>
       <div class="answer-workspace">
         <aside class="answer-sidebar" aria-label="Learned answer list"><p id="learned-summary" class="answer-list-summary"></p><div id="learned-list" class="answer-list"></div><div id="learned-pagination" class="answer-pagination"></div></aside>
@@ -242,7 +249,8 @@
       <label>Candidate<select id="library-candidate" required></select></label>
       <label>General question<textarea id="library-question" rows="2" maxlength="4000" required></textarea></label>
       <p>Use {company} for a company name when your answer applies across employers. Save exceptions with “This company” or “This application”; those take precedence.</p>
-      <label>Current answer<textarea id="library-answer" rows="3" maxlength="4000" required></textarea></label>
+      <div id="library-comparison" hidden></div>
+      <label><span id="library-answer-label">Current answer</span><textarea id="library-answer" rows="3" maxlength="4000" required></textarea></label>
       <label>Other wording this answer covers (one question per line)<textarea id="library-aliases" rows="3"></textarea></label>
       <label>Use for<select id="library-scope"><option value="global">All matching applications</option><option value="company">This company</option><option value="job">This application</option></select></label>
       <label id="library-company-label" hidden>Company<input id="library-company"></label>
@@ -350,6 +358,7 @@
         <div class="identity" style="margin-bottom: 12px;">
           <p><strong>Candidate ID: </strong><span id="profile-id" class="mono"></span> · <strong>Person key: </strong><span id="profile-person-key"></span></p>
         </div>
+        <section id="profile-knowledge" class="profile-knowledge" aria-label="Reusable application knowledge"></section>
         <form id="profile-form">
           <label>Email
             <input id="profile-email" type="email" required>

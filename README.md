@@ -25,8 +25,8 @@ results. [Screenshot provenance](docs/images/README.md).*
 |---|---|
 | **One application pipeline** | Add posting URLs manually or through discovery/integrations. Search, filter, prioritize, cancel and restore jobs while retaining their history. |
 | **Managed execution** | Queue selected jobs or use Apply now. Run 1–5 applications with separate executor conversations and owned browser windows. Pause new work or control an individual session. |
-| **Human answers when needed** | Resolve missing facts in Needs your answer, then queue an answered application for retry. Keep the original question and response history. |
-| **Reusable knowledge** | Maintain versioned learned answers with global, company or application scope, alternate question wording and source history. AI learning runs separately from saving an answer. |
+| **Human answers when needed** | Fill several questions and save drafts together across matching applications, then queue fully answered applications for retry. Keep original questions and response history. |
+| **Reusable knowledge** | See what AI extracted, open its source and inspect recorded application reuse. Maintain versioned answers with global, company or application scope from Learned answers or Profile. |
 | **Visible outcomes** | Inspect attempts, progress, timings and confirmation evidence. Activity separates distinct postings, attempts, new submissions and already-applied results. |
 | **Your execution settings** | Select model and effort, review-only or submission mode, concurrency and an overall application deadline. Discovery and answer learning can use separate models. |
 | **Profiles, resumes and accounts** | Register resume versions, maintain candidate facts and track portal accounts, including private per-account password overrides. |
@@ -42,8 +42,8 @@ that an employer accepted the application.
 ### Resolve missing answers
 
 The answer inbox keeps the employer, role and exact question together. Save the
-facts an application needs, review answer history and retry when its required
-answers are ready.
+facts an application needs individually or with **Answer in bulk** and **Save drafts**,
+review answer history and retry when its required answers are ready.
 
 ![Needs your answer workspace with synthetic application questions and an answer editor](docs/images/answer-inbox.png)
 
@@ -51,6 +51,9 @@ answers are ready.
 
 Inspect, edit or retire learned answers without losing earlier versions. Choose
 where an answer applies instead of assuming one employer's response fits every job.
+Learning activity connects successful extraction to the saved answer. The overview
+shows distinct applications with recorded reuse, with matching and form evidence
+kept separate from submission outcomes.
 
 ![Learned answers workspace showing synthetic reusable answers and their scope](docs/images/learned-answers.png)
 

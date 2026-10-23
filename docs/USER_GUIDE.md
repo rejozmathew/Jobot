@@ -169,6 +169,18 @@ repeated questions while keeping company, role and affected applications visible
 Choose a question in the list or the mobile picker to see its actual wording and
 available answer controls.
 
+Choose **Answer in bulk** to edit up to 12 questions together. Each row shows the
+company and position, its matching applications, and a control to apply the reply
+to all shown matches or one position. **Save N drafts** saves populated drafts
+across pages and search results, including drafts entered in the focused editor.
+Blank questions are left unanswered. The receipt reports saved questions and
+distinct applications; **View AI learning** opens extraction activity.
+
+Drafts survive polling, searches and switching views within this page, but are not
+stored across a browser reload. Failed saves keep remaining drafts. Large batches
+are saved in groups of at most 100 application replies; if a later group fails,
+the page reports the saved portion and retains the remainder for review.
+
 1. Check which applications the selected question belongs to.
 2. Supply the response that is true for those applications, using the offered
    choices when the employer constrains the answer.
@@ -179,8 +191,11 @@ available answer controls.
 
 The page has **Needs your answer**, **Ready to retry** and **Answer history** views.
 History includes previous response revisions and resolved application context.
-Submitted, canceled, archived and explicitly queued answer retries leave the
+Submitted, canceled, archived, explicitly queued answer retries and fully answered
+applications with a live browser leave the
 actionable inbox without being relabeled as answered when they were not answered.
+Live applications can consume saved answers in their existing session. They do
+not appear as ready for another retry solely because all questions were answered.
 
 Search, pagination and a focused detail pane keep the list manageable. Selection
 and draft answers survive polling and reorderings. Saving one response can move
@@ -203,10 +218,20 @@ covered, last use, and up to 20 recent evidence records with company, position,
 original question and answer version. Matches were selected for saved questions;
 form uses come from private application journals. Neither proves submission.
 Agent use without recorded provenance is not counted, so old evidence can undercount.
+The overview counts reusable answers, distinct applications with recorded reuse,
+matched questions and recorded form uses across profiles. **Which applications
+used these answers?** lists the 20 most recently recorded applications. An
+application using several answers is counted once in the overview.
 
 This page holds current reusable knowledge and its source history. The views are
 **Current**, **Retired** and **Learning activity**. Search by question, answer,
 company or position; select one entry for its details and original responses.
+Learning activity includes successful extraction with **View learned answer**,
+pending work, application-specific responses, conflicts and failures. It shows
+the latest 100 records and the full record count, so search here is limited to
+those recent records. Current reusable answers remain searchable in **Current**.
+Activity details show attempts, update time and scheduled retry time where
+available. A conflict shows the current and proposed answers before editing.
 
 AI learning extracts generalized, grounded answers from application responses.
 Human saves do not wait for inference. A learning error leaves the original answer
@@ -264,6 +289,12 @@ Select the candidate and inspect identity, email, full name, work authorization
 and selected resume. **Advanced Factual JSON** contains candidate facts, without
 account passwords or other secrets. **Save profile** updates future snapshots;
 existing attempt snapshots retain their recorded facts.
+
+**Experience & application answers** connects the selected profile to its reusable
+knowledge. **View this profile’s learned answers** opens that candidate’s answers;
+**Add experience or preference** adds a sourced, scoped reusable answer without
+duplicating it into the factual JSON. Existing entries remain editable in Learned
+answers, with earlier versions and application evidence retained.
 
 **Import & Resume Assets** can import factual data from a legacy JSON file. It
 excludes credentials, secrets and policy fields from that factual import and

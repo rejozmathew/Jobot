@@ -240,8 +240,10 @@ class QuestionServices:
                 except ProtocolError as exc:
                     if exc.code not in ('already_applied','job_canceled'):raise
                     historical=True
+                # Presentation only: an answered live session can consume its replies.
+                # Explicit retry requests retain the shared retry policy below.
                 group['queue_section']=('history' if historical else 'inbox' if group['pending_count'] else
-                    'history' if group['retry'] and group['retry']['state']=='queued' else 'ready')
+                    'history' if not group['browser_stopped'] or (group['retry'] and group['retry']['state']=='queued') else 'ready')
                 groups.append(group)
             return groups
 
