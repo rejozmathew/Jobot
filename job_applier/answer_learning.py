@@ -1,5 +1,6 @@
 """Grounded AI synthesis from response snapshots, independent of application execution."""
 from datetime import datetime, timedelta
+from decimal import Decimal
 import hashlib
 import json
 import re
@@ -38,10 +39,20 @@ the original question must not become an automatic direct-reuse alias.
 Compare with the current entries: identify an existing entry about the SAME fact using
 existing_entry_id, including if values conflict. Current edited facts take precedence;
 do not change a source answer to conceal a conflict. Never reactivate retired knowledge.
+existing_answer_equivalent is true ONLY when the proposed answer and the selected
+existing answer express the SAME fact in both directions, in the context of their
+questions, scope and conditions. Harmless paraphrases, a direct No versus an explicit
+negative sentence, numeric formatting and exact unit conversions can be equivalent.
+Broader/narrower claims, changed amounts, currencies, pay periods, sponsorship time
+qualifiers, employers or conditions are not equivalent. If uncertain, return false.
+For an equivalent existing answer, provide existing_evidence_quotes copied exactly
+from that entry's answer. Keep the source-grounded proposed answer in the output;
+the service will preserve the current answer and add only wording and provenance.
 Return ONLY JSON:
 {"reusable":true,"question":"general question","answer":"grounded generic answer",
 "scope":"global","scope_key":"","conditions":{},"source_equivalent":false,
-"existing_entry_id":null,"evidence_quotes":["exact substring from source answer"]}.
+"existing_entry_id":null,"existing_answer_equivalent":false,
+"existing_evidence_quotes":[],"evidence_quotes":["exact substring from source answer"]}.
 For reusable=false return {"reusable":false}. evidence_quotes must substantiate the
 answer, copied exactly from the source answer. IDs come only from the supplied data.'''
 
@@ -72,6 +83,48 @@ the underlying fact and all qualifiers, not employer-name spelling. A template m
 match equivalent wording about that employer; retain the original answer's polarity.
 Do not treat affirmative statements as a different fact simply because the question
 uses different words.'''
+
+
+def equivalent_existing_answer(output, selected):
+    """Validate the model's meaning comparison against the exact current entry.
+
+    This only relaxes the existing text-equality merge. Obvious value differences
+    still need review; all other qualifiers are part of the model's comparison.
+    """
+    if output.get('existing_answer_equivalent') is not True or output.get('existing_entry_id')!=selected['id']:
+        return False
+    current=selected['answer']
+    current=('Yes' if current else 'No') if type(current) is bool else str(current)
+    proposed=str(output['answer'])
+    quotes=output.get('existing_evidence_quotes')
+    if not isinstance(quotes,list) or not quotes or any(not isinstance(q,str) or not q.strip() or q not in current for q in quotes):
+        return False
+    polarity=lambda text: re.match(r'^\s*(yes|no)\b',text,re.I)
+    left,right=polarity(current),polarity(proposed)
+    if left and right and left[1].casefold()!=right[1].casefold():return False
+
+    def quantities(text):
+        values=[]
+        for match in re.finditer(r'(?<![\w.])\d+(?:,\d{3})*(?:\.\d+)?\b(?:\s*(days?|weeks?|months?|years?))?',text,re.I):
+            number=Decimal(re.match(r'[\d,.]+',match[0])[0].replace(',',''))
+            unit=(match[1] or '').lower().rstrip('s')
+            if unit=='week':number*=7;unit='day'
+            if unit=='year':number*=12;unit='month'
+            values.append((unit,number))
+        return sorted(values)
+    if quantities(current)!=quantities(proposed):return False
+    def currencies(text):
+        return { {'$':'usd','€':'eur','£':'gbp'}.get(token.lower(),token.lower())
+                 for token in re.findall(r'\b(?:USD|EUR|GBP|CAD|AUD)\b|[$€£]',text,re.I) }
+    left,right=currencies(current),currencies(proposed)
+    if left and right and left!=right:return False
+    if left or right:
+        def periods(text):
+            return { {'annually':'year','yearly':'year','hourly':'hour','monthly':'month','weekly':'week'}.get(word,word)
+                     for word in re.findall(r'\b(?:year|annually|yearly|hour|hourly|month|monthly|week|weekly)\b',text.lower()) }
+        left,right=periods(current),periods(proposed)
+        if left and right and left!=right:return False
+    return True
 
 
 def model_generate(config, instruction, payload):
@@ -286,6 +339,7 @@ class AnswerLearningServices:
             conditions={**conditions,**payload.get('conditions',{})}
             selected=next((e for e in current_entries if e['id']==output.get('existing_entry_id')),None)
             if output.get('existing_entry_id') and not selected:raise ValueError('unknown_entry')
+            equivalent=bool(selected and equivalent_existing_answer(output,selected))
             from .managed_answer_library import normalized,company_key,question_identity
             if not selected:
                 selected=next((e for e in current_entries if e['id']!=payload.get('entry_id') and
@@ -296,7 +350,7 @@ class AnswerLearningServices:
                     selected['scope_key']!=(company_key(scope_key) if scope=='company' else scope_key) or selected['conditions']!=conditions):
                 return self._finish_learning(source,'conflict',output)
             selected_answer=('Yes' if selected['answer'] else 'No') if selected and type(selected['answer']) is bool else (selected or {}).get('answer')
-            if selected and normalized(selected_answer)!=normalized(output['answer']):
+            if selected and normalized(selected_answer)!=normalized(output['answer']) and not equivalent:
                 return self._finish_learning(source,'conflict',output)
             old=selected or next((e for e in entries if e['id']==payload.get('entry_id')),None)
             aliases=list((old or {}).get('aliases',[])) if selected else []

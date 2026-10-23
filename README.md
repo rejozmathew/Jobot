@@ -42,7 +42,7 @@ that an employer accepted the application.
 ### Resolve missing answers
 
 The answer inbox keeps the employer, role and exact question together. Save the
-facts an application needs individually or with **Answer in bulk** and **Save drafts**,
+facts an application needs in the default bulk view with **Save drafts**, or individually,
 review answer history and retry when its required answers are ready.
 
 ![Needs your answer workspace with synthetic application questions and an answer editor](docs/images/answer-inbox.png)

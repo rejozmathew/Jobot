@@ -166,15 +166,14 @@ browser tabs and unrelated applications remain outside those controls.
 
 This is the actionable inbox for unresolved application questions. It groups
 repeated questions while keeping company, role and affected applications visible.
-Choose a question in the list or the mobile picker to see its actual wording and
-available answer controls.
-
-Choose **Answer in bulk** to edit up to 12 questions together. Each row shows the
-company and position, its matching applications, and a control to apply the reply
+The inbox opens in bulk mode so you can edit up to 12 questions together. Each row
+shows the company and position, its matching applications, and a control to apply the reply
 to all shown matches or one position. **Save N drafts** saves populated drafts
 across pages and search results, including drafts entered in the focused editor.
 Blank questions are left unanswered. The receipt reports saved questions and
 distinct applications; **View AI learning** opens extraction activity.
+Choose **Focus on one question** for the individual editor and mobile picker;
+**Answer in bulk** returns to the batch view without losing drafts.
 
 Drafts survive polling, searches and switching views within this page, but are not
 stored across a browser reload. Failed saves keep remaining drafts. Large batches
@@ -184,8 +183,8 @@ the page reports the saved portion and retains the remainder for review.
 1. Check which applications the selected question belongs to.
 2. Supply the response that is true for those applications, using the offered
    choices when the employer constrains the answer.
-3. Use **Save answer**. The response is recorded for the selected applications
-   immediately; background AI learning is separate.
+3. Use **Save N drafts**, or **Save answer** in focused mode. Responses are recorded
+   for the selected applications immediately; background AI learning is separate.
 4. Review **Ready to retry** once all required answers for an application are saved.
    Use its **Save and queue retry** action to request another attempt.
 
@@ -238,6 +237,13 @@ Human saves do not wait for inference. A learning error leaves the original answ
 saved and retries independently. **Run AI learning** requests another learning
 pass; **Check unanswered questions** reevaluates pending requests against available
 knowledge. Neither button starts an application executor.
+
+When new wording expresses the same fact as an existing answer, learning keeps
+the current answer and adds the source and equivalent question wording. It checks
+meaning in the context of both questions, scope and conditions, with exact evidence
+from the existing answer. Different amounts, currencies, pay periods, qualifiers
+or scope still need review. Uncertain comparisons remain visible as conflicts;
+the model cannot replace your current answer merely by calling it equivalent.
 
 Use **Add reusable answer** for explicit knowledge you want to maintain yourself.
 An entry includes:

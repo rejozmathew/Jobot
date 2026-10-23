@@ -36,10 +36,12 @@ def test_dashboard_saves_drafts_and_queues_answered_applications(tmp_path):
         async with fixture_browser(tmp_path,entry_url=f'http://127.0.0.1:{port}/') as (page,_,__):
             await page._session.call('Emulation.setDeviceMetricsOverride',{'width':1280,'height':1000,'deviceScaleFactor':1,'mobile':False})
             deadline=time.monotonic()+8
-            while not await page.evaluate("!!document.querySelector('.answer-application')"):
+            while not await page.evaluate("!!document.querySelector('.answer-bulk-row')"):
                 assert time.monotonic()<deadline
                 await asyncio.sleep(.05)
             await page.evaluate("document.querySelector('[data-tab=answers]').click()")
+            assert await page.evaluate("document.getElementById('answer-bulk-toggle').textContent")=='Focus on one question'
+            await page.evaluate("document.getElementById('answer-bulk-toggle').click()")
             assert await page.evaluate("document.getElementById('answer-count').textContent")=='(2)'
             assert await page.evaluate("document.querySelector('#answer-groups .answer-context').textContent.includes('Example Systems')")
             assert await page.evaluate("document.querySelector('#answer-groups .answer-context').textContent.includes('Engineering Manager')")

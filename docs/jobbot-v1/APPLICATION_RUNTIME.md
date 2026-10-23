@@ -238,6 +238,15 @@ extraction. New facts conflicting with current knowledge appear for review, and
 concurrent edits win over model results. AI-derived entries edited by the user remain
 labelled as such; manual entries are labelled **Added by you**.
 
+That same synthesis call also compares the proposed answer's meaning with the
+selected existing entry. Equivalent wording can merge with exact quotations from
+the existing answer and identical scope/conditions; text equality remains supported.
+The service rejects obvious polarity, quantity, currency and pay-period differences
+from this merge, and uncertain comparisons remain conflicts. The merge preserves
+the existing answer, question and origin while adding provenance and eligible
+aliases with optimistic revision checks. This does not change application execution
+or create an additional model call.
+
 A second auxiliary pass compares pending questions with current knowledge and adds
 only equivalent question wording. Reconciliation still maps current answers to the
 actual form choices and checks scope/conditions. A generalized career motivation
@@ -284,10 +293,11 @@ ownership, writer checks and submission evidence remain unchanged.
 
 The dashboard groups repeated outstanding requests and can save one scoped answer
 for them. Learned answers has its own top-level navigation entry. The inbox,
-ready applications, history and learned answers each use a paginated 12-row list
-and one focused detail pane. Company and position are visible before answering;
-question selection and drafts survive polling and list reordering. Mobile uses a
-question/application picker. Save receipts link to AI learning activity,
+ready applications, history and learned answers use paginated 12-row views.
+The inbox defaults to bulk editing with one Save drafts action; Focus on one question
+opens the individual detail pane. Company and position are visible before answering;
+question selection and drafts survive polling and list reordering. Focused mode
+uses a question/application picker on mobile. Save receipts link to AI learning activity,
 and a resolved question advances to the next request without losing other drafts.
 Learning records include the companies and positions they came from.
 These views separate action from records. Submitted, canceled, archived and
@@ -1227,7 +1237,7 @@ history are not migrated or rewritten. Missing direct URLs remain unclassified.
 | browser_frames.py / cdp_client.py channels | Shared DOM-owned application document routing below the existing browser API, isolated worlds, stale-ref rejection and root pointer mapping |
 | managed_queue._settle_reconciled_queue | Called inside successful manual reconciliation; atomically settles only queued rows for the related job and same identity. Existing stopped-session/newer-attempt checks and dispatched/history rows remain intact. |
 | managed_answer_library.py / migration 26 | Current candidate-scoped knowledge, aliases, applicability, append-only revisions and synthesis provenance; called by profile writes, question capture, operator APIs, application context, shared saved_answer and the dispatcher minute reconciliation. No browser/helper outcome authority. |
-| answer_learning.py / answer_learning_model.py / migration 27 | Dashboard-owned background synthesis and equivalent wording review; uses the installed Hermes auxiliary inference client without application tools/sessions. Called by queue_runtime.serve; human saves enqueue durable inputs in the same database. No application/helper outcome authority. |
+| answer_learning.py / answer_learning_model.py / migration 27 | Dashboard-owned background synthesis, equivalent-answer merging and question wording review; uses the installed Hermes auxiliary inference client without application tools/sessions. Called by queue_runtime.serve; human saves enqueue durable inputs in the same database. No application/helper outcome authority. |
 | job_duplicates.py / migration 29 | Called by configured intake, the dashboard background worker and shared admission checks. Optional cached local embeddings propose same-company role matches; matching_suppression rechecks candidate success or explicit operator cancellation for new admissions in enforce mode. Stores reversible pair decisions and first actual skip receipts with the real reason, without creating URL/ownership aliases or copying dispositions. |
 | daily_summary.py / hermes_notifications.py | The existing notification watcher calls a read-only calendar-day projection at the configured morning time. Counts submissions, attempts, actual duplicate skips and sixth-dispatch exhaustion; private delivery receipts prevent ordinary restart replays. No application outcome authority. |
 | managed_questions.py / migrations 16 and 26 | Durable required questions, exact human answers/revisions and retry requests in the same database; browser-independent, success-only history suppression shared with ordinary starts |

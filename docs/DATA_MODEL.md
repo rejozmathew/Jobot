@@ -135,7 +135,13 @@ and optional country, currency and pay-period qualifiers.
 
 AI synthesis runs outside the application executor. It can generalize grounded
 responses and suggest equivalent wording; it preserves sources and surfaces
-conflicts. Explicit human answers remain application overrides. Editing or retiring
+conflicts. The same synthesis call can identify a semantically equivalent existing
+answer using its ID and exact existing-answer quotations. A same-scope/conditions
+merge preserves the current answer, question and origin, adds provenance and
+eligible aliases, and checks the current revision before writing. Obvious polarity,
+numeric, currency and pay-period differences remain conflicts; uncertain meaning
+comparisons do too. No additional inference call or schema is required.
+Explicit human answers remain application overrides. Editing or retiring
 knowledge changes current reuse while keeping earlier versions. Existing completed
 response snapshots are not rewritten by reconciliation.
 

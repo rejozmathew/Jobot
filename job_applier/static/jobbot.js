@@ -461,7 +461,7 @@ async function saveAnswerGroup(group,queue){
   }
  state.answerKey=null;await refresh();
 }
-state.answerMode='inbox';state.answerSelections={};state.learnedMode='current';state.learnedPage=0;
+state.answerMode='inbox';state.answerBulk=true;state.answerSelections={};state.learnedMode='current';state.learnedPage=0;
 const ANSWER_PAGE_SIZE=12;
 function answerText(value){return value==null?'No answer recorded':typeof value==='object'?value.label:String(value);}
 function applicationContext(requests){

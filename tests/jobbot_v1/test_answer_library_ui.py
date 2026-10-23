@@ -14,6 +14,9 @@ w.draw(v);w.noRefresh();w.drawAnswers(v);
 '''
 
 
+FOCUSED_FIXTURE = FIXTURE + "doc.getElementById('answer-bulk-toggle').click();\n"
+
+
 def test_learned_answer_shows_distinct_matching_and_form_use_evidence():
     dashboard_check(FIXTURE + r'''
 v.answer_library={entries:[{id:'used',identity_id:'candidate',question:'Do you own stock in {company}?',answer:'No',scope:'global',state:'active',revision:2,history:[],
@@ -27,7 +30,7 @@ assert(text.includes('Neither proves submission'),'Matching is misrepresented as
 
 
 def test_grouped_inbox_saves_application_replies_without_adding_raw_library_entries():
-    dashboard_check(FIXTURE + r'''
+    dashboard_check(FOCUSED_FIXTURE + r'''
 const input=doc.getElementById('answer-q1');input.value='After two weeks notice';input.oninput();
 let payload;w.fetch=async(path,options)=>{assert(path==='/v1/answer_questions','Save must persist a human application response');payload=JSON.parse(options.body);return {ok:true,status:200,json:async()=>({questions:[]})};};
 const form=doc.querySelector('#answer-groups form');
@@ -75,7 +78,7 @@ assert(!doc.querySelector('#answer-groups form'),'History offered application wr
 
 
 def test_company_and_role_are_visible_before_answering_and_learned_answers_have_a_top_tab():
-    dashboard_check(FIXTURE + r'''
+    dashboard_check(FOCUSED_FIXTURE + r'''
 assert(doc.querySelector('nav [data-tab="learned"]')?.textContent.includes('Learned answers'),'Saved answers have no top-level destination');
 const context=doc.querySelector('#answer-groups .answer-context');
 assert(context&&!context.closest('details'),'Application context is collapsed');
@@ -87,7 +90,7 @@ assert(doc.getElementById('answer-groups').querySelectorAll('form').length===1,'
 
 
 def test_large_inbox_is_paged_and_keeps_selection_and_drafts_during_refresh():
-    dashboard_check(FIXTURE + r'''
+    dashboard_check(FOCUSED_FIXTURE + r'''
 const base=v.answer_queue.clusters[0];
 v.answer_queue.clusters=Array.from({length:35},(_,i)=>({...base,id:'cluster-'+i,question:'Question '+i,
  requests:[{...base.requests[0],question_id:'q-'+i}],request_count:1}));
@@ -108,7 +111,7 @@ assert(doc.querySelector('#answer-pagination').textContent.includes('13–24 of 
 
 
 def test_save_has_a_visible_destination_advances_the_inbox_and_keeps_other_drafts():
-    dashboard_check(FIXTURE + r'''
+    dashboard_check(FOCUSED_FIXTURE + r'''
 const next={...v.answer_queue.clusters[0],id:'next',question:'Another question',requests:[{...v.answer_queue.clusters[0].requests[0],question_id:'q3'}]};
 v.answer_queue.clusters.push(next);w.drawAnswers(v);
 doc.querySelector('[data-answer-id=next]').click();let input=doc.getElementById('answer-q3');input.value='My next draft';input.oninput();

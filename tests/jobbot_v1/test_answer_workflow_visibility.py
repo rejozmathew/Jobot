@@ -1,8 +1,17 @@
 """Bulk replies and learning receipts use synthetic ledger and UI evidence."""
 from test_answer_queue import connected, request
 from test_answer_learning import reply, synthesis
-from test_answer_library_ui import FIXTURE
+from test_answer_library_ui import FIXTURE, FOCUSED_FIXTURE
 from test_dispatch_queue_ui import dashboard_check
+
+
+def test_inbox_opens_in_bulk_mode_and_can_switch_to_focus():
+    dashboard_check(FIXTURE + r'''
+assert(doc.querySelector('.answer-bulk-workspace'),'Inbox did not default to bulk mode');
+assert(doc.getElementById('answer-bulk-toggle').textContent==='Focus on one question','Default mode is unclear');
+doc.getElementById('answer-bulk-toggle').click();
+assert(doc.querySelector('#answer-groups form'),'Focused editing is unavailable');
+''')
 
 
 def test_answered_live_session_is_history_until_browser_stops(tmp_path):
@@ -43,7 +52,7 @@ def test_bulk_answers_preserve_drafts_and_save_one_revision_checked_batch():
     dashboard_check(FIXTURE + r'''
 const base=v.answer_queue.clusters[0];
 v.answer_queue.clusters.push({...base,id:'second',question:'Another question?',requests:[{...base.requests[0],question_id:'q3'}]});
-w.drawAnswers(v);doc.getElementById('answer-bulk-toggle').click();
+w.drawAnswers(v);
 let one=doc.getElementById('answer-q1'),two=doc.getElementById('answer-q3');
 one.value='Two weeks';one.oninput();two.value='Yes';two.oninput();
 doc.getElementById('answer-search').value='Another';doc.getElementById('answer-search').oninput();
@@ -59,7 +68,7 @@ assert(doc.getElementById('answer-receipt').textContent.includes('2 questions'),
 
 def test_bulk_failed_save_keeps_all_drafts_and_does_not_queue():
     dashboard_check(FIXTURE + r'''
-doc.getElementById('answer-bulk-toggle').click();const input=doc.getElementById('answer-q1');input.value='Two weeks';input.oninput();
+const input=doc.getElementById('answer-q1');input.value='Two weeks';input.oninput();
 w.fetch=async()=>({ok:false,status:409,json:async()=>({error:'answer_revision_conflict'})});
 await doc.getElementById('answer-save-drafts').onclick();
 assert(doc.getElementById('answer-q1').value==='Two weeks','Conflict discarded draft');
@@ -71,7 +80,7 @@ def test_bulk_partial_save_retries_only_the_unsaved_chunk():
     dashboard_check(FIXTURE + r'''
 const cluster=v.answer_queue.clusters[0],base=cluster.requests[0];
 cluster.requests=Array.from({length:101},(_,i)=>({...base,question_id:'large-'+i,job_id:'job-'+i}));
-w.drawAnswers(v);doc.getElementById('answer-bulk-toggle').click();
+w.drawAnswers(v);
 const input=doc.getElementById('answer-large-0');input.value='Two weeks';input.oninput();
 const calls=[];w.fetch=async(path,options)=>{calls.push(JSON.parse(options.body));return {ok:calls.length!==2,status:calls.length===2?409:200,json:async()=>calls.length===2?{error:'answer_revision_conflict'}:{}};};
 await doc.getElementById('answer-save-drafts').onclick();
@@ -85,7 +94,7 @@ assert(doc.getElementById('answer-save-drafts').disabled,'Saved draft did not cl
 
 def test_bulk_single_position_save_clears_the_scoped_draft():
     dashboard_check(FIXTURE + r'''
-doc.getElementById('answer-bulk-toggle').click();
+
 const scope=doc.querySelector('select[aria-label="Applications for When can you start?"]');scope.value='job-b';scope.onchange();
 const input=doc.getElementById('answer-q1');input.value='Two weeks';input.oninput();let payload;
 w.fetch=async(path,options)=>{payload=JSON.parse(options.body);return {ok:true,status:200,json:async()=>({})};};
@@ -96,7 +105,7 @@ assert(doc.getElementById('answer-save-drafts').disabled,'Unselected requests ke
 
 
 def test_focused_save_keeps_revision_from_when_the_draft_was_started():
-    dashboard_check(FIXTURE + r'''
+    dashboard_check(FOCUSED_FIXTURE + r'''
 let input=doc.getElementById('answer-q1');input.value='Two weeks';input.oninput();
 v.answer_queue.clusters[0].requests[0].revision=2;w.drawAnswers(v);let payload;
 w.fetch=async(path,options)=>{payload=JSON.parse(options.body);return {ok:true,status:200,json:async()=>({})};};
@@ -107,7 +116,7 @@ assert(payload.answers[0].expected_revision===0,'Polling silently rebased a stal
 
 def test_bulk_draft_survives_matching_application_reordering():
     dashboard_check(FIXTURE + r'''
-doc.getElementById('answer-bulk-toggle').click();const input=doc.getElementById('answer-q1');input.value='Two weeks';input.oninput();
+const input=doc.getElementById('answer-q1');input.value='Two weeks';input.oninput();
 v.answer_queue.clusters[0].requests.reverse();w.drawAnswers(v);
 assert(doc.getElementById('answer-q2').value==='Two weeks','Reordering matching applications hid the draft');
 ''')
