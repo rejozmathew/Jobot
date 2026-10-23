@@ -1,9 +1,9 @@
 [Unit]
-Description=Maintain disposable JobBot runtime storage nightly
+Description=Maintain disposable JobBot runtime storage hourly
 
 [Timer]
-OnCalendar=daily
-RandomizedDelaySec=30m
+OnCalendar=hourly
+RandomizedDelaySec=5m
 Persistent=true
 Unit=jobbot-storage-maintenance.service
 

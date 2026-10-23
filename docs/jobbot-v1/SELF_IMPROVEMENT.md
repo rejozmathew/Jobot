@@ -63,6 +63,23 @@ write detailed logs locally and return aggregate results for primary inspection.
 
 ## Implementation and deployment
 
+Self-improvement #020 (October 23, 2026) adds explicit disposable-output cleanup
+to the storage maintenance service. Finished discovery scratch had accumulated
+because discovery wrote bulk responses to files and no completion/maintenance
+path disposed of them. The opt-in sweep removes terminal-run scratch, including
+compressed scratch, while preserving intake records, checkpoints and provenance.
+It also expires inactive screenshots and Hermes spilled tool/cache output after
+one day. Process references and active application timestamps preserve recovery
+data; no executor behavior, deadline, retry policy or confirmation rule changes.
+See [storage maintenance](../OPERATIONS.md#runtime-storage-maintenance) for the
+deletion scope and historical-evidence tradeoff. Disk space recovered is an
+operational result, not evidence of increased submission success or speed.
+Four new synthetic regressions failed before implementation. Focused validation
+passed all 21 cases on Windows and Ubuntu; the final managed suite passed 1,439
+with 173 opt-in/platform skips. The commit and annotated tag use
+`self-improvement-020-2026-10-23`; private run notes record actual deployment
+status separately from validation and publication.
+
 Self-improvement #019 (October 22, 2026) isolates newly launched workspace hosts
 from a calling harness's Python interpreter and Python environment overrides.
 Hosts use the repository virtualenv and `-E`; existing owned hosts remain intact.

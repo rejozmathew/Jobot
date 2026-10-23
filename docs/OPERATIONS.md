@@ -246,8 +246,25 @@ Files expire after seven days (fourteen for node-gyp); per-folder limits are
 64–256 MiB, with oldest files evicted first. Active build/download processes
 defer cache cleanup; a running browser defers browser-cache cleanup. Running
 executables, Hermes release folders, installed dependencies, browser profiles,
-cookies, live databases, conversation/tool-output history, application evidence
-and screenshots are outside this allowlist.
+cookies, live databases and conversation history are outside this cache allowlist.
+
+The installed service also opts into `--dispose-completed-output`. This separately
+deletes scratch files (including old compressed scratch copies) for discovery runs
+with a recorded end time. It retains `records.json`, `checkpoint.json`,
+`result.json` and `model-selection.json`; the database retains intake, provenance
+and application outcomes. Unknown run directories are retained. The discovery
+lock prevents cleanup overlapping discovery and its checkpoint handoff.
+
+The same option deletes screenshots older than one day and older than every
+still-open application session, plus files older than one day in Hermes' main
+and discovery-profile scratch, terminal-output, exec, web, browser-use,
+screenshots, spillover and delegation cache directories. Process-referenced
+directories, symlinks, hard-linked files and changing files are retained. An
+unreadable process command defers this sweep. These are permanent deletions:
+historical screenshot views and old spilled tool outputs may become unavailable.
+Current recovery screenshots, active discovery output, credentials, approved
+facts and job/account/submission records remain intact. This does not change
+application deadlines or recovery behavior.
 
 Explicitly named database backup copies under `private-spool/deployments`,
 `managed.db.before-local-*.db` beside the selected database, and Hermes
@@ -267,7 +284,7 @@ database or replace newer application history. Older deployment manifests may
 name the original uncompressed filename; its verified `.gz` counterpart holds
 the same bytes during retention.
 
-The adapted `jobbot-storage-maintenance.service` and `.timer` run nightly with
+The adapted `jobbot-storage-maintenance.service` and `.timer` run hourly with
 low CPU/I/O priority and a single-run lock. They do not stop queue work or change
 application eligibility. Install them in the existing user's systemd directory,
 reload the user manager and enable the timer. The latest private result is
@@ -275,9 +292,22 @@ reload the user manager and enable the timer. The latest private result is
 for errors, retained active caches and the `low_space` indicator (less than 4 GiB
 available). This complements the existing validation-fixture cleanup timer.
 
-Preserved conversation and application history can still grow. This maintenance
-bounds disposable caches and ages redundant backups; it does not promise a fixed
-total disk size or silently erase history to meet a storage target.
+Preserved conversation and application history can still grow. Discovery scratch
+is temporary working data rather than a durable archive. Minimal checkpoint and
+intake records intentionally remain after cleanup. Hermes conversation databases
+are separate: their native ended-session pruning and safe idle compaction are
+needed to reclaim transcript storage. This command does not prune those databases
+or stop their holders. It does not promise a fixed total disk size.
+
+For a dedicated disposable discovery profile, Hermes' native `sessions` settings
+can use `auto_prune: true`, `retention_days: 0`, `min_interval_hours: 1`,
+`vacuum_after_prune: true` and `min_vacuum_interval_days: 1`. This deletes ended,
+unpinned discovery transcripts on a subsequent maintenance/startup pass while
+protecting live turns and open continuation chains. Apply this only to the
+discovery profile, not a shared personal conversation profile. Native compaction
+defers while another process holds the database; deleted pages can be reused
+before the file's physical size shrinks. Do not remove an open SQLite database
+or its WAL/SHM files to force disk reclamation.
 
 ## Preparing a public repository
 

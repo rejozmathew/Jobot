@@ -4,7 +4,7 @@ Description=Bound disposable caches and verified JobBot/Hermes backup copies
 [Service]
 Type=oneshot
 WorkingDirectory=%h/apps/auto-job-applier-runtime
-ExecStart=%h/apps/auto-job-applier-runtime/.venv/bin/python scripts/maintain_runtime_storage.py --runtime-config %h/.config/jobbot/runtime.json --apply
+ExecStart=%h/apps/auto-job-applier-runtime/.venv/bin/python scripts/maintain_runtime_storage.py --runtime-config %h/.config/jobbot/runtime.json --apply --dispose-completed-output
 Nice=19
 IOSchedulingClass=idle
 CPUQuota=25%

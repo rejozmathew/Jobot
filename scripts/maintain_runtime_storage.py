@@ -4,6 +4,7 @@ Dry-run by default. Linux user maintenance; no browser, worker or service restar
 Only the fixed cache paths and explicitly named backup copies below are eligible.
 """
 import argparse
+from datetime import datetime
 import fnmatch
 import gzip
 import hashlib
@@ -11,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import stat
 import tempfile
 import time
@@ -291,10 +293,76 @@ def maintain(home, spool, db_path, *, apply=False, proc_root=Path('/proc'), now=
     return result
 
 
+def dispose_completed_output(home, spool, db_path, *, apply=False,
+                             proc_root=Path('/proc'), now=None):
+    """Opt-in removal of disposable output, never application/account records.
+
+    Caller holds the discovery lock so a subsequent run cannot read a prior
+    checkpoint while maintenance is scanning. Checkpoints and final intake
+    records remain available; only terminal runs' scratch output is disposable.
+    """
+    home, spool, db_path = (Path(p).absolute() for p in (home, spool, db_path))
+    if (any(p.resolve() != p for p in (home, spool, db_path))
+            or not spool.is_relative_to(home) or spool == home
+            or not db_path.is_relative_to(home)):
+        raise ValueError('invalid_runtime_storage_path')
+    uid = home.stat().st_uid
+    now = time.time() if now is None else now
+    result = {'eligible_files': 0, 'removed_files': 0, 'removed_bytes': 0,
+              'retained': [], 'errors': []}
+    with sqlite3.connect(db_path.as_uri()+'?mode=ro', uri=True) as db:
+        runs = db.execute('SELECT id FROM discovery_runs WHERE ended_at IS NOT NULL').fetchall()
+        starts = db.execute('SELECT requested_at FROM application_sessions WHERE ended_at IS NULL').fetchall()
+    cutoff = now-DAY
+    for (started,) in starts:
+        # An unparsable active timestamp aborts this sweep, never guesses safety.
+        cutoff = min(cutoff, datetime.fromisoformat(started).timestamp())
+    roots = []
+    for (run_id,) in runs:
+        root = spool/'harvest'/run_id
+        if root.parent == spool/'harvest' and root.resolve() == root:
+            roots.append((root, 'discovery'))
+    roots.append((spool/'screenshots', 'screenshots'))
+    for profile in (home/'.hermes', home/'.hermes/profiles/jobbot-discovery'):
+        for name in ('scratch', 'terminal-output', 'exec', 'web', 'browser-use',
+                     'screenshots', 'spillover', 'delegation'):
+            roots.append((profile/'cache'/name, 'hermes_cache'))
+    references, unreadable, _ = process_references([p for p, _ in roots], Path(proc_root), uid)
+    if unreadable:
+        result['retained'].append({'reason': 'unreadable_process_commands'})
+        return result
+    for root, kind in roots:
+        if root in references:
+            result['retained'].append({'path': str(root), 'reason': 'process_reference'})
+            continue
+        for path in files_under(root, uid):
+            if (kind == 'discovery' and path.parent == root and path.name in
+                    {'records.json', 'checkpoint.json', 'result.json', 'model-selection.json'}):
+                continue
+            saved = fingerprint(path)
+            limit = cutoff if kind == 'screenshots' else now-DAY
+            if kind != 'discovery' and saved[3]/1e9 >= limit:
+                continue
+            if path.stat().st_nlink != 1:
+                continue
+            result['eligible_files'] += 1
+            if apply:
+                try:
+                    if regular_owned(path, uid) and fingerprint(path) == saved:
+                        path.unlink()
+                        result['removed_files'] += 1
+                        result['removed_bytes'] += saved[2]
+                except OSError as exc:
+                    result['errors'].append({'path': str(path), 'reason': str(exc)})
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime-config', required=True, type=Path)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--dispose-completed-output', action='store_true',
+                        help='Delete terminal discovery scratch and inactive output older than one day')
     args = parser.parse_args()
     if os.name != 'posix':
         parser.error('This maintenance command requires Linux process inspection')
@@ -311,6 +379,16 @@ def main():
             print(json.dumps({'state': 'already_running'}))
             return 0
         result = maintain(Path.home(), config['spool_dir'], config['db_path'], apply=args.apply)
+        if args.dispose_completed_output:
+            from filelock import FileLock, Timeout
+            try:
+                with FileLock(str(config['db_path'])+'.harvest.lock', timeout=0):
+                    disposed = dispose_completed_output(Path.home(), config['spool_dir'],
+                                                        config['db_path'], apply=args.apply)
+                    result['disposable_output'] = disposed
+                    result['errors'].extend(disposed['errors'])
+            except Timeout:
+                result['disposable_output'] = {'retained': [{'reason': 'discovery_running'}]}
         usage = shutil.disk_usage(Path.home())
         result['available_bytes'] = usage.free
         result['low_space'] = usage.free < 4*1024**3
