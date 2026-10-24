@@ -2,7 +2,8 @@
 import datetime
 import sqlite3
 
-from test_runtime_storage import NOW, DAY, put, site, fake_process, storage
+import pytest
+from test_runtime_storage import NOW, DAY, put, site, fake_process, storage, SCRIPT
 
 
 def prepare(site):
@@ -69,3 +70,34 @@ def test_unreadable_processes_defer_deletion(site, monkeypatch):
     monkeypatch.setattr(storage, 'process_references', lambda *a: (set(), [123], []))
     result = cleanup(site, apply=True)
     assert scratch.exists() and result['removed_files'] == 0
+
+
+@pytest.mark.skipif(__import__('os').name != 'posix', reason='Linux maintenance entry point')
+@pytest.mark.parametrize('discovery_busy', [False, True])
+def test_cli_runs_with_only_stdlib_and_preserves_active_discovery(site, discovery_busy):
+    import fcntl
+    import json
+    import os
+    import subprocess
+    import sys
+    home, spool, db, proc = prepare(site)
+    scratch = put(spool/'harvest/done/bulk.json')
+    config = home/'runtime.json'
+    config.write_text(json.dumps({'spool_dir':str(spool),'db_path':str(db)}))
+    environment = dict(os.environ, HOME=str(home), PYTHONPATH='')
+    with open(str(db)+'.harvest.lock', 'a') as lock:
+        if discovery_busy:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = subprocess.run([sys.executable, '-S', str(SCRIPT),
+                                 '--runtime-config', str(config), '--apply', '--dispose-completed-output'],
+                                capture_output=True, text=True, env=environment, timeout=20)
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert (home/'.local/state/jobbot-storage/latest.json').is_file()
+    assert not output['errors']
+    if discovery_busy:
+        assert output['disposable_output']['retained'] == [{'reason':'discovery_running'}]
+        assert scratch.exists()
+    else:
+        assert output['disposable_output']['removed_files'] == 1
+        assert not scratch.exists()

@@ -63,6 +63,21 @@ write detailed logs locally and return aggregate results for primary inspection.
 
 ## Implementation and deployment
 
+Self-improvement #021 (October 24, 2026) corrects #020's Linux service entry
+point. The function-level tests passed, but the installed command imported an
+optional `filelock` package absent from the runtime. It now uses the existing
+standard-library `fcntl` locking mechanism on discovery's lock file. Two new
+end-to-end synthetic regressions reproduce the missing-package failure with
+site packages disabled, then verify idle cleanup and busy-discovery deferral.
+No application module, deadline, account record, retry behavior, cleanup scope or
+confirmation rule changes. Private run notes hold final validation, source
+hashes and actual deployment status under `self-improvement-021-2026-10-24`.
+Ubuntu paired validation retained all 21 passing baseline cases and passed both
+new CLI cases (23 passed). The final managed suite passed 1,464 with 175 skips.
+This maintenance correction does not establish a production submission-rate or
+application speed improvement.
+
+
 Self-improvement #020 (October 23, 2026) adds explicit disposable-output cleanup
 to the storage maintenance service. Finished discovery scratch had accumulated
 because discovery wrote bulk responses to files and no completion/maintenance

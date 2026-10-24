@@ -253,7 +253,10 @@ deletes scratch files (including old compressed scratch copies) for discovery ru
 with a recorded end time. It retains `records.json`, `checkpoint.json`,
 `result.json` and `model-selection.json`; the database retains intake, provenance
 and application outcomes. Unknown run directories are retained. The discovery
-lock prevents cleanup overlapping discovery and its checkpoint handoff.
+lock prevents cleanup overlapping discovery and its checkpoint handoff. The
+Linux service uses standard-library `fcntl.flock` on the same lock file, so the
+entry point requires no third-party lock package. End-to-end CLI regressions run
+with Python site packages disabled and cover both idle and busy discovery.
 
 The same option deletes screenshots older than one day and older than every
 still-open application session, plus files older than one day in Hermes' main

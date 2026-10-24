@@ -380,15 +380,17 @@ def main():
             return 0
         result = maintain(Path.home(), config['spool_dir'], config['db_path'], apply=args.apply)
         if args.dispose_completed_output:
-            from filelock import FileLock, Timeout
-            try:
-                with FileLock(str(config['db_path'])+'.harvest.lock', timeout=0):
+            # Match discovery's existing OS lock without an optional dependency.
+            with Path(str(config['db_path'])+'.harvest.lock').open('a') as harvest:
+                try:
+                    fcntl.flock(harvest, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    result['disposable_output'] = {'retained': [{'reason': 'discovery_running'}]}
+                else:
                     disposed = dispose_completed_output(Path.home(), config['spool_dir'],
                                                         config['db_path'], apply=args.apply)
                     result['disposable_output'] = disposed
                     result['errors'].extend(disposed['errors'])
-            except Timeout:
-                result['disposable_output'] = {'retained': [{'reason': 'discovery_running'}]}
         usage = shutil.disk_usage(Path.home())
         result['available_bytes'] = usage.free
         result['low_space'] = usage.free < 4*1024**3
